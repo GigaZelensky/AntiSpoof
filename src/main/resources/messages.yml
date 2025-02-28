@@ -1,0 +1,4 @@
+alerts:
+  detected: "&c[AntiSpoof] &e%player% &7is using suspicious client &f%brand%"
+punishments:
+  kick: "&cYou were kicked for client spoofing!"
