@@ -31,6 +31,10 @@ public class ConfigManager {
         return config.getBoolean("check-brand-formatting", true);
     }
 
+    public boolean isDebugMode() {
+        return config.getBoolean("debug", false);
+    }
+
     public List<String> getPunishments() {
         return config.getStringList("punishments");
     }

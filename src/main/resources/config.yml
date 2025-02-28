@@ -2,6 +2,7 @@
 delay-in-seconds: 3
 block-non-vanilla-with-channels: true
 check-brand-formatting: true
+debug: false # Enable debug logging
 
 punishments:
   - "kick %player% &cSuspicious client detected! Reason: %reason%"

@@ -37,4 +37,16 @@ public class AntiSpoofPlugin extends JavaPlugin {
         PacketEvents.getAPI().terminate();
         getLogger().info("AntiSpoof disabled!");
     }
+
+    private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
+    
+    @Override
+    public void onEnable() {
+        // Add this line before logger info
+        getCommand("antispoof").setExecutor(new AntiSpoofCommand(this));
+    }
+    
+    public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
+        return playerDataMap;
+    }
 }

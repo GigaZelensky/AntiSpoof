@@ -69,6 +69,17 @@ public class PlayerJoinListener implements Listener {
         if (shouldPunish) {
             executePunishment(player, reason, data);
         }
+
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("Checking player: " + player.getName());
+        }
+
+        // In punishment block:
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("Punishing " + player.getName() + " - Reason: " + reason);
+            plugin.getLogger().info("Brand: " + data.getClientBrand());
+            plugin.getLogger().info("Channels: " + String.join(", ", data.getChannels()));
+        }
     }
 
     private boolean hasInvalidFormatting(String brand) {

@@ -3,3 +3,15 @@ version: 1.0.2
 main: com.gigazelensky.antispoof.AntiSpoofPlugin
 api-version: 1.20
 softdepend: [ProtocolLib, ProtocolSupport, ViaVersion, ViaBackwards, ViaRewind, Geyser-Spigot]
+commands:
+  antispoof:
+    description: View client channel information
+    usage: /antispoof channels <player>
+    permission: antispoof.command
+permissions:
+  antispoof.command:
+    description: Access to AntiSpoof commands
+    default: op
+  antispoof.alerts:
+    description: Receive spoof alerts
+    default: true
