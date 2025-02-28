@@ -9,20 +9,18 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerJoinListener implements Listener {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
-    private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
 
     public PlayerJoinListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
     }
 
-    // Added register method
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
     }
@@ -33,21 +31,35 @@ public class PlayerJoinListener implements Listener {
         if (player.hasPermission("antispoof.bypass")) return;
         
         UUID uuid = player.getUniqueId();
-        playerDataMap.put(uuid, new PlayerData());
+        plugin.getPlayerDataMap().put(uuid, new PlayerData());
         
         int delay = config.getCheckDelay();
         Bukkit.getScheduler().runTaskLater(plugin, () -> checkPlayer(player), delay * 20L);
     }
+    
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        // Clean up player data when they leave
+        plugin.getPlayerDataMap().remove(event.getPlayer().getUniqueId());
+    }
 
     private void checkPlayer(Player player) {
-        PlayerData data = playerDataMap.remove(player.getUniqueId());
+        if (!player.isOnline()) return;
+        
+        UUID uuid = player.getUniqueId();
+        PlayerData data = plugin.getPlayerDataMap().get(uuid);
         if (data == null) return;
 
         boolean shouldPunish = false;
         String reason = "";
 
         // Brand checks
-        if (data.getClientBrand() == null) return;
+        if (data.getClientBrand() == null) {
+            if (plugin.getConfigManager().isDebugMode()) {
+                plugin.getLogger().info("No brand received for " + player.getName());
+            }
+            return;
+        }
         
         if (config.checkBrandFormatting() && hasInvalidFormatting(data.getClientBrand())) {
             reason = "Invalid brand formatting";
@@ -61,7 +73,7 @@ public class PlayerJoinListener implements Listener {
             reason = "Vanilla client with plugin channels";
             shouldPunish = true;
         }
-        else if (config.shouldBlockNonVanillaWithChannels() && hasChannels) {
+        else if (config.shouldBlockNonVanillaWithChannels() && claimsVanilla && hasChannels) {
             reason = "Non-vanilla client with channels";
             shouldPunish = true;
         }
@@ -71,12 +83,7 @@ public class PlayerJoinListener implements Listener {
         }
 
         if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("Checking player: " + player.getName());
-        }
-
-        // In punishment block:
-        if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("Punishing " + player.getName() + " - Reason: " + reason);
+            plugin.getLogger().info("Checked player: " + player.getName());
             plugin.getLogger().info("Brand: " + data.getClientBrand());
             plugin.getLogger().info("Channels: " + String.join(", ", data.getChannels()));
         }
