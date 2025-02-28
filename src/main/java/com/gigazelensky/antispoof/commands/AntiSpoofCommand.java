@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
-    private final List<String> subcommands = Arrays.asList("channels", "brand", "help");
+    private final List<String> subcommands = Arrays.asList("channels", "brand", "help", "reload");
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -40,6 +40,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
 
         if (subCommand.equals("help")) {
             showHelp(sender);
+            return true;
+        }
+        
+        if (subCommand.equals("reload")) {
+            if (!sender.hasPermission("antispoof.admin")) {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to reload the plugin.");
+                return true;
+            }
+            
+            plugin.getConfigManager().reload();
+            sender.sendMessage(ChatColor.GREEN + "AntiSpoof configuration reloaded!");
             return true;
         }
         
@@ -82,6 +93,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GOLD + "=== AntiSpoof Commands ===");
         sender.sendMessage(ChatColor.GRAY + "/antispoof channels <player> " + ChatColor.WHITE + "- Show player's plugin channels");
         sender.sendMessage(ChatColor.GRAY + "/antispoof brand <player> " + ChatColor.WHITE + "- Show player's client brand");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
     }
     

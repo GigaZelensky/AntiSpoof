@@ -65,17 +65,38 @@ public class PacketListener extends PacketListenerAbstract {
     }
     
     private void handleBrandPayload(byte[] data, PlayerData playerData) {
-        if (data.length == 0 || data.length > 64) {
-            playerData.setClientBrand("invalid-brand-length-" + data.length);
+        if (data == null || data.length == 0) {
+            playerData.setClientBrand("empty-brand");
+            logDebug("Empty brand data received");
             return;
         }
         
-        // Skip the first byte which is the length
-        byte[] brandBytes = new byte[data.length - 1];
-        System.arraycopy(data, 1, brandBytes, 0, brandBytes.length);
+        // Handle different formats of brand packet
+        String brand;
+        try {
+            // First attempt - Modern format with VarInt length prefix
+            // Create a copy without the first byte (length)
+            if (data.length > 1) {
+                byte[] brandBytes = new byte[data.length - 1];
+                System.arraycopy(data, 1, brandBytes, 0, brandBytes.length);
+                brand = new String(brandBytes, StandardCharsets.UTF_8);
+            } else {
+                // Fallback if somehow the data is just one byte
+                brand = new String(data, StandardCharsets.UTF_8);
+            }
+            
+            // If the brand is empty or nonsensical, try direct conversion
+            if (brand.isEmpty() || brand.length() > 32 || brand.contains("\0")) {
+                brand = new String(data, StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            // Last resort - direct conversion
+            brand = new String(data, StandardCharsets.UTF_8);
+            logDebug("Exception parsing brand: " + e.getMessage());
+        }
         
-        String brand = new String(brandBytes, StandardCharsets.UTF_8)
-                .replace(" (Velocity)", "")  // Remove Velocity suffix
+        // Clean the brand string
+        brand = brand.replace(" (Velocity)", "")  // Remove Velocity suffix
                 .replaceAll("§.", "")        // Remove color codes
                 .trim();
         
