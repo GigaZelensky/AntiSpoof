@@ -31,7 +31,8 @@ public class PlayerJoinListener implements Listener {
         if (player.hasPermission("antispoof.bypass")) return;
         
         UUID uuid = player.getUniqueId();
-        plugin.getPlayerDataMap().put(uuid, new PlayerData());
+        // Use putIfAbsent so we don't override data (like client brand) already set by PacketListener
+        plugin.getPlayerDataMap().putIfAbsent(uuid, new PlayerData());
         
         int delay = config.getCheckDelay();
         Bukkit.getScheduler().runTaskLater(plugin, () -> checkPlayer(player), delay * 20L);
