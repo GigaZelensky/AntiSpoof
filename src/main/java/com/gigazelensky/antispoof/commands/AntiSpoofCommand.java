@@ -79,7 +79,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 showChannels(sender, target, data);
                 break;
             case "brand":
-                showBrand(sender, target, data);
+                showBrand(sender, target);
                 break;
             default:
                 sender.sendMessage(ChatColor.RED + "Unknown subcommand: " + subCommand);
@@ -108,8 +108,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
     }
     
-    private void showBrand(CommandSender sender, Player target, PlayerData data) {
-        String brand = data.getClientBrand();
+    private void showBrand(CommandSender sender, Player target) {
+        String brand = plugin.getClientBrand(target);
         if (brand == null || brand.isEmpty()) {
             sender.sendMessage(ChatColor.YELLOW + target.getName() + " has no client brand information.");
         } else {
@@ -123,7 +123,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
         
         if (args.length == 1) {
-            // First argument - subcommands
             String partialArg = args[0].toLowerCase();
             for (String subcommand : subcommands) {
                 if (subcommand.startsWith(partialArg)) {
@@ -131,7 +130,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 }
             }
         } else if (args.length == 2 && (args[0].equalsIgnoreCase("channels") || args[0].equalsIgnoreCase("brand"))) {
-            // Second argument - player names for these subcommands
             String partialArg = args[1].toLowerCase();
             completions.addAll(Bukkit.getOnlinePlayers().stream()
                     .map(Player::getName)

@@ -31,7 +31,6 @@ public class PlayerJoinListener implements Listener {
         if (player.hasPermission("antispoof.bypass")) return;
         
         UUID uuid = player.getUniqueId();
-        // Use putIfAbsent so we don't override data (like client brand) already set by PacketListener
         plugin.getPlayerDataMap().putIfAbsent(uuid, new PlayerData());
         
         int delay = config.getCheckDelay();
@@ -40,7 +39,6 @@ public class PlayerJoinListener implements Listener {
     
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        // Clean up player data when they leave
         plugin.getPlayerDataMap().remove(event.getPlayer().getUniqueId());
     }
 
@@ -51,42 +49,42 @@ public class PlayerJoinListener implements Listener {
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
         if (data == null) return;
 
-        boolean shouldPunish = false;
-        String reason = "";
-
-        // Brand checks
-        if (data.getClientBrand() == null) {
+        String brand = plugin.getClientBrand(player);
+        if (brand == null) {
             if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("No brand received for " + player.getName());
+                plugin.getLogger().info("[Debug] No brand available for " + player.getName());
             }
             return;
         }
         
-        if (config.checkBrandFormatting() && hasInvalidFormatting(data.getClientBrand())) {
+        boolean shouldPunish = false;
+        String reason = "";
+
+        if (config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
             reason = "Invalid brand formatting";
             shouldPunish = true;
         }
         
         boolean hasChannels = !data.getChannels().isEmpty();
-        boolean claimsVanilla = data.getClientBrand().equalsIgnoreCase("vanilla");
+        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         if (claimsVanilla && hasChannels) {
             reason = "Vanilla client with plugin channels";
             shouldPunish = true;
         }
-        else if (config.shouldBlockNonVanillaWithChannels() && claimsVanilla && hasChannels) {
+        else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
             reason = "Non-vanilla client with channels";
             shouldPunish = true;
         }
 
         if (shouldPunish) {
-            executePunishment(player, reason, data);
+            executePunishment(player, reason, brand);
         }
 
         if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("Checked player: " + player.getName());
-            plugin.getLogger().info("Brand: " + data.getClientBrand());
-            plugin.getLogger().info("Channels: " + String.join(", ", data.getChannels()));
+            plugin.getLogger().info("[Debug] Checked player: " + player.getName());
+            plugin.getLogger().info("[Debug] Brand: " + brand);
+            plugin.getLogger().info("[Debug] Channels: " + String.join(", ", data.getChannels()));
         }
     }
 
@@ -95,19 +93,17 @@ public class PlayerJoinListener implements Listener {
                !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
 
-    private void executePunishment(Player player, String reason, PlayerData data) {
-        // Execute configured punishments
+    private void executePunishment(Player player, String reason, String brand) {
         for (String command : plugin.getConfigManager().getPunishments()) {
             String formatted = command.replace("%player%", player.getName())
                                      .replace("%reason%", reason)
-                                     .replace("%brand%", data.getClientBrand());
+                                     .replace("%brand%", brand);
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), formatted);
         }
 
-        // Send alerts
         String alert = plugin.getConfigManager().getAlertMessage()
                 .replace("%player%", player.getName())
-                .replace("%brand%", data.getClientBrand())
+                .replace("%brand%", brand)
                 .replace("%reason%", reason);
         
         Bukkit.getOnlinePlayers().stream()
