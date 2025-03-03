@@ -1,0 +1,23 @@
+name: AntiSpoof
+version: 1.0.2
+main: com.gigazelensky.antispoof.AntiSpoofPlugin
+api-version: 1.20
+softdepend: [ProtocolLib, ProtocolSupport, ViaVersion, ViaBackwards, ViaRewind, Geyser-Spigot, PlaceholderAPI, GrimAC]
+commands:
+  antispoof:
+    description: View client channel information and manage the plugin
+    usage: /antispoof help
+    permission: antispoof.command
+permissions:
+  antispoof.command:
+    description: Access to AntiSpoof commands
+    default: op
+  antispoof.admin:
+    description: Access to admin commands like reload
+    default: op
+  antispoof.alerts:
+    description: Receive spoof alerts
+    default: op
+  antispoof.bypass:
+    description: Bypass all spoof checks
+    default: op

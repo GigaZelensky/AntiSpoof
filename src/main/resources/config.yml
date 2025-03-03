@@ -1,0 +1,12 @@
+# AntiSpoof Configuration
+delay-in-seconds: 3
+block-non-vanilla-with-channels: true
+check-brand-formatting: true
+debug: true # Enable debug logging
+
+punishments:
+  - "kick %player% &cSuspicious client detected! Reason: %reason%"
+  - "ban %player% &cClient spoofing detected"
+
+messages:
+  alert: "&8[&cAntiSpoof&8] &e%player% &7using &f%brand% &7(Reason: &c%reason%&7)"
