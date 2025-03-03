@@ -1,12 +1,20 @@
 # AntiSpoof Configuration
+# how long to wait before checking for client brand (3 seconds is recommended)
 delay-in-seconds: 3
-block-non-vanilla-with-channels: true
+# Enable this if you would like to block anyone that isn't using a vanilla client
+# and has any channels detected
+block-non-vanilla-with-channels: false
+# Check if the client brand has weird characters in it.
 check-brand-formatting: true
-debug: true # Enable debug logging
+# Show client channels and brand in the console on login
+debug: true
 
-punishments:
-  - "kick %player% &cSuspicious client detected! Reason: %reason%"
-  - "ban %player% &cClient spoofing detected"
+# Set punishments for people who are detected spoofing
+# Available placeholders: %player%, %reason%
+punishments: []
+#  - "kick %player% &cSuspicious client detected!"
+#  - "ban %player% &cClient spoofing detected"
 
+# What to alert to people with the antispoof.alerts permission when a player is caught spoofing
 messages:
-  alert: "&8[&cAntiSpoof&8] &e%player% &7using &f%brand% &7(Reason: &c%reason%&7)"
+  alert: "&8[&cAntiSpoof&8] &e%player% &7using &c%reason%"
