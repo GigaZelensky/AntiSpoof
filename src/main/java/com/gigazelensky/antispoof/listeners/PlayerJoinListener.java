@@ -10,7 +10,9 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import java.util.Set;
 import java.util.UUID;
+import java.util.List;
 
 public class PlayerJoinListener implements Listener {
     private final AntiSpoofPlugin plugin;
@@ -77,6 +79,15 @@ public class PlayerJoinListener implements Listener {
             reason = "Non-vanilla client with channels";
             shouldPunish = true;
         }
+        
+        // Check for blocked channels
+        if (!shouldPunish && config.isBlockedChannelsEnabled()) {
+            String blockedChannel = findBlockedChannel(data.getChannels());
+            if (blockedChannel != null) {
+                reason = "Blocked channel: " + blockedChannel;
+                shouldPunish = true;
+            }
+        }
 
         if (shouldPunish) {
             executePunishment(player, reason, brand);
@@ -87,6 +98,29 @@ public class PlayerJoinListener implements Listener {
             plugin.getLogger().info("[Debug] Brand: " + brand);
             plugin.getLogger().info("[Debug] Channels: " + String.join(", ", data.getChannels()));
         }
+    }
+
+    private String findBlockedChannel(Set<String> playerChannels) {
+        List<String> blockedChannels = config.getBlockedChannels();
+        boolean exactMatch = config.isExactChannelMatchRequired();
+        
+        for (String playerChannel : playerChannels) {
+            if (exactMatch) {
+                // Check for exact match with any blocked channel
+                if (blockedChannels.contains(playerChannel)) {
+                    return playerChannel;
+                }
+            } else {
+                // Check if player channel contains any blocked channel string
+                for (String blockedChannel : blockedChannels) {
+                    if (playerChannel.contains(blockedChannel)) {
+                        return playerChannel;
+                    }
+                }
+            }
+        }
+        
+        return null; // No blocked channels found
     }
 
     private boolean hasInvalidFormatting(String brand) {

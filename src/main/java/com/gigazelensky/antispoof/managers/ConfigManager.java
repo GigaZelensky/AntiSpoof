@@ -40,6 +40,19 @@ public class ConfigManager {
     }
 
     public String getAlertMessage() {
-        return config.getString("messages.alert", "&c[AntiSpoof] &e%player% &7is using suspicious client &f%brand%");
+        return config.getString("messages.alert", "&8[&cAntiSpoof&8] &e%player% &7using &c%reason%");
+    }
+    
+    // New methods for blocked channels
+    public boolean isBlockedChannelsEnabled() {
+        return config.getBoolean("blocked-channels.enabled", false);
+    }
+    
+    public boolean isExactChannelMatchRequired() {
+        return config.getBoolean("blocked-channels.exact-match", true);
+    }
+    
+    public List<String> getBlockedChannels() {
+        return config.getStringList("blocked-channels.values");
     }
 }

@@ -10,7 +10,9 @@ import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -111,7 +113,42 @@ public class AntiSpoofPlugin extends JavaPlugin {
             return true;
         }
         
-        return configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels;
+        if (configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+            return true;
+        }
+        
+        // Check for blocked channels
+        if (configManager.isBlockedChannelsEnabled()) {
+            String blockedChannel = findBlockedChannel(data.getChannels());
+            if (blockedChannel != null) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    private String findBlockedChannel(Set<String> playerChannels) {
+        List<String> blockedChannels = configManager.getBlockedChannels();
+        boolean exactMatch = configManager.isExactChannelMatchRequired();
+        
+        for (String playerChannel : playerChannels) {
+            if (exactMatch) {
+                // Check for exact match with any blocked channel
+                if (blockedChannels.contains(playerChannel)) {
+                    return playerChannel;
+                }
+            } else {
+                // Check if player channel contains any blocked channel string
+                for (String blockedChannel : blockedChannels) {
+                    if (playerChannel.contains(blockedChannel)) {
+                        return playerChannel;
+                    }
+                }
+            }
+        }
+        
+        return null; // No blocked channels found
     }
     
     private boolean hasInvalidFormatting(String brand) {

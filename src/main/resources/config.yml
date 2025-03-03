@@ -2,7 +2,7 @@
 # how long to wait before checking for client brand (3 seconds is recommended)
 delay-in-seconds: 3
 # Enable this if you would like to block anyone that isn't using a vanilla client
-# and has any channels detected
+# and has any channels detected (basically block anyone with any mods detected)
 block-non-vanilla-with-channels: false
 # Check if the client brand has weird characters in it.
 check-brand-formatting: true
@@ -10,7 +10,7 @@ check-brand-formatting: true
 debug: true
 
 # Set punishments for people who are detected spoofing
-# Available placeholders: %player%, %reason%
+# Available placeholders: %player%, %reason%, %brand%
 punishments: []
 #  - "kick %player% &cSuspicious client detected!"
 #  - "ban %player% &cClient spoofing detected"
@@ -18,3 +18,14 @@ punishments: []
 # What to alert to people with the antispoof.alerts permission when a player is caught spoofing
 messages:
   alert: "&8[&cAntiSpoof&8] &e%player% &7using &c%reason%"
+
+# List of channels to block players from using (Beware these can be spoofed)
+blocked-channels:
+  # Punish players using specific channels
+  enabled: false
+  # If false, it checks if the string simply contains the specified value. If true, it requires an exact match.
+  exact-match: true
+  values:
+    - "fabric-screen-handler-api-v1:open_screen"
+    # Add more channels to block here
+    # - "another:blocked:channel"

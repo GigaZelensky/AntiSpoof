@@ -13,12 +13,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
-    private final List<String> subcommands = Arrays.asList("channels", "brand", "help", "reload", "check");
+    private final List<String> subcommands = Arrays.asList("channels", "brand", "help", "reload", "check", "blockedchannels");
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -52,6 +51,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             
             plugin.getConfigManager().reload();
             sender.sendMessage(ChatColor.GREEN + "AntiSpoof configuration reloaded!");
+            return true;
+        }
+        
+        // New command to show blocked channels
+        if (subCommand.equals("blockedchannels")) {
+            if (!sender.hasPermission("antispoof.admin")) {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+                return true;
+            }
+            
+            showBlockedChannels(sender);
             return true;
         }
         
@@ -120,6 +130,24 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         return true;
     }
     
+    private void showBlockedChannels(CommandSender sender) {
+        boolean enabled = plugin.getConfigManager().isBlockedChannelsEnabled();
+        boolean exactMatch = plugin.getConfigManager().isExactChannelMatchRequired();
+        List<String> blockedChannels = plugin.getConfigManager().getBlockedChannels();
+        
+        sender.sendMessage(ChatColor.GOLD + "=== Blocked Channels Configuration ===");
+        sender.sendMessage(ChatColor.GRAY + "Enabled: " + (enabled ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
+        sender.sendMessage(ChatColor.GRAY + "Match Type: " + (exactMatch ? ChatColor.WHITE + "Exact Match" : ChatColor.WHITE + "Contains"));
+        
+        if (blockedChannels.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "No channels are currently blocked.");
+        } else {
+            sender.sendMessage(ChatColor.GOLD + "Blocked Channels:");
+            blockedChannels.forEach(channel -> 
+                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + channel));
+        }
+    }
+    
     private void checkPlayer(CommandSender sender, Player target) {
         boolean isSpoofing = plugin.isPlayerSpoofing(target);
         String brand = plugin.getClientBrand(target);
@@ -139,6 +167,27 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
                 sender.sendMessage(ChatColor.GRAY + "Channels: " + ChatColor.WHITE + 
                     String.join(", ", data.getChannels()));
+                
+                // Check if any channels are in the blocked list
+                if (plugin.getConfigManager().isBlockedChannelsEnabled()) {
+                    for (String channel : data.getChannels()) {
+                        boolean blocked = false;
+                        if (plugin.getConfigManager().isExactChannelMatchRequired()) {
+                            blocked = plugin.getConfigManager().getBlockedChannels().contains(channel);
+                        } else {
+                            for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                                if (channel.contains(blockedChannel)) {
+                                    blocked = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (blocked) {
+                            sender.sendMessage(ChatColor.GRAY + "Blocked channel detected: " + ChatColor.RED + channel);
+                        }
+                    }
+                }
             } else {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.RED + "No");
             }
@@ -147,6 +196,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
             if (hasChannels) {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
+                sender.sendMessage(ChatColor.GRAY + "Channels: " + ChatColor.WHITE + 
+                    String.join(", ", data.getChannels()));
             } else {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.RED + "No");
             }
@@ -176,6 +227,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof channels <player> " + ChatColor.WHITE + "- Show player's plugin channels");
         sender.sendMessage(ChatColor.GRAY + "/antispoof brand <player> " + ChatColor.WHITE + "- Show player's client brand");
         sender.sendMessage(ChatColor.GRAY + "/antispoof check [player|*] " + ChatColor.WHITE + "- Check if player is spoofing");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
     }
@@ -186,8 +238,27 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (data.getChannels().isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "No channels registered.");
         } else {
-            data.getChannels().forEach(channel -> 
-                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + channel));
+            data.getChannels().forEach(channel -> {
+                boolean isBlocked = false;
+                if (plugin.getConfigManager().isBlockedChannelsEnabled()) {
+                    if (plugin.getConfigManager().isExactChannelMatchRequired()) {
+                        isBlocked = plugin.getConfigManager().getBlockedChannels().contains(channel);
+                    } else {
+                        for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                            if (channel.contains(blockedChannel)) {
+                                isBlocked = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (isBlocked) {
+                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.RED + channel + ChatColor.GRAY + " (blocked)");
+                } else {
+                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + channel);
+                }
+            });
         }
     }
     
