@@ -51,7 +51,7 @@ Advanced Minecraft plugin for detecting client spoofing attempts through brand a
    # Restart server
    ```
 
-## Configuration (`[config.yml](https://github.com/GigaZelensky/AntiSpoof/blob/main/src/main/resources/config.yml)`)
+## Configuration (`config.yml`)
 
 ```yaml
 # Core Settings
