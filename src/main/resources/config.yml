@@ -51,7 +51,7 @@ punishments:
 # Defines the message sent to players with the `antispoof.alerts` permission
 # when a spoofing attempt is detected.
 messages:
-  alert: "&8[&cAntiSpoof&8] &e%player% &7detected using &c%reason%"
+  alert: "&8[&cAntiSpoof&8] &e%player% flagged! &c%reason%"
 
 # ──────────────────────────────────────────────────────────
 #                 Channel Detection Settings

@@ -316,17 +316,19 @@ public class PlayerJoinListener implements Listener {
                                      .replace("%brand%", brand);
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), formatted);
         }
-
         String alert = plugin.getConfigManager().getAlertMessage()
                 .replace("%player%", player.getName())
                 .replace("%brand%", brand)
                 .replace("%reason%", reason);
         
-        // Convert color codes for console
+        // Convert color codes for player messages
         String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
         
-        // Log to console
-        plugin.getLogger().warning(coloredAlert);
+        // Create a clean console message without minecraft color codes
+        String consoleMessage = ChatColor.stripColor(coloredAlert);
+        
+        // Log to console as INFO instead of WARNING
+        plugin.getLogger().info(consoleMessage);
         
         // Notify players with permission
         Bukkit.getOnlinePlayers().stream()
