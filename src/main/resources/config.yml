@@ -1,0 +1,102 @@
+#        ___          __  _ _____                   ____
+#       /   |  ____  / /_(_) ___/____  ____  ____  / __/
+#      / /| | / __ \/ __/ /\__ \/ __ \/ __ \/ __ \/ /_  
+#     / ___ |/ / / / /_/ /___/ / /_/ / /_/ / /_/ / __/  
+#    /_/  |_/_/ /_/\__/_//____/ .___/\____/\____/_/     
+#                            /_/                        
+#                   Made by GigaZelensky
+
+# ──────────────────────────────────────────────────────────
+#                  AntiSpoof Configuration
+# ──────────────────────────────────────────────────────────
+# Welcome to AntiSpoof. This plugin helps server admins detect and manage 
+# client-side modifications by analyzing client information sent by players.
+#
+# ⚠️ Note: While this plugin enhances security, it is not foolproof. 
+# Skilled users can (ironically) spoof their client details to bypass detection.
+#
+# By default, the plugin only verifies whether a player claiming to use
+# 'vanilla' has registered plugin channels, something that is impossible
+# on a true vanilla client.
+# ──────────────────────────────────────────────────────────
+
+# ⏳ Delay (in seconds) before checking for client spoofing.
+# Set to 0 for an immediate check upon player login. (Default: 0)
+delay-in-seconds: 0
+
+# 🚫 Super Strict Mode (Not Recommended)
+# Blocks players who either:
+#    - Do NOT have a "vanilla" client, OR
+#    - Have registered plugin channels (indicating mods/plugins)
+# ⚠️ This is an extremely strict mode and may block legitimate players, 
+#    so enabling it is usually unnecessary and could negatively impact your player base.
+block-non-vanilla-with-channels: false
+
+# 🔍 Validate client brand formatting.
+# If enabled, the plugin checks for unusual characters in the client brand.
+check-brand-formatting: true
+
+# 🛠️ Debug Mode
+# If enabled, logs client channels and brand details in the console when a player logs in.
+debug: false
+
+# ⚖️ Punishment Actions
+# Define actions for detected spoofing attempts.
+# Available placeholders: %player%, %reason%, %brand%
+punishments:
+  - "kick %player% &cSuspicious client detected!"
+#  - "ban %player% &cClient spoofing detected"
+
+# 🚨 Alert Messages
+# Defines the message sent to players with the `antispoof.alerts` permission
+# when a spoofing attempt is detected.
+messages:
+  alert: "&8[&cAntiSpoof&8] &e%player% &7detected using &c%reason%"
+
+# ──────────────────────────────────────────────────────────
+#                 Channel Detection Settings
+# ──────────────────────────────────────────────────────────
+blocked-channels:
+  # 🔨 Enable channel-based detection.
+  enabled: false
+  
+  # 🔍 Exact Matching
+  # If true, only exact matches will be blocked. If false, matches
+  # that simply contain the specified value are allowed.
+  exact-match: true
+  
+  # ⚪ Whitelist Mode
+  # - FALSE: Block listed channels.
+  # - SIMPLE: Only allow players with at least one whitelisted channel.
+  # - STRICT: Only allow players who match the exact whitelist and have no extra channels.
+  whitelist-mode: FALSE
+  
+  values:
+    - "fabric-screen-handler-api-v1:open_screen"
+    # Add more channels to block here
+    # - "another:blocked:channel"
+    # - "litematica"
+    # - "fabric"
+
+# ──────────────────────────────────────────────────────────
+#                  Client Brand Detection
+# ──────────────────────────────────────────────────────────
+blocked-brands:
+  # 🔨 Enable brand-based detection.
+  enabled: false
+  
+  # 🔍 Exact Matching
+  # If true, only exact matches will be blocked. If false, matches
+  # that simply contain the specified value are allowed.
+  exact-match: true
+  
+  # ⚪ Whitelist Mode
+  # - FALSE: Block listed brands.
+  # - TRUE: Only allow players using whitelisted brands.
+  whitelist-mode: false
+  
+  values:
+    - "fabric"
+    # Add more brands to block here
+    # - "vanilla"
+    # - "optifine"
