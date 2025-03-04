@@ -64,7 +64,7 @@ debug: false                 # Diagnostic logging
 punishments:
   - "kick %player% &amp;cSuspicious client detected!"
 messages:
-  alert: "&amp;8[&amp;c⚠&amp;8] &amp;e%player% flagged! &amp;7(%reason%)"
+  alert: "&8[&cAntiSpoof&8] &e%player% flagged! &c%reason%"
 
 # Channel Configuration
 blocked-channels:
