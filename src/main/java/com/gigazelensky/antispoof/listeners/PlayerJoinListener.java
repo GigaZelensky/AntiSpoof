@@ -83,6 +83,7 @@ public class PlayerJoinListener implements Listener {
             return;
         }
         
+        boolean shouldAlert = false;
         boolean shouldPunish = false;
         String reason = "";
         String violationType = "";
@@ -92,23 +93,26 @@ public class PlayerJoinListener implements Listener {
         if (config.isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
             reason = "Spoofing Geyser client";
             violationType = "GEYSER_SPOOF";
-            shouldPunish = true;
+            shouldAlert = true;
+            shouldPunish = config.shouldPunishGeyserSpoof();
         }
 
         // Check the brand formatting
-        if (!shouldPunish && config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
+        if (!shouldAlert && config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
             reason = "Invalid brand formatting";
             violationType = "BRAND_FORMAT";
-            shouldPunish = true;
+            shouldAlert = true;
+            shouldPunish = config.shouldPunishBrandFormatting();
         }
         
         // Check for brand blocking/whitelist
-        if (!shouldPunish && config.isBlockedBrandsEnabled()) {
+        if (!shouldAlert && config.isBlockedBrandsEnabled()) {
             boolean brandBlocked = isBrandBlocked(brand);
             if (brandBlocked) {
                 reason = "Blocked client brand: " + brand;
                 violationType = "BLOCKED_BRAND";
-                shouldPunish = true;
+                shouldAlert = true;
+                shouldPunish = config.shouldPunishBlockedBrands();
             }
         }
         
@@ -116,29 +120,32 @@ public class PlayerJoinListener implements Listener {
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Vanilla client check
-        if (!shouldPunish && config.isVanillaCheckEnabled() && 
+        if (!shouldAlert && config.isVanillaCheckEnabled() && 
             claimsVanilla && hasChannels) {
             reason = "Vanilla client with plugin channels";
             violationType = "VANILLA_WITH_CHANNELS";
-            shouldPunish = true;
+            shouldAlert = true;
+            shouldPunish = config.shouldPunishVanillaCheck();
         }
         // Non-vanilla with channels check
-        else if (!shouldPunish && config.shouldBlockNonVanillaWithChannels() && 
+        else if (!shouldAlert && config.shouldBlockNonVanillaWithChannels() && 
                 !claimsVanilla && hasChannels) {
             reason = "Non-vanilla client with channels";
             violationType = "NON_VANILLA_WITH_CHANNELS";
-            shouldPunish = true;
+            shouldAlert = true;
+            shouldPunish = config.shouldPunishNonVanillaCheck();
         }
         
         // Channel whitelist/blacklist check
-        if (!shouldPunish && config.isBlockedChannelsEnabled()) {
+        if (!shouldAlert && config.isBlockedChannelsEnabled()) {
             if (config.isChannelWhitelistEnabled()) {
                 // Whitelist mode
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
                     reason = "Client channels don't match whitelist";
                     violationType = "CHANNEL_WHITELIST";
-                    shouldPunish = true;
+                    shouldAlert = true;
+                    shouldPunish = config.shouldPunishBlockedChannels();
                 }
             } else {
                 // Blacklist mode
@@ -147,23 +154,30 @@ public class PlayerJoinListener implements Listener {
                     reason = "Blocked channel: " + blockedChannel;
                     violationType = "BLOCKED_CHANNEL";
                     violatedChannel = blockedChannel;
-                    shouldPunish = true;
+                    shouldAlert = true;
+                    shouldPunish = config.shouldPunishBlockedChannels();
                 }
             }
         }
 
-        // If player is a Bedrock player and we're in EXEMPT mode, don't punish
-        if (shouldPunish && isBedrockPlayer && config.isBedrockExemptMode()) {
+        // If player is a Bedrock player and we're in EXEMPT mode, don't process further
+        if ((shouldAlert || shouldPunish) && isBedrockPlayer && config.isBedrockExemptMode()) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Bedrock player " + player.getName() + 
-                                       " would be punished for: " + reason + ", but is exempt");
+                                       " would be processed for: " + reason + ", but is exempt");
             }
             return;
         }
 
-        if (shouldPunish) {
-            executePunishment(player, reason, brand, violationType, violatedChannel);
-            data.setAlreadyPunished(true);
+        if (shouldAlert) {
+            // Always send the alert if a violation is detected
+            sendAlert(player, reason, brand, violatedChannel);
+            
+            // Only execute punishment if enabled for this violation type
+            if (shouldPunish) {
+                executePunishment(player, reason, brand, violationType, violatedChannel);
+                data.setAlreadyPunished(true);
+            }
         }
 
         if (plugin.getConfigManager().isDebugMode()) {
@@ -322,54 +336,67 @@ public class PlayerJoinListener implements Listener {
                !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
 
+    // Send alert message to staff and console
+    private void sendAlert(Player player, String reason, String brand, String violatedChannel) {
+        // Format the alert message with placeholders
+        String alert = config.getAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        if (violatedChannel != null) {
+            alert = alert.replace("%channel%", violatedChannel);
+        }
+        
+        // Convert color codes for player messages
+        String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
+        
+        // Create a clean console message without minecraft color codes
+        String consoleMessage = ChatColor.stripColor(coloredAlert);
+        
+        // Log to console as INFO
+        plugin.getLogger().info(consoleMessage);
+        
+        // Notify players with permission
+        Bukkit.getOnlinePlayers().stream()
+                .filter(p -> p.hasPermission("antispoof.alerts"))
+                .forEach(p -> p.sendMessage(coloredAlert));
+    }
+
+    // Execute punishment commands
     private void executePunishment(Player player, String reason, String brand, String violationType, String violatedChannel) {
         List<String> punishments;
-        boolean shouldPunish = true;
         
         // Select the appropriate punishments based on violation type
         switch(violationType) {
             case "VANILLA_WITH_CHANNELS":
-                shouldPunish = config.shouldPunishVanillaCheck();
                 punishments = config.getVanillaCheckPunishments();
                 break;
                 
             case "NON_VANILLA_WITH_CHANNELS":
-                shouldPunish = config.shouldPunishNonVanillaCheck();
                 punishments = config.getNonVanillaCheckPunishments();
                 break;
                 
             case "BRAND_FORMAT":
-                shouldPunish = config.shouldPunishBrandFormatting();
                 punishments = config.getBrandFormattingPunishments();
                 break;
                 
             case "BLOCKED_CHANNEL":
             case "CHANNEL_WHITELIST":
-                shouldPunish = config.shouldPunishBlockedChannels();
                 punishments = config.getBlockedChannelsPunishments();
                 break;
                 
             case "BLOCKED_BRAND":
-                shouldPunish = config.shouldPunishBlockedBrands();
                 punishments = config.getBlockedBrandsPunishments();
                 break;
                 
             case "GEYSER_SPOOF":
-                shouldPunish = config.shouldPunishGeyserSpoof();
                 punishments = config.getGeyserSpoofPunishments();
                 break;
                 
             default:
                 // Fallback to global punishments
                 punishments = config.getPunishments();
-        }
-        
-        // If punishment is disabled for this violation type, just return
-        if (!shouldPunish) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Violation detected but punishment disabled for: " + violationType);
-            }
-            return;
         }
         
         // If no specific punishments defined, fall back to global
@@ -389,28 +416,5 @@ public class PlayerJoinListener implements Listener {
             
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), formatted);
         }
-        
-        String alert = config.getAlertMessage()
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand)
-                .replace("%reason%", reason);
-        
-        if (violatedChannel != null) {
-            alert = alert.replace("%channel%", violatedChannel);
-        }
-        
-        // Convert color codes for player messages
-        String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
-        
-        // Create a clean console message without minecraft color codes
-        String consoleMessage = ChatColor.stripColor(coloredAlert);
-        
-        // Log to console as INFO instead of WARNING
-        plugin.getLogger().info(consoleMessage);
-        
-        // Notify players with permission
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredAlert));
     }
 }
