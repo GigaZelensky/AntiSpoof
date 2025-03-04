@@ -355,8 +355,10 @@ public class PacketListener extends PacketListenerAbstract {
                !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
     
-    // Send alert message to staff and console
+    // Send alert message to staff and console with rate limiting
     private void sendAlert(Player player, String reason, String brand, String violatedChannel) {
+        UUID playerUUID = player.getUniqueId();
+        
         // Format the player alert message with placeholders
         String playerAlert = plugin.getConfigManager().getAlertMessage()
                 .replace("%player%", player.getName())
@@ -380,10 +382,13 @@ public class PacketListener extends PacketListenerAbstract {
         // Log to console directly using the console format (no need to strip colors)
         plugin.getLogger().info(consoleAlert);
         
-        // Notify players with permission
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        // Only send in-game alerts if cooldown allows it
+        if (plugin.canSendAlert(playerUUID)) {
+            // Notify players with permission
+            Bukkit.getOnlinePlayers().stream()
+                    .filter(p -> p.hasPermission("antispoof.alerts"))
+                    .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        }
     }
     
     // Execute punishment commands
