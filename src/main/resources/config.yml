@@ -38,9 +38,9 @@ messages:
 #                  Core Detection Settings
 # ──────────────────────────────────────────────────────────
 
-# Vanilla Client Detection
+# Vanilla Spoof Detection
 # Detects when a player claims to use vanilla but has registered plugin channels
-vanilla-check:
+vanillaspoof-check:
   # Whether to check if a player claiming "vanilla" client has plugin channels
   enabled: true
   # Whether to punish the player if detection is positive
@@ -177,7 +177,7 @@ bedrock-handling:
   # This option checks whether a player is identified as a Bedrock player by verifying their prefix.
   # When enabled, the system will verify if the player's username or identifier starts with the specified prefix.
   # Default prefix is ".", and if a player's client brand includes "geyser" in any form without matching
-  # the expected prefix, they will be punished.
+  # the expected prefix, they will be flagged.
   prefix-check:
     enabled: true
     # The prefix used to identify Bedrock players.
