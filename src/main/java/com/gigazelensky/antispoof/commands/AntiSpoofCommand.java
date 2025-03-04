@@ -480,7 +480,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     }
     
     private void checkAllPlayers(CommandSender sender) {
-        sender.sendMessage(ChatColor.GOLD + "=== Players Currently Spoofing ===");
+        sender.sendMessage(ChatColor.GOLD + "=== Players Currently Flagging ===");
         
         boolean foundSpoofing = false;
         for (Player player : Bukkit.getOnlinePlayers()) {
