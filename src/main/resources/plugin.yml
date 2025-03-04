@@ -1,5 +1,5 @@
 name: AntiSpoof
-version: 1.0.2
+version: 1.0.3
 main: com.gigazelensky.antispoof.AntiSpoofPlugin
 api-version: 1.20
 softdepend: [ProtocolLib, ProtocolSupport, ViaVersion, ViaBackwards, ViaRewind, Geyser-Spigot, PlaceholderAPI, GrimAC, floodgate]
