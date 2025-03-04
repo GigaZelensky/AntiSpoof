@@ -134,5 +134,3 @@ Pull requests welcome! Ensure compatibility with Java 21+ and follow existing co
 ## License
 
 GNU GPLv3 © 2025 GigaZelensky
-
-```
