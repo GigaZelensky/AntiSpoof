@@ -26,12 +26,20 @@ public class ConfigManager {
     public boolean isDebugMode() {
         return config.getBoolean("debug", false);
     }
-
+    
     public String getAlertMessage() {
         return config.getString("messages.alert", "&8[&cAntiSpoof&8] &e%player% flagged! &c%reason%");
     }
     
-    // ===== Vanilla Check Settings =====
+    public String getConsoleAlertMessage() {
+        return config.getString("messages.console-alert", "%player% flagged! %reason%");
+    }
+    
+    public List<String> getPunishments() {
+        return config.getStringList("punishments");
+    }
+    
+    // Vanilla Spoof Check (claims vanilla but has channels)
     public boolean isVanillaCheckEnabled() {
         return config.getBoolean("vanillaspoof-check.enabled", true);
     }
@@ -44,7 +52,7 @@ public class ConfigManager {
         return config.getStringList("vanillaspoof-check.punishments");
     }
     
-    // ===== Non-Vanilla Check Settings =====
+    // Non-Vanilla Check (anything not vanilla with channels)
     public boolean shouldBlockNonVanillaWithChannels() {
         return config.getBoolean("non-vanilla-check.enabled", false);
     }
@@ -57,7 +65,7 @@ public class ConfigManager {
         return config.getStringList("non-vanilla-check.punishments");
     }
     
-    // ===== Brand Formatting Check Settings =====
+    // Brand Formatting Check
     public boolean checkBrandFormatting() {
         return config.getBoolean("brand-formatting.enabled", true);
     }
@@ -70,7 +78,7 @@ public class ConfigManager {
         return config.getStringList("brand-formatting.punishments");
     }
     
-    // ===== Channel Detection Settings =====
+    // Blocked Channels Check
     public boolean isBlockedChannelsEnabled() {
         return config.getBoolean("blocked-channels.enabled", false);
     }
@@ -79,17 +87,8 @@ public class ConfigManager {
         return config.getBoolean("blocked-channels.exact-match", true);
     }
     
-    public List<String> getBlockedChannels() {
-        return config.getStringList("blocked-channels.values");
-    }
-    
     public String getChannelWhitelistMode() {
-        String mode = config.getString("blocked-channels.whitelist-mode", "FALSE");
-        // Ensure valid value
-        if (!mode.equals("FALSE") && !mode.equals("SIMPLE") && !mode.equals("STRICT")) {
-            return "FALSE";
-        }
-        return mode;
+        return config.getString("blocked-channels.whitelist-mode", "FALSE").toUpperCase();
     }
     
     public boolean isChannelWhitelistEnabled() {
@@ -101,6 +100,10 @@ public class ConfigManager {
         return getChannelWhitelistMode().equals("STRICT");
     }
     
+    public List<String> getBlockedChannels() {
+        return config.getStringList("blocked-channels.values");
+    }
+    
     public boolean shouldPunishBlockedChannels() {
         return config.getBoolean("blocked-channels.punish", true);
     }
@@ -109,7 +112,7 @@ public class ConfigManager {
         return config.getStringList("blocked-channels.punishments");
     }
     
-    // ===== Brand Detection Settings =====
+    // Blocked Brands Check
     public boolean isBlockedBrandsEnabled() {
         return config.getBoolean("blocked-brands.enabled", false);
     }
@@ -118,12 +121,12 @@ public class ConfigManager {
         return config.getBoolean("blocked-brands.exact-match", true);
     }
     
-    public List<String> getBlockedBrands() {
-        return config.getStringList("blocked-brands.values");
-    }
-    
     public boolean isBrandWhitelistEnabled() {
         return config.getBoolean("blocked-brands.whitelist-mode", false);
+    }
+    
+    public List<String> getBlockedBrands() {
+        return config.getStringList("blocked-brands.values");
     }
     
     public boolean shouldPunishBlockedBrands() {
@@ -134,20 +137,16 @@ public class ConfigManager {
         return config.getStringList("blocked-brands.punishments");
     }
     
-    // ===== Bedrock Handling Settings =====
+    // Bedrock Handling
     public String getBedrockHandlingMode() {
-        String mode = config.getString("bedrock-handling.mode", "EXEMPT");
-        // Ensure valid value
-        if (!mode.equals("IGNORE") && !mode.equals("EXEMPT")) {
-            return "EXEMPT";
-        }
-        return mode;
+        return config.getString("bedrock-handling.mode", "EXEMPT").toUpperCase();
     }
     
     public boolean isBedrockExemptMode() {
         return getBedrockHandlingMode().equals("EXEMPT");
     }
     
+    // Geyser Spoof Detection
     public boolean isPunishSpoofingGeyser() {
         return config.getBoolean("bedrock-handling.geyser-spoof.enabled", true);
     }
@@ -160,16 +159,12 @@ public class ConfigManager {
         return config.getStringList("bedrock-handling.geyser-spoof.punishments");
     }
     
+    // Bedrock Prefix Check
     public boolean isBedrockPrefixCheckEnabled() {
         return config.getBoolean("bedrock-handling.prefix-check.enabled", true);
     }
     
     public String getBedrockPrefix() {
         return config.getString("bedrock-handling.prefix-check.prefix", ".");
-    }
-    
-    // ===== Fallback for legacy support =====
-    public List<String> getPunishments() {
-        return config.getStringList("punishments");
     }
 }
