@@ -20,4 +20,4 @@ permissions:
     default: op
   antispoof.bypass:
     description: Bypass all spoof checks
-    default: op
+    default: false
