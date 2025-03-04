@@ -142,7 +142,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public boolean isSpoofingGeyser(Player player) {
         if (player == null) return false;
         
-        // Don't check if not configured to punish Geyser spoofing
+        // Don't check if not configured to detect Geyser spoofing
         if (!configManager.isPunishSpoofingGeyser()) {
             return false;
         }
@@ -196,7 +196,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
         
         // Vanilla with channels check
-        if (claimsVanilla && hasChannels) {
+        if (configManager.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
             return true;
         }
         
@@ -347,7 +347,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
     }
     
-    private String findBlockedChannel(Set<String> playerChannels) {
+    public String findBlockedChannel(Set<String> playerChannels) {
         List<String> blockedChannels = configManager.getBlockedChannels();
         boolean exactMatch = configManager.isExactChannelMatchRequired();
         
