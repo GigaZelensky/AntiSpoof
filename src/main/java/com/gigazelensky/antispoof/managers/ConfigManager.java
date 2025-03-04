@@ -33,15 +33,15 @@ public class ConfigManager {
     
     // ===== Vanilla Check Settings =====
     public boolean isVanillaCheckEnabled() {
-        return config.getBoolean("vanilla-check.enabled", true);
+        return config.getBoolean("vanillaspoof-check.enabled", true);
     }
     
     public boolean shouldPunishVanillaCheck() {
-        return config.getBoolean("vanilla-check.punish", true);
+        return config.getBoolean("vanillaspoof-check.punish", true);
     }
     
     public List<String> getVanillaCheckPunishments() {
-        return config.getStringList("vanilla-check.punishments");
+        return config.getStringList("vanillaspoof-check.punishments");
     }
     
     // ===== Non-Vanilla Check Settings =====
