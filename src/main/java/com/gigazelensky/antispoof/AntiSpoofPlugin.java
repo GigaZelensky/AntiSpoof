@@ -24,6 +24,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private final Map<String, String> playerBrands = new HashMap<>();
     private FloodgateApi floodgateApi = null;
     
+    // Add a map to track the last alert time for each player
+    private final Map<UUID, Long> lastAlertTime = new HashMap<>();
+    
     @Override
     public void onEnable() {
         saveDefaultConfig();
@@ -101,6 +104,20 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public Map<String, String> getPlayerBrands() {
         return playerBrands;
+    }
+    
+    // Add a method to check if an alert can be sent for a player
+    public boolean canSendAlert(UUID playerUUID) {
+        long now = System.currentTimeMillis();
+        Long lastAlert = lastAlertTime.get(playerUUID);
+        
+        // Allow alert if no previous alert or if it's been more than 3 seconds
+        if (lastAlert == null || now - lastAlert > 3000) {
+            lastAlertTime.put(playerUUID, now);
+            return true;
+        }
+        
+        return false;
     }
     
     public boolean isBedrockPlayer(Player player) {
@@ -381,6 +398,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
             PacketEvents.getAPI().terminate();
         }
         playerBrands.clear();
+        lastAlertTime.clear();
         getLogger().info("AntiSpoof disabled!");
     }
 }
