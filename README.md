@@ -88,7 +88,10 @@ debug: false
 # Defines the message sent to players with the `antispoof.alerts` permission
 # when a spoofing attempt is detected.
 messages:
+  # Message shown to players with antispoof.alerts permission
   alert: "&8[&cAntiSpoof&8] &e%player% flagged! &c%reason%"
+  # Message logged to console (no color codes needed)
+  console-alert: "%player% flagged! %reason%"
 
 # ──────────────────────────────────────────────────────────
 #                  Core Detection Settings
