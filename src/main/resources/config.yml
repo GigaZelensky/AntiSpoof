@@ -24,7 +24,7 @@
 # Set to 0 for an immediate check upon player login. (Default: 0)
 delay-in-seconds: 0
 
-# 🚫 Super Strict Mode (Not Recommended)
+#  Super Strict Mode (Not Recommended)
 # Blocks players who either:
 #    - Do NOT have a "vanilla" client, OR
 #    - Have registered plugin channels (indicating mods/plugins)
@@ -32,11 +32,11 @@ delay-in-seconds: 0
 #    so enabling it is usually unnecessary and could negatively impact your player base.
 block-non-vanilla-with-channels: false
 
-# 🔍 Validate client brand formatting.
+#  Validate client brand formatting.
 # If enabled, the plugin checks for unusual characters in the client brand.
 check-brand-formatting: true
 
-# 🛠️ Debug Mode
+# ️ Debug Mode
 # If enabled, logs client channels and brand details in the console when a player logs in.
 debug: false
 
@@ -47,7 +47,7 @@ punishments:
   - "kick %player% &cSuspicious client detected!"
 #  - "ban %player% &cClient spoofing detected"
 
-# 🚨 Alert Messages
+#  Alert Messages
 # Defines the message sent to players with the `antispoof.alerts` permission
 # when a spoofing attempt is detected.
 messages:
@@ -57,10 +57,10 @@ messages:
 #                 Channel Detection Settings
 # ──────────────────────────────────────────────────────────
 blocked-channels:
-  # 🔨 Enable channel-based detection.
+  #  Enable channel-based detection.
   enabled: false
   
-  # 🔍 Exact Matching
+  #  Exact Matching
   # If true, only exact matches will be blocked. If false, matches
   # that simply contain the specified value are allowed.
   exact-match: true
@@ -82,10 +82,10 @@ blocked-channels:
 #                  Client Brand Detection
 # ──────────────────────────────────────────────────────────
 blocked-brands:
-  # 🔨 Enable brand-based detection.
+  #  Enable brand-based detection.
   enabled: false
   
-  # 🔍 Exact Matching
+  #  Exact Matching
   # If true, only exact matches will be blocked. If false, matches
   # that simply contain the specified value are allowed.
   exact-match: true
@@ -100,3 +100,31 @@ blocked-brands:
     # Add more brands to block here
     # - "vanilla"
     # - "optifine"
+
+# ──────────────────────────────────────────────────────────
+#                Bedrock Handling Settings
+# ──────────────────────────────────────────────────────────
+bedrock-handling:
+  # Choose how to handle Bedrock players.
+  # Options:
+  #   - "IGNORE": Completely ignore these players; process them like regular players.
+  #   - "EXEMPT": Process them but don't punish them for failing checks.
+  #
+  # Either way, Bedrock players won't get the anti-spoof treatment.
+  # "EXEMPT" mode is highly recommended as "IGNORE" can easily falsely punish Bedrock players.
+  mode: "EXEMPT"
+
+  # Punish players claiming a client brand including a variation of "geyser" without being verified
+  # as Bedrock players by the Floodgate API.
+  # When enabled (true), these people will pay the price.
+  punish-spoofing-geyser: true
+
+  # Check Player Prefix:
+  # This option checks whether a player is identified as a Bedrock player by verifying their prefix.
+  # When enabled, the system will verify if the player's username or identifier starts with the specified prefix.
+  # Default prefix is ".", and if a player's client brand includes "geyser" in any form without matching
+  # the expected prefix, they will be punished.
+  prefix-check:
+    enabled: true
+    # The prefix used to identify Bedrock players.
+    prefix: "."

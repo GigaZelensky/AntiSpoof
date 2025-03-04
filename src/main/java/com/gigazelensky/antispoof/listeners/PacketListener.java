@@ -8,6 +8,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.configuration.client.WrapperConfigClientPluginMessage;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPluginMessage;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -69,14 +70,28 @@ public class PacketListener extends PacketListenerAbstract {
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
         if (data == null || data.isAlreadyPunished()) return;
 
+        // Check if player is a Bedrock player
+        boolean isBedrockPlayer = plugin.isBedrockPlayer(player);
+        
+        // If player is a Bedrock player and we're set to ignore them, return immediately
+        if (isBedrockPlayer && plugin.getConfigManager().getBedrockHandlingMode().equals("IGNORE")) {
+            return;
+        }
+
         String brand = plugin.getClientBrand(player);
         if (brand == null) return;
         
         boolean shouldPunish = false;
         String reason = "";
 
+        // Handle potential Geyser spoofing
+        if (plugin.getConfigManager().isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
+            reason = "Spoofing Geyser client";
+            shouldPunish = true;
+        }
+
         // Check the brand first
-        if (plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
+        if (!shouldPunish && plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
             reason = "Invalid brand formatting";
             shouldPunish = true;
         }
@@ -109,7 +124,7 @@ public class PacketListener extends PacketListenerAbstract {
                 // Whitelist mode
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
-                    reason = "Client channels not in whitelist";
+                    reason = "Client channels don't match whitelist";
                     shouldPunish = true;
                 }
             } else {
@@ -120,6 +135,12 @@ public class PacketListener extends PacketListenerAbstract {
                     shouldPunish = true;
                 }
             }
+        }
+
+        // If player is a Bedrock player and we're in EXEMPT mode, don't punish
+        if (shouldPunish && isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+            logDebug("Bedrock player " + player.getName() + " would be punished for: " + reason + ", but is exempt");
+            return;
         }
 
         if (shouldPunish) {
@@ -191,9 +212,9 @@ public class PacketListener extends PacketListenerAbstract {
             }
             return false; // Fail if player has no whitelisted channels
         } 
-        // STRICT mode: Player must have ONLY whitelisted channels
+        // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
         else {
-            // Check if every player channel is whitelisted
+            // 1. Check if every player channel is whitelisted
             for (String playerChannel : playerChannels) {
                 boolean channelIsWhitelisted = false;
                 
@@ -217,7 +238,31 @@ public class PacketListener extends PacketListenerAbstract {
                 }
             }
             
-            // All player's channels are whitelisted
+            // 2. Also check if player has ALL whitelisted channels
+            for (String whitelistedChannel : whitelistedChannels) {
+                boolean playerHasChannel = false;
+                
+                for (String playerChannel : playerChannels) {
+                    boolean matches;
+                    
+                    if (exactMatch) {
+                        matches = playerChannel.equals(whitelistedChannel);
+                    } else {
+                        matches = playerChannel.contains(whitelistedChannel);
+                    }
+                    
+                    if (matches) {
+                        playerHasChannel = true;
+                        break;
+                    }
+                }
+                
+                if (!playerHasChannel) {
+                    return false; // Fail if player is missing any whitelisted channel
+                }
+            }
+            
+            // Player has passed both checks
             return true;
         }
     }
@@ -298,9 +343,16 @@ public class PacketListener extends PacketListenerAbstract {
                 .replace("%brand%", brand)
                 .replace("%reason%", reason);
         
+        // Convert color codes for console
+        String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
+        
+        // Log to console
+        plugin.getLogger().warning(coloredAlert);
+        
+        // Notify players with permission
         Bukkit.getOnlinePlayers().stream()
                 .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', alert)));
+                .forEach(p -> p.sendMessage(coloredAlert));
     }
     
     private void logDebug(String message) {

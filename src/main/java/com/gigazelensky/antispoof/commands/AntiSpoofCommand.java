@@ -242,8 +242,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             
             if (hasChannels) {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
-                sender.sendMessage(ChatColor.GRAY + "Channels: " + ChatColor.WHITE + 
-                    String.join(", ", data.getChannels()));
+                sender.sendMessage(ChatColor.GRAY + "Channels:");
+                data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
                 
                 // Check channel whitelist/blacklist
                 if (plugin.getConfigManager().isBlockedChannelsEnabled()) {
@@ -304,8 +304,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
             if (hasChannels) {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
-                sender.sendMessage(ChatColor.GRAY + "Channels: " + ChatColor.WHITE + 
-                    String.join(", ", data.getChannels()));
+                sender.sendMessage(ChatColor.GRAY + "Channels:");
+                data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
             } else {
                 sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.RED + "No");
             }

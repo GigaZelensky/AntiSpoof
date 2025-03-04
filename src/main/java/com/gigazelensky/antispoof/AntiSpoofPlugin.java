@@ -9,6 +9,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.geysermc.floodgate.api.FloodgateApi;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private ConfigManager configManager;
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<String, String> playerBrands = new HashMap<>();
+    private FloodgateApi floodgateApi = null;
     
     @Override
     public void onEnable() {
@@ -33,6 +35,16 @@ public class AntiSpoofPlugin extends JavaPlugin {
             .reEncodeByDefault(false)
             .checkForUpdates(false);
         PacketEvents.getAPI().load();
+        
+        // Try to initialize FloodgateApi
+        if (getServer().getPluginManager().isPluginEnabled("floodgate")) {
+            try {
+                floodgateApi = FloodgateApi.getInstance();
+                getLogger().info("Successfully hooked into Floodgate API!");
+            } catch (Exception e) {
+                getLogger().warning("Failed to hook into Floodgate API: " + e.getMessage());
+            }
+        }
         
         // Register plugin channels for client brand
         if (getServer().getBukkitVersion().contains("1.13") || 
@@ -91,11 +103,73 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return playerBrands;
     }
     
+    public boolean isBedrockPlayer(Player player) {
+        if (player == null) return false;
+        
+        // Try to use Floodgate API first if available
+        if (floodgateApi != null) {
+            try {
+                if (floodgateApi.isFloodgatePlayer(player.getUniqueId())) {
+                    if (configManager.isDebugMode()) {
+                        getLogger().info("[Debug] Player " + player.getName() + 
+                                       " identified as Bedrock player via Floodgate API");
+                    }
+                    return true;
+                }
+            } catch (Exception e) {
+                if (configManager.isDebugMode()) {
+                    getLogger().warning("[Debug] Error checking Floodgate API for " + 
+                                       player.getName() + ": " + e.getMessage());
+                }
+            }
+        }
+        
+        // Fall back to prefix check if Floodgate isn't available or check failed
+        if (configManager.isBedrockPrefixCheckEnabled()) {
+            String prefix = configManager.getBedrockPrefix();
+            if (player.getName().startsWith(prefix)) {
+                if (configManager.isDebugMode()) {
+                    getLogger().info("[Debug] Player " + player.getName() + 
+                                   " identified as Bedrock player via prefix check");
+                }
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    public boolean isSpoofingGeyser(Player player) {
+        if (player == null) return false;
+        
+        // Don't check if not configured to punish Geyser spoofing
+        if (!configManager.isPunishSpoofingGeyser()) {
+            return false;
+        }
+        
+        String brand = getClientBrand(player);
+        if (brand == null) return false;
+        
+        // Check if brand contains "geyser" (case insensitive)
+        boolean claimsGeyser = brand.toLowerCase().contains("geyser");
+        
+        // If player claims to be using Geyser but isn't detected as a Bedrock player
+        return claimsGeyser && !isBedrockPlayer(player);
+    }
+    
     public boolean isPlayerSpoofing(Player player) {
         if (player == null) return false;
         
         String brand = getClientBrand(player);
         if (brand == null) return false;
+        
+        // Check if player is a Bedrock player
+        boolean isBedrockPlayer = isBedrockPlayer(player);
+        
+        // If player is a Bedrock player and we're set to ignore them, return false immediately
+        if (isBedrockPlayer && configManager.getBedrockHandlingMode().equals("IGNORE")) {
+            return false;
+        }
         
         UUID uuid = player.getUniqueId();
         PlayerData data = playerDataMap.get(uuid);
@@ -103,6 +177,11 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         boolean hasChannels = !data.getChannels().isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
+        
+        // Handle potential Geyser spoofing
+        if (configManager.isPunishSpoofingGeyser() && isSpoofingGeyser(player)) {
+            return true;
+        }
         
         // Check for invalid brand formatting
         if (configManager.checkBrandFormatting() && hasInvalidFormatting(brand)) {
@@ -140,6 +219,11 @@ public class AntiSpoofPlugin extends JavaPlugin {
                     return true;
                 }
             }
+        }
+        
+        // If we got here and player is a Bedrock player in EXEMPT mode, return false
+        if (isBedrockPlayer && configManager.isBedrockExemptMode()) {
+            return false;
         }
         
         return false;
@@ -208,9 +292,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
             return false; // Fail if player has no whitelisted channels
         } 
-        // STRICT mode: Player must have ONLY whitelisted channels
+        // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
         else {
-            // Check if every player channel is whitelisted
+            // 1. Check if every player channel is whitelisted
             for (String playerChannel : playerChannels) {
                 boolean channelIsWhitelisted = false;
                 
@@ -234,7 +318,31 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 }
             }
             
-            // All player's channels are whitelisted
+            // 2. Also check if player has ALL whitelisted channels
+            for (String whitelistedChannel : whitelistedChannels) {
+                boolean playerHasChannel = false;
+                
+                for (String playerChannel : playerChannels) {
+                    boolean matches;
+                    
+                    if (exactMatch) {
+                        matches = playerChannel.equals(whitelistedChannel);
+                    } else {
+                        matches = playerChannel.contains(whitelistedChannel);
+                    }
+                    
+                    if (matches) {
+                        playerHasChannel = true;
+                        break;
+                    }
+                }
+                
+                if (!playerHasChannel) {
+                    return false; // Fail if player is missing any whitelisted channel
+                }
+            }
+            
+            // Player has passed both checks
             return true;
         }
     }

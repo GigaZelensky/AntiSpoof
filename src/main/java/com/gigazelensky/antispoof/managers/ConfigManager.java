@@ -90,4 +90,30 @@ public class ConfigManager {
     public boolean isBrandWhitelistEnabled() {
         return config.getBoolean("blocked-brands.whitelist-mode", false);
     }
+    
+    // Bedrock player handling configuration
+    public String getBedrockHandlingMode() {
+        String mode = config.getString("bedrock-handling.mode", "EXEMPT");
+        // Ensure valid value
+        if (!mode.equals("IGNORE") && !mode.equals("EXEMPT")) {
+            return "EXEMPT";
+        }
+        return mode;
+    }
+    
+    public boolean isBedrockExemptMode() {
+        return getBedrockHandlingMode().equals("EXEMPT");
+    }
+    
+    public boolean isPunishSpoofingGeyser() {
+        return config.getBoolean("bedrock-handling.punish-spoofing-geyser", true);
+    }
+    
+    public boolean isBedrockPrefixCheckEnabled() {
+        return config.getBoolean("bedrock-handling.prefix-check.enabled", true);
+    }
+    
+    public String getBedrockPrefix() {
+        return config.getString("bedrock-handling.prefix-check.prefix", ".");
+    }
 }

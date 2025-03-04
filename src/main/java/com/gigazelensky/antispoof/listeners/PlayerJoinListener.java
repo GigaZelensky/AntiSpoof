@@ -64,6 +64,17 @@ public class PlayerJoinListener implements Listener {
         // Skip if already punished
         if (data.isAlreadyPunished()) return;
 
+        // Check if player is a Bedrock player
+        boolean isBedrockPlayer = plugin.isBedrockPlayer(player);
+        
+        // If player is a Bedrock player and we're set to ignore them, return immediately
+        if (isBedrockPlayer && config.getBedrockHandlingMode().equals("IGNORE")) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Ignoring Bedrock player: " + player.getName());
+            }
+            return;
+        }
+
         String brand = plugin.getClientBrand(player);
         if (brand == null) {
             if (plugin.getConfigManager().isDebugMode()) {
@@ -75,8 +86,14 @@ public class PlayerJoinListener implements Listener {
         boolean shouldPunish = false;
         String reason = "";
 
+        // Handle potential Geyser spoofing
+        if (config.isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
+            reason = "Spoofing Geyser client";
+            shouldPunish = true;
+        }
+
         // Check the brand first
-        if (config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
+        if (!shouldPunish && config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
             reason = "Invalid brand formatting";
             shouldPunish = true;
         }
@@ -109,7 +126,7 @@ public class PlayerJoinListener implements Listener {
                 // Whitelist mode
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
-                    reason = "Client channels not in whitelist";
+                    reason = "Client channels don't match whitelist";
                     shouldPunish = true;
                 }
             } else {
@@ -122,6 +139,15 @@ public class PlayerJoinListener implements Listener {
             }
         }
 
+        // If player is a Bedrock player and we're in EXEMPT mode, don't punish
+        if (shouldPunish && isBedrockPlayer && config.isBedrockExemptMode()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Bedrock player " + player.getName() + 
+                                       " would be punished for: " + reason + ", but is exempt");
+            }
+            return;
+        }
+
         if (shouldPunish) {
             executePunishment(player, reason, brand);
             data.setAlreadyPunished(true);
@@ -131,6 +157,9 @@ public class PlayerJoinListener implements Listener {
             plugin.getLogger().info("[Debug] Checked player: " + player.getName());
             plugin.getLogger().info("[Debug] Brand: " + brand);
             plugin.getLogger().info("[Debug] Channels: " + String.join(", ", data.getChannels()));
+            if (isBedrockPlayer) {
+                plugin.getLogger().info("[Debug] Player is a Bedrock player");
+            }
         }
     }
 
@@ -197,9 +226,9 @@ public class PlayerJoinListener implements Listener {
             }
             return false; // Fail if player has no whitelisted channels
         } 
-        // STRICT mode: Player must have ONLY whitelisted channels
+        // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
         else {
-            // Check if every player channel is whitelisted
+            // 1. Check if every player channel is whitelisted
             for (String playerChannel : playerChannels) {
                 boolean channelIsWhitelisted = false;
                 
@@ -223,7 +252,31 @@ public class PlayerJoinListener implements Listener {
                 }
             }
             
-            // All player's channels are whitelisted
+            // 2. Also check if player has ALL whitelisted channels
+            for (String whitelistedChannel : whitelistedChannels) {
+                boolean playerHasChannel = false;
+                
+                for (String playerChannel : playerChannels) {
+                    boolean matches;
+                    
+                    if (exactMatch) {
+                        matches = playerChannel.equals(whitelistedChannel);
+                    } else {
+                        matches = playerChannel.contains(whitelistedChannel);
+                    }
+                    
+                    if (matches) {
+                        playerHasChannel = true;
+                        break;
+                    }
+                }
+                
+                if (!playerHasChannel) {
+                    return false; // Fail if player is missing any whitelisted channel
+                }
+            }
+            
+            // Player has passed both checks
             return true;
         }
     }
@@ -269,8 +322,15 @@ public class PlayerJoinListener implements Listener {
                 .replace("%brand%", brand)
                 .replace("%reason%", reason);
         
+        // Convert color codes for console
+        String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
+        
+        // Log to console
+        plugin.getLogger().warning(coloredAlert);
+        
+        // Notify players with permission
         Bukkit.getOnlinePlayers().stream()
                 .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(ChatColor.translateAlternateColorCodes('&', alert)));
+                .forEach(p -> p.sendMessage(coloredAlert));
     }
 }
