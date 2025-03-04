@@ -12,6 +12,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.List;
 
 public class PacketListener extends PacketListenerAbstract {
     private final AntiSpoofPlugin plugin;
@@ -48,15 +49,12 @@ public class PacketListener extends PacketListenerAbstract {
         
         // If this packet registered a channel and delay is set to 0, check the player
         if (wasChannelRegistered && plugin.getConfigManager().getCheckDelay() <= 0) {
-            // Get a reference to the PlayerJoinListener check method
             // Since we can't call it directly, we'll schedule an immediate task
             Bukkit.getScheduler().runTask(plugin, () -> {
                 // Only check if player is still online
                 if (player.isOnline() && !data.isAlreadyPunished()) {
                     // Check if player is spoofing after channel registration
-                    if (plugin.isPlayerSpoofing(player)) {
-                        checkAndPunishPlayer(player);
-                    }
+                    checkAndPunishPlayer(player);
                 }
             });
         }
@@ -83,16 +81,20 @@ public class PacketListener extends PacketListenerAbstract {
         
         boolean shouldPunish = false;
         String reason = "";
+        String violationType = "";
+        String violatedChannel = null;
 
         // Handle potential Geyser spoofing
         if (plugin.getConfigManager().isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
             reason = "Spoofing Geyser client";
+            violationType = "GEYSER_SPOOF";
             shouldPunish = true;
         }
 
-        // Check the brand first
+        // Check the brand formatting
         if (!shouldPunish && plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
             reason = "Invalid brand formatting";
+            violationType = "BRAND_FORMAT";
             shouldPunish = true;
         }
         
@@ -101,6 +103,7 @@ public class PacketListener extends PacketListenerAbstract {
             boolean brandBlocked = isBrandBlocked(brand);
             if (brandBlocked) {
                 reason = "Blocked client brand: " + brand;
+                violationType = "BLOCKED_BRAND";
                 shouldPunish = true;
             }
         }
@@ -109,12 +112,17 @@ public class PacketListener extends PacketListenerAbstract {
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Vanilla client check
-        if (!shouldPunish && claimsVanilla && hasChannels) {
+        if (!shouldPunish && plugin.getConfigManager().isVanillaCheckEnabled() && 
+            claimsVanilla && hasChannels) {
             reason = "Vanilla client with plugin channels";
+            violationType = "VANILLA_WITH_CHANNELS";
             shouldPunish = true;
         }
-        else if (!shouldPunish && plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+        // Non-vanilla with channels check
+        else if (!shouldPunish && plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && 
+                !claimsVanilla && hasChannels) {
             reason = "Non-vanilla client with channels";
+            violationType = "NON_VANILLA_WITH_CHANNELS";
             shouldPunish = true;
         }
         
@@ -125,6 +133,7 @@ public class PacketListener extends PacketListenerAbstract {
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
                     reason = "Client channels don't match whitelist";
+                    violationType = "CHANNEL_WHITELIST";
                     shouldPunish = true;
                 }
             } else {
@@ -132,6 +141,8 @@ public class PacketListener extends PacketListenerAbstract {
                 String blockedChannel = findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
                     reason = "Blocked channel: " + blockedChannel;
+                    violationType = "BLOCKED_CHANNEL";
+                    violatedChannel = blockedChannel;
                     shouldPunish = true;
                 }
             }
@@ -144,7 +155,7 @@ public class PacketListener extends PacketListenerAbstract {
         }
 
         if (shouldPunish) {
-            executePunishment(player, reason, brand);
+            executePunishment(player, reason, brand, violationType, violatedChannel);
             data.setAlreadyPunished(true);
         }
     }
@@ -330,17 +341,80 @@ public class PacketListener extends PacketListenerAbstract {
                !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
     
-    private void executePunishment(Player player, String reason, String brand) {
-        for (String command : plugin.getConfigManager().getPunishments()) {
+    private void executePunishment(Player player, String reason, String brand, String violationType, String violatedChannel) {
+        List<String> punishments;
+        boolean shouldPunish = true;
+        
+        // Select the appropriate punishments based on violation type
+        switch(violationType) {
+            case "VANILLA_WITH_CHANNELS":
+                shouldPunish = plugin.getConfigManager().shouldPunishVanillaCheck();
+                punishments = plugin.getConfigManager().getVanillaCheckPunishments();
+                break;
+                
+            case "NON_VANILLA_WITH_CHANNELS":
+                shouldPunish = plugin.getConfigManager().shouldPunishNonVanillaCheck();
+                punishments = plugin.getConfigManager().getNonVanillaCheckPunishments();
+                break;
+                
+            case "BRAND_FORMAT":
+                shouldPunish = plugin.getConfigManager().shouldPunishBrandFormatting();
+                punishments = plugin.getConfigManager().getBrandFormattingPunishments();
+                break;
+                
+            case "BLOCKED_CHANNEL":
+            case "CHANNEL_WHITELIST":
+                shouldPunish = plugin.getConfigManager().shouldPunishBlockedChannels();
+                punishments = plugin.getConfigManager().getBlockedChannelsPunishments();
+                break;
+                
+            case "BLOCKED_BRAND":
+                shouldPunish = plugin.getConfigManager().shouldPunishBlockedBrands();
+                punishments = plugin.getConfigManager().getBlockedBrandsPunishments();
+                break;
+                
+            case "GEYSER_SPOOF":
+                shouldPunish = plugin.getConfigManager().shouldPunishGeyserSpoof();
+                punishments = plugin.getConfigManager().getGeyserSpoofPunishments();
+                break;
+                
+            default:
+                // Fallback to global punishments
+                punishments = plugin.getConfigManager().getPunishments();
+        }
+        
+        // If punishment is disabled for this violation type, just return
+        if (!shouldPunish) {
+            logDebug("Violation detected but punishment disabled for: " + violationType);
+            return;
+        }
+        
+        // If no specific punishments defined, fall back to global
+        if (punishments.isEmpty()) {
+            punishments = plugin.getConfigManager().getPunishments();
+        }
+        
+        // Execute the punishments
+        for (String command : punishments) {
             String formatted = command.replace("%player%", player.getName())
                                      .replace("%reason%", reason)
-                                     .replace("%brand%", brand);
+                                     .replace("%brand%", brand != null ? brand : "unknown");
+            
+            if (violatedChannel != null) {
+                formatted = formatted.replace("%channel%", violatedChannel);
+            }
+            
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), formatted);
         }
+        
         String alert = plugin.getConfigManager().getAlertMessage()
                 .replace("%player%", player.getName())
                 .replace("%brand%", brand)
                 .replace("%reason%", reason);
+        
+        if (violatedChannel != null) {
+            alert = alert.replace("%channel%", violatedChannel);
+        }
         
         // Convert color codes for player messages
         String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
