@@ -206,6 +206,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         PlayerData data = plugin.getPlayerDataMap().get(target.getUniqueId());
         boolean hasChannels = data != null && !data.getChannels().isEmpty();
         
+        // Display channels first regardless of spoof status
+        if (hasChannels) {
+            sender.sendMessage(ChatColor.GRAY + "Channels:");
+            data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
+        }
+        
         // Determine reason for flagging
         if (isSpoofing) {
             // Check brand first
@@ -335,10 +341,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             }
         }
         
+        // Display player status and brand information after channels
         if (isSpoofing) {
             sender.sendMessage(ChatColor.GOLD + target.getName() + ChatColor.RED + " has been flagged!");
             sender.sendMessage(ChatColor.RED + "Reason: " + flagReason);
             sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
+            sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
             
             // Check if the brand is blocked/not whitelisted
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
@@ -371,111 +379,106 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 }
             }
             
-            if (hasChannels) {
-                sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
-                sender.sendMessage(ChatColor.GRAY + "Channels:");
-                data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
+            // Channel whitelist/blacklist checks - moved after spoofing and brand info 
+            if (hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
+                String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
-                // Check channel whitelist/blacklist
-                if (plugin.getConfigManager().isBlockedChannelsEnabled()) {
-                    String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
+                if (!whitelistMode.equals("FALSE")) {
+                    // Whitelist mode
+                    sender.sendMessage(ChatColor.GRAY + "Channel whitelist mode: " + 
+                        ChatColor.WHITE + (whitelistMode.equals("STRICT") ? "Strict" : "Simple"));
                     
-                    if (!whitelistMode.equals("FALSE")) {
-                        // Whitelist mode
-                        sender.sendMessage(ChatColor.GRAY + "Channel whitelist mode: " + 
-                            ChatColor.WHITE + (whitelistMode.equals("STRICT") ? "Strict" : "Simple"));
+                    sender.sendMessage(ChatColor.GRAY + "Channel is whitelisted:");
+                    
+                    // First, list all player channels and if they're whitelisted
+                    for (String channel : data.getChannels()) {
+                        boolean whitelisted = false;
+                        for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                            boolean matches;
+                            if (plugin.getConfigManager().isExactChannelMatchRequired()) {
+                                matches = channel.equals(whitelistedChannel);
+                            } else {
+                                matches = channel.contains(whitelistedChannel);
+                            }
+                            
+                            if (matches) {
+                                whitelisted = true;
+                                sender.sendMessage(ChatColor.GREEN + channel);
+                                break;
+                            }
+                        }
                         
-                        sender.sendMessage(ChatColor.GRAY + "Channel is whitelisted:");
+                        if (!whitelisted) {
+                            sender.sendMessage(ChatColor.RED + channel + ChatColor.GRAY + " (not in whitelist)");
+                        }
+                    }
+                    
+                    // If in STRICT mode, also list any missing whitelisted channels
+                    if (whitelistMode.equals("STRICT")) {
+                        List<String> missingWhitelistedChannels = new ArrayList<>();
                         
-                        // First, list all player channels and if they're whitelisted
-                        for (String channel : data.getChannels()) {
-                            boolean whitelisted = false;
-                            for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                        for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                            boolean found = false;
+                            for (String playerChannel : data.getChannels()) {
                                 boolean matches;
                                 if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                    matches = channel.equals(whitelistedChannel);
+                                    matches = playerChannel.equals(whitelistedChannel);
                                 } else {
-                                    matches = channel.contains(whitelistedChannel);
+                                    matches = playerChannel.contains(whitelistedChannel);
                                 }
                                 
                                 if (matches) {
-                                    whitelisted = true;
-                                    sender.sendMessage(ChatColor.GREEN + channel);
+                                    found = true;
                                     break;
                                 }
                             }
                             
-                            if (!whitelisted) {
-                                sender.sendMessage(ChatColor.RED + channel + ChatColor.GRAY + " (not in whitelist)");
+                            if (!found) {
+                                missingWhitelistedChannels.add(whitelistedChannel);
                             }
                         }
                         
-                        // If in STRICT mode, also list any missing whitelisted channels
-                        if (whitelistMode.equals("STRICT")) {
-                            List<String> missingWhitelistedChannels = new ArrayList<>();
-                            
-                            for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                                boolean found = false;
-                                for (String playerChannel : data.getChannels()) {
-                                    boolean matches;
-                                    if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                        matches = playerChannel.equals(whitelistedChannel);
-                                    } else {
-                                        matches = playerChannel.contains(whitelistedChannel);
-                                    }
-                                    
-                                    if (matches) {
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (!found) {
-                                    missingWhitelistedChannels.add(whitelistedChannel);
-                                }
-                            }
-                            
-                            if (!missingWhitelistedChannels.isEmpty()) {
-                                sender.sendMessage(ChatColor.GRAY + "Missing required channels:");
-                                for (String missingChannel : missingWhitelistedChannels) {
-                                    sender.sendMessage(ChatColor.RED + missingChannel);
-                                }
-                            }
-                        }
-                    } else {
-                        // Blacklist mode
-                        for (String channel : data.getChannels()) {
-                            boolean blocked = false;
-                            if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                blocked = plugin.getConfigManager().getBlockedChannels().contains(channel);
-                            } else {
-                                for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                                    if (channel.contains(blockedChannel)) {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            
-                            if (blocked) {
-                                sender.sendMessage(ChatColor.GRAY + "Blocked channel detected:" + ChatColor.RED + "\n" + channel);
+                        if (!missingWhitelistedChannels.isEmpty()) {
+                            sender.sendMessage(ChatColor.GRAY + "Missing required channels:");
+                            for (String missingChannel : missingWhitelistedChannels) {
+                                sender.sendMessage(ChatColor.RED + missingChannel);
                             }
                         }
                     }
+                } else {
+                    // Blacklist mode - Collect all blocked channels first, then display them together
+                    List<String> blockedChannels = new ArrayList<>();
+                    
+                    for (String channel : data.getChannels()) {
+                        boolean blocked = false;
+                        
+                        if (plugin.getConfigManager().isExactChannelMatchRequired()) {
+                            if (plugin.getConfigManager().getBlockedChannels().contains(channel)) {
+                                blockedChannels.add(channel);
+                            }
+                        } else {
+                            for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                                if (channel.contains(blockedChannel)) {
+                                    blockedChannels.add(channel);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Display all blocked channels under one header
+                    if (!blockedChannels.isEmpty()) {
+                        sender.sendMessage(ChatColor.GRAY + "Blocked channel detected:");
+                        for (String channel : blockedChannels) {
+                            sender.sendMessage(ChatColor.RED + channel);
+                        }
+                    }
                 }
-            } else {
-                sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.RED + "No");
             }
         } else {
             sender.sendMessage(ChatColor.GOLD + target.getName() + ChatColor.GREEN + " does not appear to be spoofing.");
             sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
-            if (hasChannels) {
-                sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.GREEN + "Yes");
-                sender.sendMessage(ChatColor.GRAY + "Channels:");
-                data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
-            } else {
-                sender.sendMessage(ChatColor.GRAY + "Has channels: " + ChatColor.RED + "No");
-            }
+            sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
         }
     }
     
