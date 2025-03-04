@@ -1,4 +1,3 @@
-```markdown
 # AntiSpoof - Advanced Client Spoof Detection
 
 ![Banner](https://i.imgur.com/7QkWF7E.png)
