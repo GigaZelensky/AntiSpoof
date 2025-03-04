@@ -357,29 +357,33 @@ public class PacketListener extends PacketListenerAbstract {
     
     // Send alert message to staff and console
     private void sendAlert(Player player, String reason, String brand, String violatedChannel) {
-        // Format the alert message with placeholders
-        String alert = plugin.getConfigManager().getAlertMessage()
+        // Format the player alert message with placeholders
+        String playerAlert = plugin.getConfigManager().getAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        // Format the console alert message with placeholders
+        String consoleAlert = plugin.getConfigManager().getConsoleAlertMessage()
                 .replace("%player%", player.getName())
                 .replace("%brand%", brand != null ? brand : "unknown")
                 .replace("%reason%", reason);
         
         if (violatedChannel != null) {
-            alert = alert.replace("%channel%", violatedChannel);
+            playerAlert = playerAlert.replace("%channel%", violatedChannel);
+            consoleAlert = consoleAlert.replace("%channel%", violatedChannel);
         }
         
         // Convert color codes for player messages
-        String coloredAlert = ChatColor.translateAlternateColorCodes('&', alert);
+        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
         
-        // Create a clean console message without minecraft color codes
-        String consoleMessage = ChatColor.stripColor(coloredAlert);
-        
-        // Log to console as INFO
-        plugin.getLogger().info(consoleMessage);
+        // Log to console directly using the console format (no need to strip colors)
+        plugin.getLogger().info(consoleAlert);
         
         // Notify players with permission
         Bukkit.getOnlinePlayers().stream()
                 .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredAlert));
+                .forEach(p -> p.sendMessage(coloredPlayerAlert));
     }
     
     // Execute punishment commands
