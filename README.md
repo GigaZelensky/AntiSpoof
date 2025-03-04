@@ -1,6 +1,6 @@
 # AntiSpoof - Advanced Client Spoof Detection
 
-![Banner](https://i.imgur.com/Tyji4mJ.jpeg)
+![Banner](https://i.imgur.com/Tyji4mJ.jpeg){: width="50%" heght="50%"}
 
 Advanced Minecraft plugin for detecting client spoofing attempts through brand analysis and channel monitoring. Designed for Spigot/Paper 1.20.4+ servers.
 
