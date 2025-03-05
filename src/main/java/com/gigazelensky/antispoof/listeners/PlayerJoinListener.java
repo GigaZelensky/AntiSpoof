@@ -248,7 +248,6 @@ public class PlayerJoinListener implements Listener {
        if (plugin.getConfigManager().isDebugMode()) {
            plugin.getLogger().info("[Debug] Checked player: " + player.getName());
            plugin.getLogger().info("[Debug] Brand: " + brand);
-           plugin.getLogger().info("[Debug] Channels: " + String.join(", ", data.getChannels()));
            if (isBedrockPlayer) {
                plugin.getLogger().info("[Debug] Player is a Bedrock player");
            }
