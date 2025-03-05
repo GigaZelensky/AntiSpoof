@@ -13,12 +13,23 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class DiscordWebhookHandler {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
+    
+    // Cooldown map to track the last time a webhook was sent for each player
+    private final Map<UUID, Long> lastWebhookTime = new ConcurrentHashMap<>();
+    // Map to store the most severe alert for each player during cooldown
+    private final Map<UUID, WebhookAlert> pendingAlerts = new ConcurrentHashMap<>();
+    
+    // Default cooldown period in milliseconds (10 seconds)
+    private static final long DEFAULT_COOLDOWN = 10000;
     
     public DiscordWebhookHandler(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -26,7 +37,71 @@ public class DiscordWebhookHandler {
     }
     
     /**
-     * Sends an alert to Discord webhook
+     * Represents an alert to be sent to Discord
+     */
+    private static class WebhookAlert {
+        final Player player;
+        final String reason;
+        final String brand;
+        final String channel;
+        final List<String> violations;
+        final int severityScore;
+        
+        public WebhookAlert(Player player, String reason, String brand, String channel, List<String> violations) {
+            this.player = player;
+            this.reason = reason;
+            this.brand = brand;
+            this.channel = channel;
+            this.violations = violations;
+            
+            // Calculate a severity score based on the alert details
+            // More violations = higher severity
+            this.severityScore = calculateSeverity();
+        }
+        
+        private int calculateSeverity() {
+            int score = 0;
+            
+            // Multiple violations have higher severity
+            if (violations != null) {
+                score += violations.size() * 10;
+            }
+            
+            // Specific violation types have different weights
+            if (reason != null) {
+                if (reason.contains("Geyser")) {
+                    score += 50;  // Geyser spoofing is high severity
+                }
+                if (reason.contains("Vanilla")) {
+                    score += 30;  // Vanilla spoofing is medium-high severity
+                }
+                if (reason.contains("Blocked channel")) {
+                    score += 20;  // Blocked channels are medium severity
+                }
+                if (reason.contains("Blocked client brand")) {
+                    score += 15;  // Blocked brands are medium-low severity
+                }
+                if (reason.contains("joined using client brand")) {
+                    score += 5;   // Just joining with a monitored brand is low severity
+                }
+            }
+            
+            return score;
+        }
+        
+        /**
+         * Compares this alert with another to determine which is more severe
+         * @param other The other alert to compare with
+         * @return true if this alert is more severe
+         */
+        public boolean isMoreSevereThan(WebhookAlert other) {
+            if (other == null) return true;
+            return this.severityScore > other.severityScore;
+        }
+    }
+    
+    /**
+     * Sends an alert to Discord webhook with cooldown handling
      * @param player The player who triggered the alert
      * @param reason The reason for the alert
      * @param brand The client brand
@@ -35,35 +110,96 @@ public class DiscordWebhookHandler {
      */
     public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations) {
         if (!config.isDiscordWebhookEnabled()) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Webhook is disabled in config.");
-            }
             return;
         }
         
         String webhookUrl = config.getDiscordWebhookUrl();
         if (webhookUrl == null || webhookUrl.isEmpty()) {
-            plugin.getLogger().warning("[Discord] Webhook URL is empty. Please set a valid URL in the config.");
             return;
         }
 
+        UUID playerUuid = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        long cooldownPeriod = getCooldownPeriod();
+        
+        // Create current alert object
+        WebhookAlert currentAlert = new WebhookAlert(player, reason, brand, channel, violations);
+        
+        // Check if player is in cooldown
+        Long lastTime = lastWebhookTime.get(playerUuid);
+        if (lastTime != null && now - lastTime < cooldownPeriod) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Player " + player.getName() + " is in webhook cooldown. Checking alert priority.");
+            }
+            
+            // Get existing pending alert if any
+            WebhookAlert pendingAlert = pendingAlerts.get(playerUuid);
+            
+            // Replace pending alert if current one is more severe
+            if (currentAlert.isMoreSevereThan(pendingAlert)) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Storing higher priority alert for " + player.getName() + " with reason: " + reason);
+                }
+                pendingAlerts.put(playerUuid, currentAlert);
+            }
+            
+            // Wait for cooldown to expire before sending
+            return;
+        }
+        
+        // Set the last webhook time and remove any pending alerts
+        lastWebhookTime.put(playerUuid, now);
+        pendingAlerts.remove(playerUuid);
+        
+        // Send the alert
+        sendWebhookDirectly(currentAlert);
+        
+        // Schedule a task to send any pending alerts after cooldown
+        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+            WebhookAlert pendingAlert = pendingAlerts.remove(playerUuid);
+            if (pendingAlert != null) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Sending pending alert for " + pendingAlert.player.getName() + " after cooldown");
+                }
+                sendWebhookDirectly(pendingAlert);
+                lastWebhookTime.put(playerUuid, System.currentTimeMillis());
+            }
+        }, cooldownPeriod / 50 + 1); // Convert ms to ticks (20 ticks = 1 second) and add 1 for safety
+    }
+    
+    /**
+     * Get the cooldown period in milliseconds
+     */
+    private long getCooldownPeriod() {
+        // Get from config or use default
+        int seconds = config.getWebhookCooldown();
+        if (seconds <= 0) {
+            return DEFAULT_COOLDOWN;
+        }
+        return seconds * 1000L;
+    }
+    
+    /**
+     * Directly sends a webhook without cooldown checks
+     */
+    private void sendWebhookDirectly(WebhookAlert alert) {
+        String webhookUrl = config.getDiscordWebhookUrl();
+        
         // Validate webhook URL format
         if (!webhookUrl.startsWith("https://discord.com/api/webhooks/") && 
             !webhookUrl.startsWith("https://discordapp.com/api/webhooks/")) {
             plugin.getLogger().warning("[Discord] Invalid webhook URL. Must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/");
-            plugin.getLogger().warning("[Discord] Current URL: " + webhookUrl);
             return;
         }
         
         // Get the appropriate console alert message based on the violation type
-        String consoleAlert = determineConsoleAlert(player, reason, brand, channel, violations);
+        String consoleAlert = determineConsoleAlert(alert.player, alert.reason, alert.brand, alert.channel, alert.violations);
         
         // Execute webhook request asynchronously
         CompletableFuture.runAsync(() -> {
             try {
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Sending webhook for player: " + player.getName());
-                    plugin.getLogger().info("[Discord] Console alert: " + consoleAlert);
+                    plugin.getLogger().info("[Discord] Sending webhook for player: " + alert.player.getName());
                 }
                 
                 URL url = new URL(webhookUrl);
@@ -74,7 +210,7 @@ public class DiscordWebhookHandler {
                 connection.setDoOutput(true);
                 
                 // Create JSON payload
-                String json = createWebhookJson(player, reason, brand, channel, violations, consoleAlert);
+                String json = createWebhookJson(alert.player, alert.reason, alert.brand, alert.channel, alert.violations, consoleAlert);
                 
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Discord] Webhook payload: " + json);
@@ -169,6 +305,11 @@ public class DiscordWebhookHandler {
                     .replace("%player%", player.getName())
                     .replace("%brand%", brand != null ? brand : "unknown")
                     .replace("%reason%", reason);
+        }
+        else if (reason.contains("joined using client brand:")) {
+            return config.getBlockedBrandsConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown");
         }
         
         // Default to the general console alert if no specific type is found
