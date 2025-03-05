@@ -2,9 +2,11 @@ package com.gigazelensky.antispoof;
 
 import com.gigazelensky.antispoof.commands.AntiSpoofCommand;
 import com.gigazelensky.antispoof.data.PlayerData;
+import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
 import com.gigazelensky.antispoof.listeners.PacketListener;
 import com.gigazelensky.antispoof.listeners.PlayerJoinListener;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.entity.Player;
@@ -20,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AntiSpoofPlugin extends JavaPlugin {
     
     private ConfigManager configManager;
+    private DiscordWebhookHandler discordWebhookHandler;
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<String, String> playerBrands = new HashMap<>();
     private FloodgateApi floodgateApi = null;
@@ -31,6 +34,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         this.configManager = new ConfigManager(this);
+        this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize PacketEvents
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
@@ -47,6 +51,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
             } catch (Exception e) {
                 getLogger().warning("Failed to hook into Floodgate API: " + e.getMessage());
             }
+        }
+
+        // Register PlaceholderAPI expansion if available
+        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            new AntiSpoofPlaceholders(this).register();
+            getLogger().info("Successfully registered PlaceholderAPI expansion!");
         }
         
         // Register plugin channels for client brand
@@ -84,11 +94,29 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         PacketEvents.getAPI().init();
         
+        // Log Discord webhook status
+        if (configManager.isDiscordWebhookEnabled()) {
+            String webhookUrl = configManager.getDiscordWebhookUrl();
+            if (webhookUrl != null && !webhookUrl.isEmpty()) {
+                getLogger().info("Discord webhook integration is enabled.");
+            } else {
+                getLogger().warning("Discord webhook is enabled but no URL is configured!");
+            }
+        } else {
+            if (configManager.isDebugMode()) {
+                getLogger().info("Discord webhook integration is disabled.");
+            }
+        }
+        
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
 
     public ConfigManager getConfigManager() {
         return configManager;
+    }
+    
+    public DiscordWebhookHandler getDiscordWebhookHandler() {
+        return discordWebhookHandler;
     }
     
     public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
@@ -205,9 +233,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
             return true;
         }
         
-        // Check for brand blocking
+        // Check for brand blocking - Now using configManager.isBrandBlocked method
         if (configManager.isBlockedBrandsEnabled()) {
-            if (isBrandBlocked(brand)) {
+            boolean brandBlocked = configManager.isBrandBlocked(brand);
+            
+            // Only consider as spoofing if count-as-flag is true
+            if (brandBlocked && configManager.shouldCountNonWhitelistedBrandsAsFlag()) {
                 return true;
             }
         }
@@ -246,44 +277,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return false;
     }
     
-    private boolean isBrandBlocked(String brand) {
-        if (brand == null) return false;
-        
-        List<String> blockedBrands = configManager.getBlockedBrands();
-        boolean exactMatch = configManager.isExactBrandMatchRequired();
-        boolean whitelistMode = configManager.isBrandWhitelistEnabled();
-        
-        // No brands in the list means no blocks in blacklist mode, or no allowed brands in whitelist mode
-        if (blockedBrands.isEmpty()) {
-            return whitelistMode; // If whitelist is empty, everything is blocked
-        }
-        
-        boolean isListed = false;
-        
-        for (String blockedBrand : blockedBrands) {
-            boolean matches;
-            
-            if (exactMatch) {
-                matches = brand.equalsIgnoreCase(blockedBrand);
-            } else {
-                matches = brand.toLowerCase().contains(blockedBrand.toLowerCase());
-            }
-            
-            if (matches) {
-                isListed = true;
-                break;
-            }
-        }
-        
-        // In whitelist mode, being listed is good (not blocked)
-        // In blacklist mode, being listed is bad (blocked)
-        return whitelistMode ? !isListed : isListed;
-    }
-    
     private boolean checkChannelWhitelist(Set<String> playerChannels) {
-        List<String> whitelistedChannels = configManager.getBlockedChannels(); // Reusing the values list
-        boolean exactMatch = configManager.isExactChannelMatchRequired();
         boolean strictMode = configManager.isChannelWhitelistStrict();
+        List<String> whitelistedChannels = configManager.getBlockedChannels();
         
         // If no channels are whitelisted, then fail if player has any channels
         if (whitelistedChannels.isEmpty()) {
@@ -293,18 +289,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
         // SIMPLE mode: Player must have at least one of the whitelisted channels
         if (!strictMode) {
             for (String playerChannel : playerChannels) {
-                for (String whitelistedChannel : whitelistedChannels) {
-                    boolean matches;
-                    
-                    if (exactMatch) {
-                        matches = playerChannel.equals(whitelistedChannel);
-                    } else {
-                        matches = playerChannel.contains(whitelistedChannel);
-                    }
-                    
-                    if (matches) {
-                        return true; // Pass if player has at least one whitelisted channel
-                    }
+                if (configManager.matchesChannelPattern(playerChannel)) {
+                    return true; // Pass if player has at least one whitelisted channel
                 }
             }
             return false; // Fail if player has no whitelisted channels
@@ -313,24 +299,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         else {
             // 1. Check if every player channel is whitelisted
             for (String playerChannel : playerChannels) {
-                boolean channelIsWhitelisted = false;
-                
-                for (String whitelistedChannel : whitelistedChannels) {
-                    boolean matches;
-                    
-                    if (exactMatch) {
-                        matches = playerChannel.equals(whitelistedChannel);
-                    } else {
-                        matches = playerChannel.contains(whitelistedChannel);
-                    }
-                    
-                    if (matches) {
-                        channelIsWhitelisted = true;
-                        break;
-                    }
-                }
-                
-                if (!channelIsWhitelisted) {
+                if (!configManager.matchesChannelPattern(playerChannel)) {
                     return false; // Fail if any player channel is not whitelisted
                 }
             }
@@ -340,17 +309,17 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 boolean playerHasChannel = false;
                 
                 for (String playerChannel : playerChannels) {
-                    boolean matches;
-                    
-                    if (exactMatch) {
-                        matches = playerChannel.equals(whitelistedChannel);
-                    } else {
-                        matches = playerChannel.contains(whitelistedChannel);
-                    }
-                    
-                    if (matches) {
-                        playerHasChannel = true;
-                        break;
+                    try {
+                        if (playerChannel.matches(whitelistedChannel)) {
+                            playerHasChannel = true;
+                            break;
+                        }
+                    } catch (Exception e) {
+                        // If regex is invalid, just do direct match as fallback
+                        if (playerChannel.equals(whitelistedChannel)) {
+                            playerHasChannel = true;
+                            break;
+                        }
                     }
                 }
                 
@@ -365,22 +334,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
     }
     
     public String findBlockedChannel(Set<String> playerChannels) {
-        List<String> blockedChannels = configManager.getBlockedChannels();
-        boolean exactMatch = configManager.isExactChannelMatchRequired();
-        
         for (String playerChannel : playerChannels) {
-            if (exactMatch) {
-                // Check for exact match with any blocked channel
-                if (blockedChannels.contains(playerChannel)) {
-                    return playerChannel;
-                }
-            } else {
-                // Check if player channel contains any blocked channel string
-                for (String blockedChannel : blockedChannels) {
-                    if (playerChannel.contains(blockedChannel)) {
-                        return playerChannel;
-                    }
-                }
+            if (configManager.matchesChannelPattern(playerChannel)) {
+                return playerChannel;
             }
         }
         
