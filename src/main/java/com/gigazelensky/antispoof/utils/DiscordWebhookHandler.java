@@ -3,6 +3,7 @@ package com.gigazelensky.antispoof.utils;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.awt.Color;
@@ -33,14 +34,38 @@ public class DiscordWebhookHandler {
      * @param violations List of all violations (for multiple flags)
      */
     public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations) {
-        if (!config.isDiscordWebhookEnabled() || config.getDiscordWebhookUrl().isEmpty()) {
+        if (!config.isDiscordWebhookEnabled()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Webhook is disabled in config.");
+            }
             return;
         }
+        
+        String webhookUrl = config.getDiscordWebhookUrl();
+        if (webhookUrl == null || webhookUrl.isEmpty()) {
+            plugin.getLogger().warning("[Discord] Webhook URL is empty. Please set a valid URL in the config.");
+            return;
+        }
+
+        // Validate webhook URL format
+        if (!webhookUrl.startsWith("https://discord.com/api/webhooks/") && 
+            !webhookUrl.startsWith("https://discordapp.com/api/webhooks/")) {
+            plugin.getLogger().warning("[Discord] Invalid webhook URL. Must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/");
+            plugin.getLogger().warning("[Discord] Current URL: " + webhookUrl);
+            return;
+        }
+        
+        // Get the appropriate console alert message based on the violation type
+        String consoleAlert = determineConsoleAlert(player, reason, brand, channel, violations);
         
         // Execute webhook request asynchronously
         CompletableFuture.runAsync(() -> {
             try {
-                String webhookUrl = config.getDiscordWebhookUrl();
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Sending webhook for player: " + player.getName());
+                    plugin.getLogger().info("[Discord] Console alert: " + consoleAlert);
+                }
+                
                 URL url = new URL(webhookUrl);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
@@ -49,7 +74,11 @@ public class DiscordWebhookHandler {
                 connection.setDoOutput(true);
                 
                 // Create JSON payload
-                String json = createWebhookJson(player, reason, brand, channel, violations);
+                String json = createWebhookJson(player, reason, brand, channel, violations, consoleAlert);
+                
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Webhook payload: " + json);
+                }
                 
                 try (OutputStream os = connection.getOutputStream()) {
                     byte[] input = json.getBytes(StandardCharsets.UTF_8);
@@ -57,21 +86,107 @@ public class DiscordWebhookHandler {
                 }
                 
                 int responseCode = connection.getResponseCode();
-                if (responseCode != 204) {
-                    plugin.getLogger().warning("Failed to send Discord webhook, response code: " + responseCode);
+                if (responseCode == 204) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Webhook sent successfully!");
+                    }
+                } else {
+                    plugin.getLogger().warning("[Discord] Failed to send webhook, response code: " + responseCode);
+                    
+                    // Read error response
+                    try (java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+                        StringBuilder responseBody = new StringBuilder();
+                        String responseLine;
+                        while ((responseLine = br.readLine()) != null) {
+                            responseBody.append(responseLine);
+                        }
+                        plugin.getLogger().warning("[Discord] Error response: " + responseBody);
+                    } catch (Exception e) {
+                        plugin.getLogger().warning("[Discord] Could not read error response: " + e.getMessage());
+                    }
                 }
                 
                 connection.disconnect();
             } catch (IOException e) {
-                plugin.getLogger().warning("Error sending Discord webhook: " + e.getMessage());
+                plugin.getLogger().warning("[Discord] Error sending webhook: " + e.getMessage());
+                e.printStackTrace();
             }
         });
     }
     
     /**
+     * Determines the appropriate console alert message based on the violation type
+     */
+    private String determineConsoleAlert(Player player, String reason, String brand, String channel, List<String> violations) {
+        // For multiple violations, use the multiple flags console message
+        if (violations != null && violations.size() > 1) {
+            String reasonsList = String.join(", ", violations);
+            return config.getConsoleMultipleFlagsMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reasons%", reasonsList);
+        }
+        
+        // For specific violation types, determine the appropriate message
+        if (reason.contains("Vanilla client with plugin channels")) {
+            return config.getVanillaCheckConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        } 
+        else if (reason.contains("Non-vanilla client with channels")) {
+            return config.getNonVanillaCheckConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("Invalid brand formatting")) {
+            return config.getBrandFormattingConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("Blocked channel:") || reason.contains("Client channels don't match whitelist")) {
+            String alert = config.getBlockedChannelsConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+            
+            if (channel != null) {
+                alert = alert.replace("%channel%", channel);
+            }
+            return alert;
+        }
+        else if (reason.contains("Blocked client brand:")) {
+            return config.getBlockedBrandsConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("Spoofing Geyser client")) {
+            return config.getGeyserSpoofConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        
+        // Default to the general console alert if no specific type is found
+        String alert = config.getConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        if (channel != null) {
+            alert = alert.replace("%channel%", channel);
+        }
+        return alert;
+    }
+    
+    /**
      * Creates the JSON payload for the Discord webhook
      */
-    private String createWebhookJson(Player player, String reason, String brand, String channel, List<String> violations) {
+    private String createWebhookJson(Player player, String reason, String brand, String channel, List<String> violations, String consoleAlert) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"embeds\":[{");
         
@@ -91,48 +206,88 @@ public class DiscordWebhookHandler {
             sb.append("\"color\":2831050,"); // Default teal color
         }
         
-        // Fields
-        sb.append("\"fields\":[");
+        // Description - Use violation content from config
+        sb.append("\"description\":\"");
+        List<String> contentLines = config.getDiscordViolationContent();
         
-        // Add player info
-        sb.append("{\"name\":\"Player\",\"value\":\"").append(escapeJson(player.getName())).append("\",\"inline\":true},");
-        
-        // Add client brand
-        sb.append("{\"name\":\"Client Brand\",\"value\":\"").append(escapeJson(brand != null ? brand : "unknown")).append("\",\"inline\":true},");
-        
-        // Add reason(s)
-        if (violations != null && !violations.isEmpty()) {
-            sb.append("{\"name\":\"Violations\",\"value\":\"");
-            for (String violation : violations) {
-                sb.append("• ").append(escapeJson(violation)).append("\\n");
+        if (contentLines != null && !contentLines.isEmpty()) {
+            for (String line : contentLines) {
+                // Handle special placeholders
+                String processedLine = line;
+                
+                // Handle %player% placeholder
+                processedLine = processedLine.replace("%player%", player.getName());
+                
+                // Handle %console_alert% placeholder
+                processedLine = processedLine.replace("%console_alert%", consoleAlert);
+                
+                // Handle %brand% placeholder
+                processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
+                
+                // Handle %viaversion_version% placeholder if ViaVersion is installed
+                if (processedLine.contains("%viaversion_version%")) {
+                    String version = "Unknown";
+                    // Check if ViaVersion and PlaceholderAPI are installed
+                    if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion") && 
+                        Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+                        try {
+                            // If so, try to get the version through PlaceholderAPI
+                            version = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                                player, "%viaversion_player_protocol_version%");
+                        } catch (Exception e) {
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().warning("[Discord] Error getting ViaVersion: " + e.getMessage());
+                            }
+                        }
+                    }
+                    processedLine = processedLine.replace("%viaversion_version%", version);
+                }
+                
+                // Handle %channel% placeholder for listing all channels
+                if (line.contains("%channel%")) {
+                    PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                    if (data != null && !data.getChannels().isEmpty()) {
+                        Set<String> channels = data.getChannels();
+                        for (String ch : channels) {
+                            sb.append("• ").append(escapeJson(ch)).append("\\n");
+                        }
+                    } else {
+                        sb.append("• None detected\\n");
+                    }
+                } else {
+                    sb.append(escapeJson(processedLine)).append("\\n");
+                }
             }
-            sb.append("\",\"inline\":false},");
         } else {
-            sb.append("{\"name\":\"Reason\",\"value\":\"").append(escapeJson(reason)).append("\",\"inline\":false},");
-        }
-        
-        // Add channel info if available
-        if (channel != null) {
-            sb.append("{\"name\":\"Channel\",\"value\":\"").append(escapeJson(channel)).append("\",\"inline\":true},");
-        }
-        
-        // Add all channels if available
-        PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-        if (data != null && !data.getChannels().isEmpty()) {
-            Set<String> channels = data.getChannels();
-            StringBuilder channelsStr = new StringBuilder();
-            for (String ch : channels) {
-                channelsStr.append("• ").append(ch).append("\\n");
+            // Fallback if no content lines configured
+            sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
+            sb.append("**Console Alert**: ").append(escapeJson(consoleAlert)).append("\\n");
+            sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
+            
+            if (violations != null && !violations.isEmpty()) {
+                sb.append("**Violations**:\\n");
+                for (String violation : violations) {
+                    sb.append("• ").append(escapeJson(violation)).append("\\n");
+                }
+            } else {
+                sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
             }
-            sb.append("{\"name\":\"All Channels\",\"value\":\"").append(escapeJson(channelsStr.toString())).append("\",\"inline\":false},");
+            
+            if (channel != null) {
+                sb.append("**Channel**: ").append(escapeJson(channel)).append("\\n");
+            }
+            
+            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+            if (data != null && !data.getChannels().isEmpty()) {
+                sb.append("**All Channels**:\\n");
+                for (String ch : data.getChannels()) {
+                    sb.append("• ").append(escapeJson(ch)).append("\\n");
+                }
+            }
         }
         
-        // Remove trailing comma if present
-        if (sb.charAt(sb.length() - 1) == ',') {
-            sb.setLength(sb.length() - 1);
-        }
-        
-        sb.append("],");
+        // Remove any trailing newline and close the description
+        sb.append("\",");
         
         // Timestamp
         sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
