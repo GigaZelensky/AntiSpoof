@@ -229,14 +229,7 @@ public class PacketListener extends PacketListenerAbstract {
     private boolean isBrandBlocked(String brand) {
         if (brand == null) return false;
         
-        boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
-        
-        // Brand regex matching
-        boolean matchesPattern = plugin.getConfigManager().matchesBrandPattern(brand);
-        
-        // In whitelist mode, matching pattern means not blocked
-        // In blacklist mode, matching pattern means blocked
-        return whitelistMode ? !matchesPattern : matchesPattern;
+        return plugin.getConfigManager().isBrandBlocked(brand);
     }
     
     private boolean checkChannelWhitelist(java.util.Set<String> playerChannels) {
