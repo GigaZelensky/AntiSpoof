@@ -94,6 +94,20 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         PacketEvents.getAPI().init();
         
+        // Log Discord webhook status
+        if (configManager.isDiscordWebhookEnabled()) {
+            String webhookUrl = configManager.getDiscordWebhookUrl();
+            if (webhookUrl != null && !webhookUrl.isEmpty()) {
+                getLogger().info("Discord webhook integration is enabled.");
+            } else {
+                getLogger().warning("Discord webhook is enabled but no URL is configured!");
+            }
+        } else {
+            if (configManager.isDebugMode()) {
+                getLogger().info("Discord webhook integration is disabled.");
+            }
+        }
+        
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
 
