@@ -126,6 +126,9 @@ blocked-brands:
   alert-message: "&8[&eAntiSpoof&8] &7%player% joined using client brand: &f%brand%"
   console-alert-message: "%player% joined using client brand: %brand%"
 
+  # Choose whether a player not matching the brand list should count as a flag.
+  count-as-flag: true
+  
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
