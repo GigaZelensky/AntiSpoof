@@ -187,13 +187,6 @@ public class ConfigManager {
         return getChannelWhitelistMode().equals("STRICT");
     }
     
-    // For backward compatibility with command
-    public boolean isExactChannelMatchRequired() {
-        // We no longer have this config option, but we simulate it using regex
-        // Return true as a safe default
-        return true;
-    }
-    
     public List<String> getBlockedChannels() {
         return config.getStringList("blocked-channels.values");
     }
@@ -235,13 +228,6 @@ public class ConfigManager {
     
     public boolean shouldCountNonWhitelistedBrandsAsFlag() {
         return config.getBoolean("blocked-brands.count-as-flag", true);
-    }
-    
-    // For backward compatibility with command
-    public boolean isExactBrandMatchRequired() {
-        // We no longer have this config option, but we simulate it using regex
-        // Return true as a safe default
-        return true;
     }
     
     public List<String> getBlockedBrands() {
