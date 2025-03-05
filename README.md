@@ -2,7 +2,7 @@
 
 <img src="https://i.imgur.com/Tyji4mJ.jpeg" alt="Banner" style="width:300px; height:auto;">
 
-Advanced Minecraft plugin for detecting client spoofing attempts through brand analysis and channel monitoring. Designed for Spigot/Paper 1.20.4+ servers.
+Advanced, heavily customizable Minecraft plugin for detecting client spoofing attempts through brand analysis and channel monitoring. Designed for Spigot/Paper 1.20.4+ servers.
 
 ## Features
 
@@ -31,12 +31,15 @@ Advanced Minecraft plugin for detecting client spoofing attempts through brand a
   - Debug mode with detailed logs
   - Live player data inspection
 
+- **Discord Webhooks**
+  - Fully customizable Discord Webhooks
+  - Sends alerts when a player flags
+
 ## Installation
 
 1. **Requirements**
    - Java 21+
    - Spigot/Paper 1.20.4+
-   - [PacketEvents](https://github.com/retrooper/packetevents) 2.7.0
 
 2. **Optional Dependencies**
    - Floodgate (Bedrock support)
