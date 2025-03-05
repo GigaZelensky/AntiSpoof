@@ -258,14 +258,7 @@ public class PlayerJoinListener implements Listener {
    private boolean isBrandBlocked(String brand) {
        if (brand == null) return false;
        
-       boolean whitelistMode = config.isBrandWhitelistEnabled();
-       
-       // Brand regex matching
-       boolean matchesPattern = config.matchesBrandPattern(brand);
-       
-       // In whitelist mode, matching pattern means not blocked
-       // In blacklist mode, matching pattern means blocked
-       return whitelistMode ? !matchesPattern : matchesPattern;
+       return config.isBrandBlocked(brand);
    }
    
    private boolean checkChannelWhitelist(Set<String> playerChannels) {
