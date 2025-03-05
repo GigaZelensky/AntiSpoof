@@ -219,9 +219,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
             return true;
         }
         
-        // Check for brand blocking - Now takes into account count-as-flag setting
+        // Check for brand blocking - Now using configManager.isBrandBlocked method
         if (configManager.isBlockedBrandsEnabled()) {
-            boolean brandBlocked = isBrandBlocked(brand);
+            boolean brandBlocked = configManager.isBrandBlocked(brand);
             
             // Only consider as spoofing if count-as-flag is true
             if (brandBlocked && configManager.shouldCountNonWhitelistedBrandsAsFlag()) {
@@ -261,19 +261,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
         
         return false;
-    }
-    
-    private boolean isBrandBlocked(String brand) {
-        if (brand == null) return false;
-        
-        boolean whitelistMode = configManager.isBrandWhitelistEnabled();
-        
-        // Brand regex matching
-        boolean matchesPattern = configManager.matchesBrandPattern(brand);
-        
-        // In whitelist mode, matching pattern means not blocked
-        // In blacklist mode, matching pattern means blocked
-        return whitelistMode ? !matchesPattern : matchesPattern;
     }
     
     private boolean checkChannelWhitelist(Set<String> playerChannels) {
