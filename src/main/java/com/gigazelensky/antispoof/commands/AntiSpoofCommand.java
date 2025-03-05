@@ -145,13 +145,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     
     private void showBlockedBrands(CommandSender sender) {
         boolean enabled = plugin.getConfigManager().isBlockedBrandsEnabled();
-        boolean exactMatch = plugin.getConfigManager().isExactBrandMatchRequired();
         boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
         List<String> blockedBrands = plugin.getConfigManager().getBlockedBrands();
         
         sender.sendMessage(ChatColor.GOLD + "=== Blocked Brands Configuration ===");
         sender.sendMessage(ChatColor.GRAY + "Enabled: " + (enabled ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
-        sender.sendMessage(ChatColor.GRAY + "Match Type: " + (exactMatch ? ChatColor.WHITE + "Exact Match" : ChatColor.WHITE + "Contains"));
+        sender.sendMessage(ChatColor.GRAY + "Match Type: " + ChatColor.WHITE + "Regex Pattern");
         sender.sendMessage(ChatColor.GRAY + "Mode: " + (whitelistMode ? ChatColor.WHITE + "Whitelist" : ChatColor.WHITE + "Blacklist"));
         
         if (blockedBrands.isEmpty()) {
@@ -165,13 +164,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     
     private void showBlockedChannels(CommandSender sender) {
         boolean enabled = plugin.getConfigManager().isBlockedChannelsEnabled();
-        boolean exactMatch = plugin.getConfigManager().isExactChannelMatchRequired();
         String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
         List<String> blockedChannels = plugin.getConfigManager().getBlockedChannels();
         
         sender.sendMessage(ChatColor.GOLD + "=== Blocked Channels Configuration ===");
         sender.sendMessage(ChatColor.GRAY + "Enabled: " + (enabled ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
-        sender.sendMessage(ChatColor.GRAY + "Match Type: " + (exactMatch ? ChatColor.WHITE + "Exact Match" : ChatColor.WHITE + "Contains"));
+        sender.sendMessage(ChatColor.GRAY + "Match Type: " + ChatColor.WHITE + "Regex Pattern");
         
         String modeDisplay;
         if (whitelistMode.equals("FALSE")) {
@@ -219,21 +217,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 boolean brandBlocked = false;
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 List<String> brandsList = plugin.getConfigManager().getBlockedBrands();
-                boolean exactMatch = plugin.getConfigManager().isExactBrandMatchRequired();
                 
-                for (String listedBrand : brandsList) {
-                    boolean matches;
-                    if (exactMatch) {
-                        matches = brand.equalsIgnoreCase(listedBrand);
-                    } else {
-                        matches = brand.toLowerCase().contains(listedBrand.toLowerCase());
-                    }
+                for (String brandPattern : brandsList) {
+                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
                     
                     if (matches) {
                         if (whitelistMode) {
                             // Brand is in whitelist, not the reason
                         } else {
-                            flagReason = "Using blocked client brand: " + listedBrand;
+                            flagReason = "Using blocked client brand: " + brandPattern;
                             brandBlocked = true;
                             break;
                         }
@@ -257,12 +249,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                         for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
                             boolean found = false;
                             for (String playerChannel : data.getChannels()) {
-                                boolean matches;
-                                if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                    matches = playerChannel.equals(whitelistedChannel);
-                                } else {
-                                    matches = playerChannel.contains(whitelistedChannel);
-                                }
+                                boolean matches = plugin.getConfigManager().matchesChannelPattern(playerChannel);
                                 
                                 if (matches) {
                                     found = true;
@@ -283,21 +270,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                         boolean hasWhitelistedChannel = false;
                         
                         for (String channel : data.getChannels()) {
-                            for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                                boolean matches;
-                                if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                    matches = channel.equals(whitelistedChannel);
-                                } else {
-                                    matches = channel.contains(whitelistedChannel);
-                                }
-                                
-                                if (matches) {
-                                    hasWhitelistedChannel = true;
-                                    break;
-                                }
-                            }
+                            boolean matches = plugin.getConfigManager().matchesChannelPattern(channel);
                             
-                            if (hasWhitelistedChannel) {
+                            if (matches) {
+                                hasWhitelistedChannel = true;
                                 break;
                             }
                         }
@@ -309,26 +285,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 } else {
                     // Blacklist mode - check for blocked channels
                     for (String channel : data.getChannels()) {
-                        boolean blocked = false;
-                        String blockedByChannel = null;
-                        
-                        if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                            if (plugin.getConfigManager().getBlockedChannels().contains(channel)) {
-                                blocked = true;
-                                blockedByChannel = channel;
-                            }
-                        } else {
-                            for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                                if (channel.contains(blockedChannel)) {
-                                    blocked = true;
-                                    blockedByChannel = blockedChannel;
-                                    break;
-                                }
-                            }
-                        }
+                        boolean blocked = plugin.getConfigManager().matchesChannelPattern(channel);
                         
                         if (blocked) {
-                            flagReason = "Using blocked channel: " + blockedByChannel;
+                            flagReason = "Using blocked channel: " + channel;
                             break;
                         }
                     }
@@ -353,21 +313,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 boolean brandBlocked = false;
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 List<String> brandsList = plugin.getConfigManager().getBlockedBrands();
-                boolean exactMatch = plugin.getConfigManager().isExactBrandMatchRequired();
                 
-                for (String listedBrand : brandsList) {
-                    boolean matches;
-                    if (exactMatch) {
-                        matches = brand.equalsIgnoreCase(listedBrand);
-                    } else {
-                        matches = brand.toLowerCase().contains(listedBrand.toLowerCase());
-                    }
+                for (String brandPattern : brandsList) {
+                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
                     
                     if (matches) {
                         if (whitelistMode) {
-                            sender.sendMessage(ChatColor.GRAY + "Brand is whitelisted: " + ChatColor.GREEN + listedBrand);
+                            sender.sendMessage(ChatColor.GRAY + "Brand is whitelisted: " + ChatColor.GREEN + brandPattern);
                         } else {
-                            sender.sendMessage(ChatColor.GRAY + "Brand is blocked: " + ChatColor.RED + listedBrand);
+                            sender.sendMessage(ChatColor.GRAY + "Brand is blocked: " + ChatColor.RED + brandPattern);
                             brandBlocked = true;
                         }
                         break;
@@ -392,23 +346,11 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     
                     // First, list all player channels and if they're whitelisted
                     for (String channel : data.getChannels()) {
-                        boolean whitelisted = false;
-                        for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                            boolean matches;
-                            if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                matches = channel.equals(whitelistedChannel);
-                            } else {
-                                matches = channel.contains(whitelistedChannel);
-                            }
-                            
-                            if (matches) {
-                                whitelisted = true;
-                                sender.sendMessage(ChatColor.GREEN + channel);
-                                break;
-                            }
-                        }
+                        boolean whitelisted = plugin.getConfigManager().matchesChannelPattern(channel);
                         
-                        if (!whitelisted) {
+                        if (whitelisted) {
+                            sender.sendMessage(ChatColor.GREEN + channel);
+                        } else {
                             sender.sendMessage(ChatColor.RED + channel + ChatColor.GRAY + " (not in whitelist)");
                         }
                     }
@@ -420,12 +362,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                         for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
                             boolean found = false;
                             for (String playerChannel : data.getChannels()) {
-                                boolean matches;
-                                if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                                    matches = playerChannel.equals(whitelistedChannel);
-                                } else {
-                                    matches = playerChannel.contains(whitelistedChannel);
-                                }
+                                boolean matches = plugin.getConfigManager().matchesChannelPattern(playerChannel);
                                 
                                 if (matches) {
                                     found = true;
@@ -450,19 +387,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     List<String> blockedChannels = new ArrayList<>();
                     
                     for (String channel : data.getChannels()) {
-                        boolean blocked = false;
+                        boolean blocked = plugin.getConfigManager().matchesChannelPattern(channel);
                         
-                        if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                            if (plugin.getConfigManager().getBlockedChannels().contains(channel)) {
-                                blockedChannels.add(channel);
-                            }
-                        } else {
-                            for (String blockedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                                if (channel.contains(blockedChannel)) {
-                                    blockedChannels.add(channel);
-                                    break;
-                                }
-                            }
+                        if (blocked) {
+                            blockedChannels.add(channel);
                         }
                     }
                     
@@ -521,19 +449,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             boolean isWhitelist = !whitelistMode.equals("FALSE");
             
             data.getChannels().forEach(channel -> {
-                boolean isListed = false;
-                if (plugin.getConfigManager().isBlockedChannelsEnabled()) {
-                    if (plugin.getConfigManager().isExactChannelMatchRequired()) {
-                        isListed = plugin.getConfigManager().getBlockedChannels().contains(channel);
-                    } else {
-                        for (String listedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                            if (channel.contains(listedChannel)) {
-                                isListed = true;
-                                break;
-                            }
-                        }
-                    }
-                }
+                boolean isListed = plugin.getConfigManager().matchesChannelPattern(channel);
                 
                 if (isListed) {
                     if (isWhitelist) {
@@ -562,30 +478,16 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 
             // Check if the brand is in the whitelist/blacklist
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
-                boolean isListed = false;
-                boolean exactMatch = plugin.getConfigManager().isExactBrandMatchRequired();
+                boolean isListed = plugin.getConfigManager().matchesBrandPattern(brand);
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 
-                for (String listedBrand : plugin.getConfigManager().getBlockedBrands()) {
-                    boolean matches;
-                    if (exactMatch) {
-                        matches = brand.equalsIgnoreCase(listedBrand);
+                if (isListed) {
+                    if (whitelistMode) {
+                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "Whitelisted");
                     } else {
-                        matches = brand.toLowerCase().contains(listedBrand.toLowerCase());
+                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Blocked");
                     }
-                    
-                    if (matches) {
-                        isListed = true;
-                        if (whitelistMode) {
-                            sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "Whitelisted");
-                        } else {
-                            sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Blocked");
-                        }
-                        break;
-                    }
-                }
-                
-                if (!isListed) {
+                } else {
                     if (whitelistMode) {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Not whitelisted");
                     } else {
