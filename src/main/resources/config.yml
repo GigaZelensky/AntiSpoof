@@ -85,8 +85,8 @@ blocked-channels:
     - "^fabric-screen-handler-api-v1:open_screen$"
     # Add more channels to block here
     # - "another:blocked:channel"
-    # - "litematica"
-    # - "fabric"
+    # - "(?i).*litematica.*"
+    # - "(?i).*fabric.*"
 
   # Custom alert messages for this specific violation
   alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing blocked channel: &f%channel%"
@@ -188,21 +188,11 @@ embed-title: "**AntiSpoof Alert**"
 embed-color: "#2AB7CA"
 violation-content:
   - "**Player**: %player%"
-  - "**Reason**: %reason%"
-  - "**Client Version**: %version%"
+  - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
+  - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
   - "**Brand**: %brand%"
   - "**Channels**:"
   - "%channel%" # Vertical channel list
-
-# ──────────────────────────────────────────────────────────
-#                   Plugin Color Theme
-# ──────────────────────────────────────────────────────────
-# Set the plugin's color theme.
-# List: "dark_red", "red", "gold", "yellow", "dark_green", "green", "aqua", 
-# "dark_aqua", "dark_blue", "blue", "light_purple", "dark_purple", "white", 
-# "gray", "dark_gray", "black"
-primary-color: "gold"
-secondary-color: "gray"
 
 # ──────────────────────────────────────────────────────────
 #                Legacy Punishment Settings
