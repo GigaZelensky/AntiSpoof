@@ -13,6 +13,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import java.util.Set;
 import java.util.UUID;
 import java.util.List;
+import java.util.ArrayList;
 
 public class PlayerJoinListener implements Listener {
    private final AntiSpoofPlugin plugin;
@@ -83,36 +84,80 @@ public class PlayerJoinListener implements Listener {
            return;
        }
        
+       // Always show client brand join message for operators if it's not in the ignored list
+       // This happens regardless of any violations
+       if (config.isBlockedBrandsEnabled() && !config.matchesBrandPattern(brand)) {
+           // Format the player alert message with placeholders
+           String playerAlert = config.getBlockedBrandsAlertMessage()
+                   .replace("%player%", player.getName())
+                   .replace("%brand%", brand != null ? brand : "unknown");
+           
+           // Format the console alert message with placeholders
+           String consoleAlert = config.getBlockedBrandsConsoleAlertMessage()
+                   .replace("%player%", player.getName())
+                   .replace("%brand%", brand != null ? brand : "unknown");
+           
+           // Convert color codes for player messages
+           String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
+           
+           // Log to console directly using the console format (no need to strip colors)
+           plugin.getLogger().info(consoleAlert);
+           
+           // Notify players with permission
+           Bukkit.getOnlinePlayers().stream()
+                   .filter(p -> p.hasPermission("antispoof.alerts"))
+                   .forEach(p -> p.sendMessage(coloredPlayerAlert));
+           
+           // Don't send to Discord for just brand alerts (only for violations)
+       }
+       
+       // List to collect all violations
+       List<String> violations = new ArrayList<>();
        boolean shouldAlert = false;
        boolean shouldPunish = false;
-       String reason = "";
+       String primaryReason = "";
        String violationType = "";
        String violatedChannel = null;
 
        // Handle potential Geyser spoofing
        if (config.isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
-           reason = "Spoofing Geyser client";
-           violationType = "GEYSER_SPOOF";
+           String reason = "Spoofing Geyser client";
+           violations.add(reason);
+           if (primaryReason.isEmpty()) {
+               primaryReason = reason;
+               violationType = "GEYSER_SPOOF";
+           }
            shouldAlert = true;
            shouldPunish = config.shouldPunishGeyserSpoof();
        }
 
        // Check the brand formatting
-       if (!shouldAlert && config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
-           reason = "Invalid brand formatting";
-           violationType = "BRAND_FORMAT";
+       if (config.checkBrandFormatting() && hasInvalidFormatting(brand)) {
+           String reason = "Invalid brand formatting";
+           violations.add(reason);
+           if (primaryReason.isEmpty()) {
+               primaryReason = reason;
+               violationType = "BRAND_FORMAT";
+           }
            shouldAlert = true;
            shouldPunish = config.shouldPunishBrandFormatting();
        }
        
-       // Check for brand blocking/whitelist
-       if (!shouldAlert && config.isBlockedBrandsEnabled()) {
+       // Check for brand blocking
+       if (config.isBlockedBrandsEnabled()) {
            boolean brandBlocked = isBrandBlocked(brand);
            if (brandBlocked) {
-               reason = "Blocked client brand: " + brand;
-               violationType = "BLOCKED_BRAND";
-               shouldAlert = true;
-               shouldPunish = config.shouldPunishBlockedBrands();
+               // Only add as a violation if count-as-flag is true
+               if (config.shouldCountNonWhitelistedBrandsAsFlag()) {
+                   String reason = "Blocked client brand: " + brand;
+                   violations.add(reason);
+                   if (primaryReason.isEmpty()) {
+                       primaryReason = reason;
+                       violationType = "BLOCKED_BRAND";
+                   }
+                   shouldAlert = true;
+                   shouldPunish = config.shouldPunishBlockedBrands();
+               }
            }
        }
        
@@ -120,30 +165,42 @@ public class PlayerJoinListener implements Listener {
        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
        
        // Vanilla client check
-       if (!shouldAlert && config.isVanillaCheckEnabled() && 
+       if (config.isVanillaCheckEnabled() && 
            claimsVanilla && hasChannels) {
-           reason = "Vanilla client with plugin channels";
-           violationType = "VANILLA_WITH_CHANNELS";
+           String reason = "Vanilla client with plugin channels";
+           violations.add(reason);
+           if (primaryReason.isEmpty()) {
+               primaryReason = reason;
+               violationType = "VANILLA_WITH_CHANNELS";
+           }
            shouldAlert = true;
            shouldPunish = config.shouldPunishVanillaCheck();
        }
        // Non-vanilla with channels check
-       else if (!shouldAlert && config.shouldBlockNonVanillaWithChannels() && 
+       else if (config.shouldBlockNonVanillaWithChannels() && 
                !claimsVanilla && hasChannels) {
-           reason = "Non-vanilla client with channels";
-           violationType = "NON_VANILLA_WITH_CHANNELS";
+           String reason = "Non-vanilla client with channels";
+           violations.add(reason);
+           if (primaryReason.isEmpty()) {
+               primaryReason = reason;
+               violationType = "NON_VANILLA_WITH_CHANNELS";
+           }
            shouldAlert = true;
            shouldPunish = config.shouldPunishNonVanillaCheck();
        }
        
        // Channel whitelist/blacklist check
-       if (!shouldAlert && config.isBlockedChannelsEnabled()) {
+       if (config.isBlockedChannelsEnabled()) {
            if (config.isChannelWhitelistEnabled()) {
                // Whitelist mode
                boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                if (!passesWhitelist) {
-                   reason = "Client channels don't match whitelist";
-                   violationType = "CHANNEL_WHITELIST";
+                   String reason = "Client channels don't match whitelist";
+                   violations.add(reason);
+                   if (primaryReason.isEmpty()) {
+                       primaryReason = reason;
+                       violationType = "CHANNEL_WHITELIST";
+                   }
                    shouldAlert = true;
                    shouldPunish = config.shouldPunishBlockedChannels();
                }
@@ -151,9 +208,13 @@ public class PlayerJoinListener implements Listener {
                // Blacklist mode
                String blockedChannel = findBlockedChannel(data.getChannels());
                if (blockedChannel != null) {
-                   reason = "Blocked channel: " + blockedChannel;
-                   violationType = "BLOCKED_CHANNEL";
-                   violatedChannel = blockedChannel;
+                   String reason = "Blocked channel: " + blockedChannel;
+                   violations.add(reason);
+                   if (primaryReason.isEmpty()) {
+                       primaryReason = reason;
+                       violationType = "BLOCKED_CHANNEL";
+                       violatedChannel = blockedChannel;
+                   }
                    shouldAlert = true;
                    shouldPunish = config.shouldPunishBlockedChannels();
                }
@@ -164,18 +225,22 @@ public class PlayerJoinListener implements Listener {
        if ((shouldAlert || shouldPunish) && isBedrockPlayer && config.isBedrockExemptMode()) {
            if (config.isDebugMode()) {
                plugin.getLogger().info("[Debug] Bedrock player " + player.getName() + 
-                                      " would be processed for: " + reason + ", but is exempt");
+                                      " would be processed for: " + primaryReason + ", but is exempt");
            }
            return;
        }
 
        if (shouldAlert) {
            // Always send the alert if a violation is detected
-           sendAlert(player, reason, brand, violatedChannel);
+           if (violations.size() > 1) {
+               sendMultipleViolationsAlert(player, violations, brand);
+           } else {
+               sendAlert(player, primaryReason, brand, violatedChannel, violationType);
+           }
            
            // Only execute punishment if enabled for this violation type
            if (shouldPunish) {
-               executePunishment(player, reason, brand, violationType, violatedChannel);
+               executePunishment(player, primaryReason, brand, violationType, violatedChannel);
                data.setAlreadyPunished(true);
            }
        }
@@ -193,41 +258,19 @@ public class PlayerJoinListener implements Listener {
    private boolean isBrandBlocked(String brand) {
        if (brand == null) return false;
        
-       List<String> blockedBrands = config.getBlockedBrands();
-       boolean exactMatch = config.isExactBrandMatchRequired();
        boolean whitelistMode = config.isBrandWhitelistEnabled();
        
-       // No brands in the list means no blocks in blacklist mode, or no allowed brands in whitelist mode
-       if (blockedBrands.isEmpty()) {
-           return whitelistMode; // If whitelist is empty, everything is blocked
-       }
+       // Brand regex matching
+       boolean matchesPattern = config.matchesBrandPattern(brand);
        
-       boolean isListed = false;
-       
-       for (String blockedBrand : blockedBrands) {
-           boolean matches;
-           
-           if (exactMatch) {
-               matches = brand.equalsIgnoreCase(blockedBrand);
-           } else {
-               matches = brand.toLowerCase().contains(blockedBrand.toLowerCase());
-           }
-           
-           if (matches) {
-               isListed = true;
-               break;
-           }
-       }
-       
-       // In whitelist mode, being listed is good (not blocked)
-       // In blacklist mode, being listed is bad (blocked)
-       return whitelistMode ? !isListed : isListed;
+       // In whitelist mode, matching pattern means not blocked
+       // In blacklist mode, matching pattern means blocked
+       return whitelistMode ? !matchesPattern : matchesPattern;
    }
    
    private boolean checkChannelWhitelist(Set<String> playerChannels) {
-       List<String> whitelistedChannels = config.getBlockedChannels(); // Reusing the values list
-       boolean exactMatch = config.isExactChannelMatchRequired();
        boolean strictMode = config.isChannelWhitelistStrict();
+       List<String> whitelistedChannels = config.getBlockedChannels();
        
        // If no channels are whitelisted, then fail if player has any channels
        if (whitelistedChannels.isEmpty()) {
@@ -237,18 +280,8 @@ public class PlayerJoinListener implements Listener {
        // SIMPLE mode: Player must have at least one of the whitelisted channels
        if (!strictMode) {
            for (String playerChannel : playerChannels) {
-               for (String whitelistedChannel : whitelistedChannels) {
-                   boolean matches;
-                   
-                   if (exactMatch) {
-                       matches = playerChannel.equals(whitelistedChannel);
-                   } else {
-                       matches = playerChannel.contains(whitelistedChannel);
-                   }
-                   
-                   if (matches) {
-                       return true; // Pass if player has at least one whitelisted channel
-                   }
+               if (config.matchesChannelPattern(playerChannel)) {
+                   return true; // Pass if player has at least one whitelisted channel
                }
            }
            return false; // Fail if player has no whitelisted channels
@@ -257,24 +290,7 @@ public class PlayerJoinListener implements Listener {
        else {
            // 1. Check if every player channel is whitelisted
            for (String playerChannel : playerChannels) {
-               boolean channelIsWhitelisted = false;
-               
-               for (String whitelistedChannel : whitelistedChannels) {
-                   boolean matches;
-                   
-                   if (exactMatch) {
-                       matches = playerChannel.equals(whitelistedChannel);
-                   } else {
-                       matches = playerChannel.contains(whitelistedChannel);
-                   }
-                   
-                   if (matches) {
-                       channelIsWhitelisted = true;
-                       break;
-                   }
-               }
-               
-               if (!channelIsWhitelisted) {
+               if (!config.matchesChannelPattern(playerChannel)) {
                    return false; // Fail if any player channel is not whitelisted
                }
            }
@@ -284,17 +300,17 @@ public class PlayerJoinListener implements Listener {
                boolean playerHasChannel = false;
                
                for (String playerChannel : playerChannels) {
-                   boolean matches;
-                   
-                   if (exactMatch) {
-                       matches = playerChannel.equals(whitelistedChannel);
-                   } else {
-                       matches = playerChannel.contains(whitelistedChannel);
-                   }
-                   
-                   if (matches) {
-                       playerHasChannel = true;
-                       break;
+                   try {
+                       if (playerChannel.matches(whitelistedChannel)) {
+                           playerHasChannel = true;
+                           break;
+                       }
+                   } catch (Exception e) {
+                       // If regex is invalid, just do direct match as fallback
+                       if (playerChannel.equals(whitelistedChannel)) {
+                           playerHasChannel = true;
+                           break;
+                       }
                    }
                }
                
@@ -309,22 +325,9 @@ public class PlayerJoinListener implements Listener {
    }
 
    private String findBlockedChannel(Set<String> playerChannels) {
-       List<String> blockedChannels = config.getBlockedChannels();
-       boolean exactMatch = config.isExactChannelMatchRequired();
-       
        for (String playerChannel : playerChannels) {
-           if (exactMatch) {
-               // Check for exact match with any blocked channel
-               if (blockedChannels.contains(playerChannel)) {
-                   return playerChannel;
-               }
-           } else {
-               // Check if player channel contains any blocked channel string
-               for (String blockedChannel : blockedChannels) {
-                   if (playerChannel.contains(blockedChannel)) {
-                       return playerChannel;
-                   }
-               }
+           if (config.matchesChannelPattern(playerChannel)) {
+               return playerChannel;
            }
        }
        
@@ -336,18 +339,97 @@ public class PlayerJoinListener implements Listener {
               !brand.matches("^[a-zA-Z0-9 _-]+$");
    }
 
-   // Send alert message to staff and console with rate limiting
-   private void sendAlert(Player player, String reason, String brand, String violatedChannel) {
+   // Send alert message for multiple violations
+   private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand) {
        UUID playerUUID = player.getUniqueId();
        
+       // Join all reasons with commas
+       String reasonsList = String.join(", ", violations);
+       
+       // Format the player alert message for multiple violations
+       String playerAlert = config.getMultipleFlagsMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reasons%", reasonsList);
+       
+       // Format the console alert message for multiple violations
+       String consoleAlert = config.getConsoleMultipleFlagsMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reasons%", reasonsList);
+       
+       // Convert color codes for player messages
+       String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
+       
+       // Log to console directly using the console format (no need to strip colors)
+       plugin.getLogger().info(consoleAlert);
+       
+       // Only send in-game alerts if cooldown allows it
+       if (plugin.canSendAlert(playerUUID)) {
+           // Notify players with permission
+           Bukkit.getOnlinePlayers().stream()
+                   .filter(p -> p.hasPermission("antispoof.alerts"))
+                   .forEach(p -> p.sendMessage(coloredPlayerAlert));
+       }
+       
+       // Send to Discord if enabled
+       plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
+   }
+
+   // Send alert message to staff and console with rate limiting
+   private void sendAlert(Player player, String reason, String brand, String violatedChannel, String violationType) {
+       UUID playerUUID = player.getUniqueId();
+       
+       // Select the appropriate alert message based on violation type
+       String alertTemplate;
+       String consoleAlertTemplate;
+       
+       switch(violationType) {
+           case "VANILLA_WITH_CHANNELS":
+               alertTemplate = config.getVanillaCheckAlertMessage();
+               consoleAlertTemplate = config.getVanillaCheckConsoleAlertMessage();
+               break;
+               
+           case "NON_VANILLA_WITH_CHANNELS":
+               alertTemplate = config.getNonVanillaCheckAlertMessage();
+               consoleAlertTemplate = config.getNonVanillaCheckConsoleAlertMessage();
+               break;
+               
+           case "BRAND_FORMAT":
+               alertTemplate = config.getBrandFormattingAlertMessage();
+               consoleAlertTemplate = config.getBrandFormattingConsoleAlertMessage();
+               break;
+               
+           case "BLOCKED_CHANNEL":
+           case "CHANNEL_WHITELIST":
+               alertTemplate = config.getBlockedChannelsAlertMessage();
+               consoleAlertTemplate = config.getBlockedChannelsConsoleAlertMessage();
+               break;
+               
+           case "BLOCKED_BRAND":
+               alertTemplate = config.getBlockedBrandsAlertMessage();
+               consoleAlertTemplate = config.getBlockedBrandsConsoleAlertMessage();
+               break;
+               
+           case "GEYSER_SPOOF":
+               alertTemplate = config.getGeyserSpoofAlertMessage();
+               consoleAlertTemplate = config.getGeyserSpoofConsoleAlertMessage();
+               break;
+               
+           default:
+               // Fallback to global messages
+               alertTemplate = config.getAlertMessage();
+               consoleAlertTemplate = config.getConsoleAlertMessage();
+       }
+       
        // Format the player alert message with placeholders
-       String playerAlert = config.getAlertMessage()
+       String playerAlert = alertTemplate
                .replace("%player%", player.getName())
                .replace("%brand%", brand != null ? brand : "unknown")
                .replace("%reason%", reason);
        
        // Format the console alert message with placeholders
-       String consoleAlert = config.getConsoleAlertMessage()
+       String consoleAlert = consoleAlertTemplate
                .replace("%player%", player.getName())
                .replace("%brand%", brand != null ? brand : "unknown")
                .replace("%reason%", reason);
@@ -370,6 +452,11 @@ public class PlayerJoinListener implements Listener {
                    .filter(p -> p.hasPermission("antispoof.alerts"))
                    .forEach(p -> p.sendMessage(coloredPlayerAlert));
        }
+       
+       // Send to Discord if enabled
+       List<String> singleViolation = new ArrayList<>();
+       singleViolation.add(reason);
+       plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
    }
 
    // Execute punishment commands
