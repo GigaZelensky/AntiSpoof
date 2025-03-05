@@ -214,26 +214,14 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (isSpoofing) {
             // Check brand first
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
-                boolean brandBlocked = false;
-                boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
-                List<String> brandsList = plugin.getConfigManager().getBlockedBrands();
+                boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 
-                for (String brandPattern : brandsList) {
-                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
-                    
-                    if (matches) {
-                        if (whitelistMode) {
-                            // Brand is in whitelist, not the reason
-                        } else {
-                            flagReason = "Using blocked client brand: " + brandPattern;
-                            brandBlocked = true;
-                            break;
-                        }
+                if (brandBlocked && plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
+                    if (plugin.getConfigManager().isBrandWhitelistEnabled()) {
+                        flagReason = "Client brand is not in whitelist";
+                    } else {
+                        flagReason = "Using blocked client brand";
                     }
-                }
-                
-                if (whitelistMode && !brandBlocked && !brandsList.isEmpty()) {
-                    flagReason = "Client brand is not in whitelist";
                 }
             }
             
@@ -310,26 +298,34 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             
             // Check if the brand is blocked/not whitelisted
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
-                boolean brandBlocked = false;
+                boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
-                List<String> brandsList = plugin.getConfigManager().getBlockedBrands();
                 
-                for (String brandPattern : brandsList) {
+                if (whitelistMode) {
+                    // Show if the brand is in the whitelist or not
                     boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
-                    
                     if (matches) {
-                        if (whitelistMode) {
-                            sender.sendMessage(ChatColor.GRAY + "Brand is whitelisted: " + ChatColor.GREEN + brandPattern);
-                        } else {
-                            sender.sendMessage(ChatColor.GRAY + "Brand is blocked: " + ChatColor.RED + brandPattern);
-                            brandBlocked = true;
-                        }
-                        break;
+                        sender.sendMessage(ChatColor.GRAY + "Brand is in whitelist");
+                    } else {
+                        sender.sendMessage(ChatColor.GRAY + "Brand is not in whitelist");
                     }
-                }
-                
-                if (whitelistMode && !brandBlocked && !brandsList.isEmpty()) {
-                    sender.sendMessage(ChatColor.GRAY + "Brand is not whitelisted");
+                    
+                    // Display all whitelist patterns for debugging
+                    List<String> patterns = plugin.getConfigManager().getBlockedBrands();
+                    if (!patterns.isEmpty()) {
+                        sender.sendMessage(ChatColor.GRAY + "Whitelist patterns:");
+                        for (String pattern : patterns) {
+                            sender.sendMessage(ChatColor.GRAY + "- " + pattern);
+                        }
+                    }
+                } else {
+                    // Show if the brand matches a blacklist pattern
+                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
+                    if (matches) {
+                        sender.sendMessage(ChatColor.GRAY + "Brand is in blacklist");
+                    } else {
+                        sender.sendMessage(ChatColor.GRAY + "Brand is not in blacklist");
+                    }
                 }
             }
             
@@ -478,18 +474,18 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 
             // Check if the brand is in the whitelist/blacklist
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
-                boolean isListed = plugin.getConfigManager().matchesBrandPattern(brand);
+                boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 
-                if (isListed) {
+                if (brandBlocked) {
                     if (whitelistMode) {
-                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "Whitelisted");
+                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Not in whitelist");
                     } else {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Blocked");
                     }
                 } else {
                     if (whitelistMode) {
-                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Not whitelisted");
+                        sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "In whitelist");
                     } else {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "Allowed");
                     }
