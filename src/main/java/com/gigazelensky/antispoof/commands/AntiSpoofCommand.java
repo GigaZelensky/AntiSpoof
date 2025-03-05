@@ -293,43 +293,23 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (isSpoofing) {
             sender.sendMessage(ChatColor.GOLD + target.getName() + ChatColor.RED + " has been flagged!");
             sender.sendMessage(ChatColor.RED + "Reason: " + flagReason);
-            sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
-            sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
             
-            // Check if the brand is blocked/not whitelisted
+            // Check if the brand is blocked/not whitelisted and display with appropriate color
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
-                boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 
-                if (whitelistMode) {
-                    // Show if the brand is in the whitelist or not
-                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
-                    if (matches) {
-                        sender.sendMessage(ChatColor.GRAY + "Brand is in whitelist");
-                    } else {
-                        sender.sendMessage(ChatColor.GRAY + "Brand is not in whitelist");
-                    }
-                    
-                    // Display all whitelist patterns for debugging
-                    List<String> patterns = plugin.getConfigManager().getBlockedBrands();
-                    if (!patterns.isEmpty()) {
-                        sender.sendMessage(ChatColor.GRAY + "Whitelist patterns:");
-                        for (String pattern : patterns) {
-                            sender.sendMessage(ChatColor.GRAY + "- " + pattern);
-                        }
-                    }
+                if (brandBlocked) {
+                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.RED + brand + ChatColor.GRAY + " (Blocked)");
                 } else {
-                    // Show if the brand matches a blacklist pattern
-                    boolean matches = plugin.getConfigManager().matchesBrandPattern(brand);
-                    if (matches) {
-                        sender.sendMessage(ChatColor.GRAY + "Brand is in blacklist");
-                    } else {
-                        sender.sendMessage(ChatColor.GRAY + "Brand is not in blacklist");
-                    }
+                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.GREEN + brand);
                 }
+            } else {
+                sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
             }
             
-            // Channel whitelist/blacklist checks - moved after spoofing and brand info 
+            sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
+            
+            // Channel whitelist/blacklist checks
             if (hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
                 String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
@@ -401,7 +381,20 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             }
         } else {
             sender.sendMessage(ChatColor.GOLD + target.getName() + ChatColor.GREEN + " does not appear to be spoofing.");
-            sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
+            
+            // Check if the brand is blocked/not whitelisted and display with appropriate color
+            if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
+                boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
+                
+                if (brandBlocked) {
+                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.RED + brand + ChatColor.GRAY + " (Blocked)");
+                } else {
+                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.GREEN + brand);
+                }
+            } else {
+                sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
+            }
+            
             sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
         }
     }
@@ -469,27 +462,33 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (brand == null || brand.isEmpty()) {
             sender.sendMessage(ChatColor.YELLOW + target.getName() + " has no client brand information.");
         } else {
-            sender.sendMessage(ChatColor.GOLD + "Client brand for " + target.getName() + ": " + 
-                ChatColor.WHITE + brand);
-                
-            // Check if the brand is in the whitelist/blacklist
+            // Check if the brand is in the whitelist/blacklist and display with appropriate color
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 boolean whitelistMode = plugin.getConfigManager().isBrandWhitelistEnabled();
                 
                 if (brandBlocked) {
+                    sender.sendMessage(ChatColor.GOLD + "Client brand for " + target.getName() + ": " + 
+                        ChatColor.RED + brand + ChatColor.GRAY + " (Blocked)");
+                    
                     if (whitelistMode) {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Not in whitelist");
                     } else {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.RED + "Blocked");
                     }
                 } else {
+                    sender.sendMessage(ChatColor.GOLD + "Client brand for " + target.getName() + ": " + 
+                        ChatColor.GREEN + brand);
+                    
                     if (whitelistMode) {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "In whitelist");
                     } else {
                         sender.sendMessage(ChatColor.GRAY + "Status: " + ChatColor.GREEN + "Allowed");
                     }
                 }
+            } else {
+                sender.sendMessage(ChatColor.GOLD + "Client brand for " + target.getName() + ": " + 
+                    ChatColor.WHITE + brand);
             }
         }
     }
