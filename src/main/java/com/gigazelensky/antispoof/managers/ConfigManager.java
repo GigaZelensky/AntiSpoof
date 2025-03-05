@@ -1,6 +1,5 @@
 package com.gigazelensky.antispoof.managers;
 
-import org.bukkit.ChatColor;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -78,27 +77,6 @@ public class ConfigManager {
     
     public String getConsoleMultipleFlagsMessage() {
         return config.getString("messages.console-multiple-flags", "%player% has multiple violations: %reasons%");
-    }
-    
-    // Color theme settings
-    public ChatColor getPrimaryColor() {
-        String colorName = config.getString("primary-color", "gold").toUpperCase();
-        try {
-            return ChatColor.valueOf(colorName);
-        } catch (IllegalArgumentException e) {
-            plugin.getLogger().warning("Invalid primary color: " + colorName + ", defaulting to GOLD");
-            return ChatColor.GOLD;
-        }
-    }
-    
-    public ChatColor getSecondaryColor() {
-        String colorName = config.getString("secondary-color", "gray").toUpperCase();
-        try {
-            return ChatColor.valueOf(colorName);
-        } catch (IllegalArgumentException e) {
-            plugin.getLogger().warning("Invalid secondary color: " + colorName + ", defaulting to GRAY");
-            return ChatColor.GRAY;
-        }
     }
     
     // Global punishments (legacy)
@@ -338,5 +316,10 @@ public class ConfigManager {
     
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
+    }
+    
+    // New method for webhook cooldown
+    public int getWebhookCooldown() {
+        return config.getInt("discord.cooldown-seconds", 10);
     }
 }
