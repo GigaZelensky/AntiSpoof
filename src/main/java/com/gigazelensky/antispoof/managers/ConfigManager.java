@@ -209,12 +209,15 @@ public class ConfigManager {
     
     // Channel regex matching
     public boolean matchesChannelPattern(String channel) {
+        boolean isWhitelist = isChannelWhitelistEnabled();
+        
         for (Map.Entry<String, Pattern> entry : channelPatterns.entrySet()) {
             if (entry.getValue().matcher(channel).matches()) {
-                return true;
+                return true; // Channel matches a pattern
             }
         }
-        return false;
+        
+        return false; // No patterns matched
     }
     
     // Blocked Brands Check
@@ -252,12 +255,29 @@ public class ConfigManager {
     
     // Brand regex matching
     public boolean matchesBrandPattern(String brand) {
+        // Check if brand matches any pattern in the list
         for (Map.Entry<String, Pattern> entry : brandPatterns.entrySet()) {
             if (entry.getValue().matcher(brand).matches()) {
-                return true;
+                return true; // Brand matches a pattern
             }
         }
-        return false;
+        return false; // No patterns matched
+    }
+    
+    // Fixed method: Checks if a brand should be blocked based on whitelist/blacklist mode
+    public boolean isBrandBlocked(String brand) {
+        if (brand == null) return false;
+        
+        boolean whitelistMode = isBrandWhitelistEnabled();
+        boolean matchesPattern = matchesBrandPattern(brand);
+        
+        if (whitelistMode) {
+            // In whitelist mode: if matches ANY pattern, it's allowed
+            return !matchesPattern;
+        } else {
+            // In blacklist mode: if matches ANY pattern, it's blocked
+            return matchesPattern;
+        }
     }
     
     // Bedrock Handling
