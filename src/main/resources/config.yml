@@ -181,18 +181,18 @@ bedrock-handling:
 # ──────────────────────────────────────────────────────────
 #                 Discord Webhook Settings
 # ──────────────────────────────────────────────────────────
-
-enabled: false
-webhook: ""
-embed-title: "**AntiSpoof Alert**"
-embed-color: "#2AB7CA"
-violation-content:
-  - "**Player**: %player%"
-  - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
-  - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
-  - "**Brand**: %brand%"
-  - "**Channels**:"
-  - "%channel%" # Vertical channel list
+discord:
+  enabled: false
+  webhook: ""
+  embed-title: "**AntiSpoof Alert**"
+  embed-color: "#2AB7CA"
+  violation-content:
+    - "**Player**: %player%"
+    - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
+    - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
+    - "**Brand**: %brand%"
+    - "**Channels**:"
+    - "%channel%" # Vertical channel list
 
 # ──────────────────────────────────────────────────────────
 #                Legacy Punishment Settings
