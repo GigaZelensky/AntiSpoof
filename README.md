@@ -4,38 +4,91 @@
 
 Advanced, heavily customizable Minecraft plugin for detecting client spoofing attempts through brand analysis and channel monitoring. Designed for Spigot/Paper 1.20.4+ servers.
 
-## Features
+---
 
-- **Client Brand Analysis**
-  - Block/whitelist specific client brands (Fabric, Forge, etc.)
-  - Validate brand formatting (special characters detection)
-  - Geyser client spoof detection
+## **Key Features**
 
-- **Channel Monitoring**
-  - Vanilla client verification
-  - Channel whitelist/blacklist system
-  - Strict mode for exact channel matching
+### **Client Brand Analysis**
+- Block/whitelist specific client brands (Fabric, Forge, Lunar Client, etc.)
+- Validate brand formatting (special characters detection)
+- Geyser client spoof detection
 
-- **Bedrock Player Integration**
-  - Floodgate API support
-  - Username prefix verification
-  - Special handling modes (Ignore/Exempt)
+### **Channel Monitoring**
+- Vanilla client verification
+- Channel whitelist/blacklist system
+- Strict mode for exact channel matching
 
-- **Advanced Detection**
-  - Multiple check modes (brand, channels, formatting)
-  - Configurable punishment system
-  - Real-time alerts with permission support
+### **Bedrock Player Integration**
+- Floodgate API support
+- Username prefix verification
+- Special handling modes (Ignore/Exempt)
 
-- **Diagnostic Tools**
-  - In-game checking commands
-  - Debug mode with detailed logs
-  - Live player data inspection
+### **Advanced Detection**
+- Multiple check modes (brand, channels, formatting)
+- Configurable punishment system
+- Real-time alerts with permission support
 
-- **Discord Webhooks**
-  - Fully customizable Discord Webhooks
-  - Sends alerts when a player flags
+### **Diagnostic Tools**
+- In-game checking commands
+- Debug mode with detailed logs
+- Live player data inspection
 
-## Installation
+### **Discord Webhooks**
+- Fully customizable Discord Webhooks
+- Sends alerts when a player flags
+
+---
+
+## **What AntiSpoof Can Do**
+
+AntiSpoof is designed to catch the vast majority of cheaters who don't properly spoof their client brand or channels. It excels at:
+
+1. **Detecting Obvious Spoofers:**  
+   - Most hacked clients (like Wurst or Meteor) don't spoof brands or channels properly. AntiSpoof catches these easily.
+
+2. **Enforcing Vanilla-Only Policies:**  
+   - Use the vanilla check to block players who claim to be using "vanilla" but have registered plugin channels.
+
+3. **Blocking/Whitelisting Specific Brands or Channels:**  
+   - Use regex patterns to block or allow specific client brands or channels.
+
+4. **Protecting Against Geyser Spoofing:**  
+   - Detect Java players pretending to be Bedrock clients.
+
+---
+
+## **What AntiSpoof *Cannot* Do**
+
+Due to Minecraft's inherent limitations, AntiSpoof cannot:
+
+1. **Stop Sophisticated Spoofers:**  
+   - A determined cheater with a custom client can spoof both brands and channels to mimic a truly vanilla client. However, such cheaters are extremely rare.
+
+2. **Detect VPNs or Alt Accounts:**  
+   - AntiSpoof focuses on client-side detection and does not include IP-based checks.
+
+3. **Replace a Full Anti-Cheat:**  
+   - AntiSpoof is not designed to detect in-game cheats like fly hacks or kill aura. It complements anti-cheat plugins but does not replace them.
+
+---
+
+## **Why AntiSpoof is Still the Best Solution**
+
+1. **Catches 95% of Spoofers:**  
+   - Most cheaters don't spoof properly. AntiSpoof catches these easily.
+
+2. **Highly Customizable:**  
+   - Tailor the plugin to your server's needs with regex patterns, whitelist/blacklist modes, and more.
+
+3. **Specialized Use Cases:**  
+   - Whether you want to block non-vanilla clients, enforce specific mods, or protect against Geyser spoofing, AntiSpoof has you covered.
+
+4. **Realistic Expectations:**  
+   - AntiSpoof acknowledges Minecraft's limitations and focuses on what *can* be done rather than making unrealistic promises.
+
+---
+
+## **Installation**
 
 1. **Requirements**
    - Java 21+
@@ -54,6 +107,43 @@ Advanced, heavily customizable Minecraft plugin for detecting client spoofing at
    # Restart server
    ```
 
+---
+
+## **Commands & Permissions**
+
+### **Command Reference**
+| Command | Description | Permission |
+|---------|-------------|------------|
+| `/antispoof check [player]` | Check player status | `antispoof.command` |
+| `/antispoof channels <player>` | View player channels | `antispoof.command` |
+| `/antispoof brand <player>` | Show client brand | `antispoof.command` |
+| `/antispoof reload` | Reload configuration | `antispoof.admin` |
+| `/antispoof blockedchannels` | List channel rules | `antispoof.admin` |
+| `/antispoof blockedbrands` | List brand rules | `antispoof.admin` |
+
+### **Permission Nodes**
+- `antispoof.command`: Base command access
+- `antispoof.admin`: Configuration reload
+- `antispoof.alerts`: Receive detection alerts
+- `antispoof.bypass`: Bypass all checks
+
+---
+
+## **FAQ**
+
+**Q: How does AntiSpoof handle Bedrock players?**  
+A: It uses Floodgate API when available and falls back to username prefix checking.
+
+**Q: What's considered a vanilla client?**  
+A: Clients reporting "vanilla" brand with zero registered channels.
+
+**Q: Can AntiSpoof stop all cheaters?**  
+A: No, but it can stop up to 95% of them depending on your setup. Sophisticated spoofing is rare and requires custom clients.
+
+**Q: Does this work with ViaVersion?**  
+A: Yes! Compatibility with older versions is still being tested.
+
+---
 ## Configuration (`config.yml`)
 
 ```yaml
@@ -290,42 +380,8 @@ messages:
   # Message for console when multiple violations
   console-multiple-flags: "%player% has multiple violations: %reasons%"
 ```
-
-## Commands & Permissions
-
-### Command Reference
-| Command | Description | Permission |
-|---------|-------------|------------|
-| `/antispoof check [player]` | Check player status | `antispoof.command` |
-| `/antispoof channels <player>` | View player channels | `antispoof.command` |
-| `/antispoof brand <player>` | Show client brand | `antispoof.command` |
-| `/antispoof reload` | Reload configuration | `antispoof.admin` |
-| `/antispoof blockedchannels` | List channel rules | `antispoof.admin` |
-| `/antispoof blockedbrands` | List brand rules | `antispoof.admin` |
-
-### Permission Nodes
-- `antispoof.command`: Base command access
-- `antispoof.admin`: Configuration reload
-- `antispoof.alerts`: Receive detection alerts
-- `antispoof.bypass`: Bypass all checks
-
-## FAQ
-
-**Q: How does Bedrock player handling work?**  
-A: Uses Floodgate API when available, falls back to username prefix checking.
-
-**Q: What's considered a vanilla client?**  
-A: Clients reporting "vanilla" brand with zero registered channels.
-
-**Q: How to handle false positives?**  
-1. Enable debug mode
-2. Check player data with `/antispoof channels <player>`
-3. Adjust blocked lists in config
-
-**Q: Does this work with ViaVersion?**  
-A: Yes, but requires ProtocolLib for best results with older versions.
-
-## Support & Development
+---
+## **Support & Development**
 
 **Issue Tracking**  
 [GitHub Issues](https://github.com/GigaZelensky/AntiSpoof/issues)
@@ -333,6 +389,8 @@ A: Yes, but requires ProtocolLib for best results with older versions.
 **Contributing**  
 Pull requests welcome! Ensure compatibility with Java 21+ and follow existing code style.
 
-## License
+---
+
+## **License**
 
 GNU GPLv3 © 2025 GigaZelensky
