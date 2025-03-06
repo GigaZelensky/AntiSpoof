@@ -317,9 +317,4 @@ public class ConfigManager {
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
     }
-    
-    // New method for webhook cooldown
-    public int getWebhookCooldown() {
-        return config.getInt("discord.cooldown-seconds", 10);
-    }
 }
