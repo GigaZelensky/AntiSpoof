@@ -37,6 +37,18 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Clears the alert status for a player
+     * @param playerUUID The UUID of the player to clear
+     */
+    public void clearPlayerAlertStatus(UUID playerUUID) {
+        alertedPlayers.remove(playerUUID);
+        lastAlertChannels.remove(playerUUID);
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("[Discord] Cleared alert status for player UUID: " + playerUUID);
+        }
+    }
+    
+    /**
      * Sends an alert to Discord webhook
      * @param player The player who triggered the alert
      * @param reason The reason for the alert

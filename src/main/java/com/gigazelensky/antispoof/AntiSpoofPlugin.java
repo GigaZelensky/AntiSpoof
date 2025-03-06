@@ -140,6 +140,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return packetListener;
     }
     
+    // Added method to clear a player's alert status
+    public void clearPlayerAlertStatus(UUID playerUUID) {
+        if (discordWebhookHandler != null) {
+            discordWebhookHandler.clearPlayerAlertStatus(playerUUID);
+        }
+    }
+    
     // Add a method to check if an alert can be sent for a player
     public boolean canSendAlert(UUID playerUUID) {
         long now = System.currentTimeMillis();

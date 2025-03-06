@@ -93,39 +93,41 @@ public class PacketListener extends PacketListenerAbstract {
         String brand = plugin.getClientBrand(player);
         if (brand == null) return;
         
-        // List to collect all violations
-        List<String> violations = new ArrayList<>();
-        boolean shouldAlert = false;
+        // Track all violations and whether to punish
+        List<String> allViolations = new ArrayList<>();
         boolean shouldPunish = false;
-        String primaryReason = "";
-        String violationType = "";
-        String violatedChannel = null;
+        
+        // Process each violation separately
 
         // Handle potential Geyser spoofing
         if (plugin.getConfigManager().isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
             String reason = "Spoofing Geyser client";
-            violations.add(reason);
-            if (primaryReason.isEmpty()) {
-                primaryReason = reason;
-                violationType = "GEYSER_SPOOF";
-            }
-            shouldAlert = true;
-            if (plugin.getConfigManager().shouldPunishGeyserSpoof()) {
-                shouldPunish = true;
+            String violationType = "GEYSER_SPOOF";
+            allViolations.add(reason);
+            
+            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+            } else {
+                sendAlert(player, reason, brand, null, violationType);
+                if (plugin.getConfigManager().shouldPunishGeyserSpoof()) {
+                    shouldPunish = true;
+                }
             }
         }
 
         // Check the brand formatting
         if (plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
             String reason = "Invalid brand formatting";
-            violations.add(reason);
-            if (primaryReason.isEmpty()) {
-                primaryReason = reason;
-                violationType = "BRAND_FORMAT";
-            }
-            shouldAlert = true;
-            if (plugin.getConfigManager().shouldPunishBrandFormatting()) {
-                shouldPunish = true;
+            String violationType = "BRAND_FORMAT";
+            allViolations.add(reason);
+            
+            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+            } else {
+                sendAlert(player, reason, brand, null, violationType);
+                if (plugin.getConfigManager().shouldPunishBrandFormatting()) {
+                    shouldPunish = true;
+                }
             }
         }
         
@@ -136,14 +138,16 @@ public class PacketListener extends PacketListenerAbstract {
                 // Only add as a violation if count-as-flag is true
                 if (plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
                     String reason = "Blocked client brand: " + brand;
-                    violations.add(reason);
-                    if (primaryReason.isEmpty()) {
-                        primaryReason = reason;
-                        violationType = "BLOCKED_BRAND";
-                    }
-                    shouldAlert = true;
-                    if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
-                        shouldPunish = true;
+                    String violationType = "BLOCKED_BRAND";
+                    allViolations.add(reason);
+                    
+                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+                    } else {
+                        sendAlert(player, reason, brand, null, violationType);
+                        if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
+                            shouldPunish = true;
+                        }
                     }
                 }
             }
@@ -156,28 +160,32 @@ public class PacketListener extends PacketListenerAbstract {
         if (plugin.getConfigManager().isVanillaCheckEnabled() && 
             claimsVanilla && hasChannels) {
             String reason = "Vanilla client with plugin channels";
-            violations.add(reason);
-            if (primaryReason.isEmpty()) {
-                primaryReason = reason;
-                violationType = "VANILLA_WITH_CHANNELS";
-            }
-            shouldAlert = true;
-            if (plugin.getConfigManager().shouldPunishVanillaCheck()) {
-                shouldPunish = true;
+            String violationType = "VANILLA_WITH_CHANNELS";
+            allViolations.add(reason);
+            
+            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+            } else {
+                sendAlert(player, reason, brand, null, violationType);
+                if (plugin.getConfigManager().shouldPunishVanillaCheck()) {
+                    shouldPunish = true;
+                }
             }
         }
         // Non-vanilla with channels check
         else if (plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && 
                 !claimsVanilla && hasChannels) {
             String reason = "Non-vanilla client with channels";
-            violations.add(reason);
-            if (primaryReason.isEmpty()) {
-                primaryReason = reason;
-                violationType = "NON_VANILLA_WITH_CHANNELS";
-            }
-            shouldAlert = true;
-            if (plugin.getConfigManager().shouldPunishNonVanillaCheck()) {
-                shouldPunish = true;
+            String violationType = "NON_VANILLA_WITH_CHANNELS";
+            allViolations.add(reason);
+            
+            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+            } else {
+                sendAlert(player, reason, brand, null, violationType);
+                if (plugin.getConfigManager().shouldPunishNonVanillaCheck()) {
+                    shouldPunish = true;
+                }
             }
         }
         
@@ -188,14 +196,16 @@ public class PacketListener extends PacketListenerAbstract {
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
                     String reason = "Client channels don't match whitelist";
-                    violations.add(reason);
-                    if (primaryReason.isEmpty()) {
-                        primaryReason = reason;
-                        violationType = "CHANNEL_WHITELIST";
-                    }
-                    shouldAlert = true;
-                    if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
-                        shouldPunish = true;
+                    String violationType = "CHANNEL_WHITELIST";
+                    allViolations.add(reason);
+                    
+                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+                    } else {
+                        sendAlert(player, reason, brand, null, violationType);
+                        if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
+                            shouldPunish = true;
+                        }
                     }
                 }
             } else {
@@ -203,43 +213,65 @@ public class PacketListener extends PacketListenerAbstract {
                 String blockedChannel = findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
                     String reason = "Blocked channel: " + blockedChannel;
-                    violations.add(reason);
-                    if (primaryReason.isEmpty()) {
-                        primaryReason = reason;
-                        violationType = "BLOCKED_CHANNEL";
-                        violatedChannel = blockedChannel;
-                    }
-                    shouldAlert = true;
-                    if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
-                        shouldPunish = true;
+                    String violationType = "BLOCKED_CHANNEL";
+                    allViolations.add(reason);
+                    
+                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
+                    } else {
+                        sendAlert(player, reason, brand, blockedChannel, violationType);
+                        if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
+                            shouldPunish = true;
+                        }
                     }
                 }
             }
         }
 
         // If player is a Bedrock player and we're in EXEMPT mode, don't punish
-        if ((shouldAlert || shouldPunish) && isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-            logDebug("Bedrock player " + player.getName() + " would be processed for: " + primaryReason + ", but is exempt");
+        if (!allViolations.isEmpty() && isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+            logDebug("Bedrock player " + player.getName() + " would be processed for violations, but is exempt");
             return;
         }
 
-        if (shouldAlert) {
-            // Mark player as flagged to prevent duplicate alerts
-            flaggedPlayers.add(uuid);
+        // Only execute punishment if any violations were found
+        if (shouldPunish && !allViolations.isEmpty()) {
+            // Choose the first violation as the primary reason for punishment
+            String primaryReason = allViolations.get(0);
+            String violationType = determineViolationType(primaryReason);
+            String violatedChannel = extractChannelFromReason(primaryReason);
             
-            // Always send the alert if a violation is detected
-            if (violations.size() > 1) {
-                sendMultipleViolationsAlert(player, violations, brand);
-            } else {
-                sendAlert(player, primaryReason, brand, violatedChannel, violationType);
-            }
-            
-            // Only execute punishment if enabled for this violation type
-            if (shouldPunish) {
-                executePunishment(player, primaryReason, brand, violationType, violatedChannel);
-                data.setAlreadyPunished(true);
-            }
+            executePunishment(player, primaryReason, brand, violationType, violatedChannel);
+            data.setAlreadyPunished(true);
         }
+    }
+    
+    // Helper method to determine violation type from reason
+    private String determineViolationType(String reason) {
+        if (reason.contains("Vanilla client with plugin channels")) {
+            return "VANILLA_WITH_CHANNELS";
+        } else if (reason.contains("Non-vanilla client with channels")) {
+            return "NON_VANILLA_WITH_CHANNELS";
+        } else if (reason.contains("Invalid brand formatting")) {
+            return "BRAND_FORMAT";
+        } else if (reason.contains("Blocked channel:")) {
+            return "BLOCKED_CHANNEL";
+        } else if (reason.contains("Client channels don't match whitelist")) {
+            return "CHANNEL_WHITELIST";
+        } else if (reason.contains("Blocked client brand:")) {
+            return "BLOCKED_BRAND";
+        } else if (reason.contains("Spoofing Geyser client")) {
+            return "GEYSER_SPOOF";
+        }
+        return "";
+    }
+
+    // Helper method to extract channel from reason
+    private String extractChannelFromReason(String reason) {
+        if (reason.contains("Blocked channel: ")) {
+            return reason.substring("Blocked channel: ".length());
+        }
+        return null;
     }
     
     private boolean isBrandBlocked(String brand) {
@@ -630,5 +662,8 @@ public class PacketListener extends PacketListenerAbstract {
     public void playerDisconnected(UUID playerUUID) {
         flaggedPlayers.remove(playerUUID);
         initialRegistrationTime.remove(playerUUID);
+        
+        // Also clear the player's alert status in the Discord webhook handler
+        plugin.clearPlayerAlertStatus(playerUUID);
     }
 }
