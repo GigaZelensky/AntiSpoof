@@ -126,13 +126,15 @@ public class ConfigManager {
         return config.getStringList("non-vanilla-check.punishments");
     }
     
-    // Brand Formatting Check
+    // Brand Formatting Check - DISABLED
     public boolean checkBrandFormatting() {
-        return config.getBoolean("brand-formatting.enabled", true);
+        // Always return false to disable this check
+        return false;
     }
     
     public boolean shouldPunishBrandFormatting() {
-        return config.getBoolean("brand-formatting.punish", true);
+        // Since the check is disabled, this doesn't matter
+        return false;
     }
     
     public String getBrandFormattingAlertMessage() {
