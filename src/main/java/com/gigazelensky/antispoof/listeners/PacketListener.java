@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
 
 public class PacketListener extends PacketListenerAbstract {
     private final AntiSpoofPlugin plugin;
@@ -305,10 +306,25 @@ public class PacketListener extends PacketListenerAbstract {
         if (channel.equals("minecraft:register") || channel.equals("minecraft:unregister")) {
             channelRegistered = handleChannelRegistration(channel, data, playerData);
         } else {
-            // Direct channel usage
-            playerData.addChannel(channel);
-            logDebug("Direct channel used: " + channel);
-            channelRegistered = true;
+            // Direct channel usage - check if this is a new channel
+            if (!playerData.getChannels().contains(channel)) {
+                // This is a new channel, consider it as "modified"
+                playerData.addChannel(channel);
+                
+                // If modified channels alerts are enabled, notify
+                if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
+                    Player player = Bukkit.getPlayer(playerUUID);
+                    if (player != null) {
+                        notifyModifiedChannel(player, channel);
+                    }
+                }
+                
+                logDebug("Direct channel used: " + channel);
+                channelRegistered = true;
+            } else {
+                // Channel already known, just log it
+                logDebug("Direct channel used: " + channel);
+            }
         }
         
         return channelRegistered;
@@ -321,9 +337,27 @@ public class PacketListener extends PacketListenerAbstract {
         
         for (String registeredChannel : channels) {
             if (channel.equals("minecraft:register")) {
-                playerData.addChannel(registeredChannel);
-                logDebug("Channel registered: " + registeredChannel);
-                didRegister = true;
+                // Check if this is a new channel
+                if (!playerData.getChannels().contains(registeredChannel)) {
+                    playerData.addChannel(registeredChannel);
+                    logDebug("Channel registered: " + registeredChannel);
+                    
+                    // If modified channels alerts are enabled, notify
+                    if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
+                        // Try to get the player from the player data
+                        for (Map.Entry<UUID, PlayerData> entry : plugin.getPlayerDataMap().entrySet()) {
+                            if (entry.getValue() == playerData) {
+                                Player player = Bukkit.getPlayer(entry.getKey());
+                                if (player != null) {
+                                    notifyModifiedChannel(player, registeredChannel);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    didRegister = true;
+                }
             } else {
                 playerData.removeChannel(registeredChannel);
                 logDebug("Channel unregistered: " + registeredChannel);
@@ -331,6 +365,38 @@ public class PacketListener extends PacketListenerAbstract {
         }
         
         return didRegister;
+    }
+    
+    private void notifyModifiedChannel(Player player, String channel) {
+        // Format the player alert message
+        String alertMessage = plugin.getConfigManager().getModifiedChannelsAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%channel%", channel);
+        
+        // Format the console alert message
+        String consoleAlertMessage = plugin.getConfigManager().getModifiedChannelsConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%channel%", channel);
+        
+        // Convert color codes for player messages
+        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', alertMessage);
+        
+        // Log to console
+        plugin.getLogger().info(consoleAlertMessage);
+        
+        // Notify players with permission
+        Bukkit.getOnlinePlayers().stream()
+                .filter(p -> p.hasPermission("antispoof.alerts"))
+                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        
+        // Send to Discord webhook if enabled
+        plugin.getDiscordWebhookHandler().sendAlert(
+            player, 
+            "Modified channel: " + channel,
+            plugin.getClientBrand(player), 
+            channel, 
+            null // No violations list
+        );
     }
     
     private boolean hasInvalidFormatting(String brand) {
@@ -363,13 +429,10 @@ public class PacketListener extends PacketListenerAbstract {
         // Log to console directly using the console format (no need to strip colors)
         plugin.getLogger().info(consoleAlert);
         
-        // Only send in-game alerts if cooldown allows it
-        if (plugin.canSendAlert(playerUUID)) {
-            // Notify players with permission
-            Bukkit.getOnlinePlayers().stream()
-                    .filter(p -> p.hasPermission("antispoof.alerts"))
-                    .forEach(p -> p.sendMessage(coloredPlayerAlert));
-        }
+        // Notify players with permission
+        Bukkit.getOnlinePlayers().stream()
+                .filter(p -> p.hasPermission("antispoof.alerts"))
+                .forEach(p -> p.sendMessage(coloredPlayerAlert));
         
         // Send to Discord if enabled
         plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
@@ -444,13 +507,10 @@ public class PacketListener extends PacketListenerAbstract {
         // Log to console directly using the console format (no need to strip colors)
         plugin.getLogger().info(consoleAlert);
         
-        // Only send in-game alerts if cooldown allows it
-        if (plugin.canSendAlert(playerUUID)) {
-            // Notify players with permission
-            Bukkit.getOnlinePlayers().stream()
-                    .filter(p -> p.hasPermission("antispoof.alerts"))
-                    .forEach(p -> p.sendMessage(coloredPlayerAlert));
-        }
+        // Notify players with permission
+        Bukkit.getOnlinePlayers().stream()
+                .filter(p -> p.hasPermission("antispoof.alerts"))
+                .forEach(p -> p.sendMessage(coloredPlayerAlert));
         
         // Send to Discord if enabled
         List<String> singleViolation = new ArrayList<>();
