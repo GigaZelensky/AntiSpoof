@@ -151,6 +151,13 @@ blocked-channels:
   alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing blocked channel: &f%channel%"
   console-alert-message: "%player% flagged! Using blocked channel: %channel%"
 
+  # Alert when a player's plugin channel is modified
+  modifiedchannels:
+    enabled: true
+    alert-message: "&8[&cAntiSpoof&8] &e%player% modified channel: &f%channel%"
+    console-alert-message: "%player% modified channel: %channel%"
+    discord-alert: false
+
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
@@ -245,10 +252,6 @@ discord:
   webhook: ""
   embed-title: "**AntiSpoof Alert**"
   embed-color: "#2AB7CA"
-  # Cooldown between webhook alerts for the same player (in seconds)
-  # This prevents duplicate alerts when brand detection and violation detection
-  # happen close together during player login. 3 is recommended.
-  cooldown-seconds: 3
   violation-content:
     - "**Player**: %player%"
     - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
