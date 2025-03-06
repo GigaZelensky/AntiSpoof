@@ -51,8 +51,14 @@ public class PlayerJoinListener implements Listener {
    
    @EventHandler
    public void onPlayerQuit(PlayerQuitEvent event) {
-       plugin.getPlayerDataMap().remove(event.getPlayer().getUniqueId());
+       UUID uuid = event.getPlayer().getUniqueId();
+       plugin.getPlayerDataMap().remove(uuid);
        plugin.getPlayerBrands().remove(event.getPlayer().getName());
+       
+       // Clean up packet listener tracking
+       if (plugin.getPacketListener() != null) {
+           plugin.getPacketListener().playerDisconnected(uuid);
+       }
    }
 
    private void checkPlayer(Player player) {
@@ -356,13 +362,10 @@ public class PlayerJoinListener implements Listener {
        // Log to console directly using the console format (no need to strip colors)
        plugin.getLogger().info(consoleAlert);
        
-       // Only send in-game alerts if cooldown allows it
-       if (plugin.canSendAlert(playerUUID)) {
-           // Notify players with permission
-           Bukkit.getOnlinePlayers().stream()
-                   .filter(p -> p.hasPermission("antispoof.alerts"))
-                   .forEach(p -> p.sendMessage(coloredPlayerAlert));
-       }
+       // Notify players with permission
+       Bukkit.getOnlinePlayers().stream()
+               .filter(p -> p.hasPermission("antispoof.alerts"))
+               .forEach(p -> p.sendMessage(coloredPlayerAlert));
        
        // Send to Discord if enabled
        plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
@@ -437,13 +440,10 @@ public class PlayerJoinListener implements Listener {
        // Log to console directly using the console format (no need to strip colors)
        plugin.getLogger().info(consoleAlert);
        
-       // Only send in-game alerts if cooldown allows it
-       if (plugin.canSendAlert(playerUUID)) {
-           // Notify players with permission
-           Bukkit.getOnlinePlayers().stream()
-                   .filter(p -> p.hasPermission("antispoof.alerts"))
-                   .forEach(p -> p.sendMessage(coloredPlayerAlert));
-       }
+       // Notify players with permission
+       Bukkit.getOnlinePlayers().stream()
+               .filter(p -> p.hasPermission("antispoof.alerts"))
+               .forEach(p -> p.sendMessage(coloredPlayerAlert));
        
        // Send to Discord if enabled
        List<String> singleViolation = new ArrayList<>();
