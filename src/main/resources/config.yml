@@ -92,6 +92,13 @@ blocked-channels:
   alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing blocked channel: &f%channel%"
   console-alert-message: "%player% flagged! Using blocked channel: %channel%"
 
+  # Alert when a player's plugin channel is modified
+  modifiedchannels:
+    enabled: true
+    alert-message: "&8[&cAntiSpoof&8] &e%player% modified channel: &f%channel%"
+    console-alert-message: "%player% modified channel: %channel%"
+    discord-alert: false
+
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
