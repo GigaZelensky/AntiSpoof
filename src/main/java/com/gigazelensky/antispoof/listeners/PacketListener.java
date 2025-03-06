@@ -117,14 +117,10 @@ public class PacketListener extends PacketListenerAbstract {
         String brand = plugin.getClientBrand(player);
         if (brand == null) return;
         
-        // Send the initial channels webhook (will only send once)
-        if (!data.getChannels().isEmpty()) {
-            plugin.getDiscordWebhookHandler().sendInitialChannelsWebhook(player, data.getChannels());
-        }
-        
         // Track all violations and whether to punish
         List<String> allViolations = new ArrayList<>();
         boolean shouldPunish = false;
+        boolean anyViolationDetected = false;
         
         // Process each violation separately
 
@@ -133,6 +129,7 @@ public class PacketListener extends PacketListenerAbstract {
             String reason = "Spoofing Geyser client";
             String violationType = "GEYSER_SPOOF";
             allViolations.add(reason);
+            anyViolationDetected = true;
             
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -152,6 +149,7 @@ public class PacketListener extends PacketListenerAbstract {
             String reason = "Invalid brand formatting";
             String violationType = "BRAND_FORMAT";
             allViolations.add(reason);
+            anyViolationDetected = true;
             
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -175,6 +173,7 @@ public class PacketListener extends PacketListenerAbstract {
                     String reason = "Blocked client brand: " + brand;
                     String violationType = "BLOCKED_BRAND";
                     allViolations.add(reason);
+                    anyViolationDetected = true;
                     
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -200,6 +199,7 @@ public class PacketListener extends PacketListenerAbstract {
             String reason = "Vanilla client with plugin channels";
             String violationType = "VANILLA_WITH_CHANNELS";
             allViolations.add(reason);
+            anyViolationDetected = true;
             
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -219,6 +219,7 @@ public class PacketListener extends PacketListenerAbstract {
             String reason = "Non-vanilla client with channels";
             String violationType = "NON_VANILLA_WITH_CHANNELS";
             allViolations.add(reason);
+            anyViolationDetected = true;
             
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -242,6 +243,7 @@ public class PacketListener extends PacketListenerAbstract {
                     String reason = "Client channels don't match whitelist";
                     String violationType = "CHANNEL_WHITELIST";
                     allViolations.add(reason);
+                    anyViolationDetected = true;
                     
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -262,6 +264,7 @@ public class PacketListener extends PacketListenerAbstract {
                     String reason = "Blocked channel: " + blockedChannel;
                     String violationType = "BLOCKED_CHANNEL:" + blockedChannel;
                     allViolations.add(reason);
+                    anyViolationDetected = true;
                     
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
@@ -293,6 +296,11 @@ public class PacketListener extends PacketListenerAbstract {
             
             executePunishment(player, primaryReason, brand, violationType, violatedChannel);
             data.setAlreadyPunished(true);
+        }
+        
+        // Send initial channels webhook only if no violations
+        if (!anyViolationDetected && !data.getChannels().isEmpty()) {
+            plugin.getDiscordWebhookHandler().sendInitialChannelsWebhook(player, data.getChannels());
         }
     }
     

@@ -72,6 +72,30 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Check if any violation alerts have been sent for this player
+     * @param playerUUID Player UUID
+     * @return True if any violation alerts have been sent
+     */
+    public boolean hasAnyViolationAlerts(UUID playerUUID) {
+        Set<String> sentTypes = alertTypesSent.getOrDefault(playerUUID, new HashSet<>());
+        
+        // Check for common violation alert types
+        for (String alertType : sentTypes) {
+            if (alertType.startsWith("BLOCKED_CHANNEL:") ||
+                alertType.equals("CHANNEL_WHITELIST") ||
+                alertType.equals("VANILLA_WITH_CHANNELS") ||
+                alertType.equals("NON_VANILLA_WITH_CHANNELS") ||
+                alertType.equals("BRAND_FORMAT") ||
+                alertType.equals("BLOCKED_BRAND") ||
+                alertType.equals("GEYSER_SPOOF")) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
      * Sends an alert to Discord webhook
      * @param player The player who triggered the alert
      * @param reason The reason for the alert
@@ -184,6 +208,11 @@ public class DiscordWebhookHandler {
         
         // Check if we've already sent an initial channels alert
         if (hasAlertBeenSent(playerUuid, "INITIAL_CHANNELS")) {
+            return;
+        }
+        
+        // Don't send initial channels if we already have any violation alerts
+        if (hasAnyViolationAlerts(playerUuid)) {
             return;
         }
         
