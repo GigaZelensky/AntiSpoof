@@ -28,11 +28,35 @@ public class PacketListener extends PacketListenerAbstract {
     // Track players' initial channel registration phase
     private final Map<UUID, Long> initialRegistrationTime = new ConcurrentHashMap<>();
     
+    // Map to track which alert types have already been shown to players
+    private final Map<UUID, Set<String>> alertTypesSent = new ConcurrentHashMap<>();
+    
     // Time window for initial channel registration (in milliseconds)
     private static final long INITIAL_REGISTRATION_WINDOW = 5000; // 5 seconds
 
     public PacketListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
+    }
+    
+    /**
+     * Check if an alert of a specific type has already been sent for this player
+     * @param playerUUID Player UUID
+     * @param alertType The type of alert
+     * @return True if this alert type has already been sent
+     */
+    public boolean hasAlertBeenSent(UUID playerUUID, String alertType) {
+        Set<String> sentTypes = alertTypesSent.getOrDefault(playerUUID, new HashSet<>());
+        return sentTypes.contains(alertType);
+    }
+    
+    /**
+     * Mark an alert type as sent for this player
+     * @param playerUUID Player UUID
+     * @param alertType The type of alert
+     */
+    public void markAlertSent(UUID playerUUID, String alertType) {
+        Set<String> sentTypes = alertTypesSent.computeIfAbsent(playerUUID, k -> new HashSet<>());
+        sentTypes.add(alertType);
     }
 
     @Override
@@ -66,7 +90,7 @@ public class PacketListener extends PacketListenerAbstract {
             // Since we can't call it directly, we'll schedule an immediate task
             Bukkit.getScheduler().runTask(plugin, () -> {
                 // Only check if player is still online and not already punished
-                if (player.isOnline() && !data.isAlreadyPunished() && !flaggedPlayers.contains(playerUUID)) {
+                if (player.isOnline() && !data.isAlreadyPunished()) {
                     // Check if player is spoofing after channel registration
                     checkAndProcessPlayer(player);
                 }
@@ -93,6 +117,11 @@ public class PacketListener extends PacketListenerAbstract {
         String brand = plugin.getClientBrand(player);
         if (brand == null) return;
         
+        // Send the initial channels webhook (will only send once)
+        if (!data.getChannels().isEmpty()) {
+            plugin.getDiscordWebhookHandler().sendInitialChannelsWebhook(player, data.getChannels());
+        }
+        
         // Track all violations and whether to punish
         List<String> allViolations = new ArrayList<>();
         boolean shouldPunish = false;
@@ -108,7 +137,10 @@ public class PacketListener extends PacketListenerAbstract {
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
             } else {
-                sendAlert(player, reason, brand, null, violationType);
+                if (!hasAlertBeenSent(uuid, violationType)) {
+                    sendAlert(player, reason, brand, null, violationType);
+                    markAlertSent(uuid, violationType);
+                }
                 if (plugin.getConfigManager().shouldPunishGeyserSpoof()) {
                     shouldPunish = true;
                 }
@@ -124,7 +156,10 @@ public class PacketListener extends PacketListenerAbstract {
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
             } else {
-                sendAlert(player, reason, brand, null, violationType);
+                if (!hasAlertBeenSent(uuid, violationType)) {
+                    sendAlert(player, reason, brand, null, violationType);
+                    markAlertSent(uuid, violationType);
+                }
                 if (plugin.getConfigManager().shouldPunishBrandFormatting()) {
                     shouldPunish = true;
                 }
@@ -144,7 +179,10 @@ public class PacketListener extends PacketListenerAbstract {
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
                     } else {
-                        sendAlert(player, reason, brand, null, violationType);
+                        if (!hasAlertBeenSent(uuid, violationType)) {
+                            sendAlert(player, reason, brand, null, violationType);
+                            markAlertSent(uuid, violationType);
+                        }
                         if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
                             shouldPunish = true;
                         }
@@ -166,7 +204,10 @@ public class PacketListener extends PacketListenerAbstract {
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
             } else {
-                sendAlert(player, reason, brand, null, violationType);
+                if (!hasAlertBeenSent(uuid, violationType)) {
+                    sendAlert(player, reason, brand, null, violationType);
+                    markAlertSent(uuid, violationType);
+                }
                 if (plugin.getConfigManager().shouldPunishVanillaCheck()) {
                     shouldPunish = true;
                 }
@@ -182,7 +223,10 @@ public class PacketListener extends PacketListenerAbstract {
             if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                 logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
             } else {
-                sendAlert(player, reason, brand, null, violationType);
+                if (!hasAlertBeenSent(uuid, violationType)) {
+                    sendAlert(player, reason, brand, null, violationType);
+                    markAlertSent(uuid, violationType);
+                }
                 if (plugin.getConfigManager().shouldPunishNonVanillaCheck()) {
                     shouldPunish = true;
                 }
@@ -202,7 +246,10 @@ public class PacketListener extends PacketListenerAbstract {
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
                     } else {
-                        sendAlert(player, reason, brand, null, violationType);
+                        if (!hasAlertBeenSent(uuid, violationType)) {
+                            sendAlert(player, reason, brand, null, violationType);
+                            markAlertSent(uuid, violationType);
+                        }
                         if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
                             shouldPunish = true;
                         }
@@ -213,13 +260,16 @@ public class PacketListener extends PacketListenerAbstract {
                 String blockedChannel = findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
                     String reason = "Blocked channel: " + blockedChannel;
-                    String violationType = "BLOCKED_CHANNEL";
+                    String violationType = "BLOCKED_CHANNEL:" + blockedChannel;
                     allViolations.add(reason);
                     
                     if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
                         logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
                     } else {
-                        sendAlert(player, reason, brand, blockedChannel, violationType);
+                        if (!hasAlertBeenSent(uuid, violationType)) {
+                            sendAlert(player, reason, brand, blockedChannel, violationType);
+                            markAlertSent(uuid, violationType);
+                        }
                         if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
                             shouldPunish = true;
                         }
@@ -235,7 +285,7 @@ public class PacketListener extends PacketListenerAbstract {
         }
 
         // Only execute punishment if any violations were found
-        if (shouldPunish && !allViolations.isEmpty()) {
+        if (shouldPunish && !allViolations.isEmpty() && !data.isAlreadyPunished()) {
             // Choose the first violation as the primary reason for punishment
             String primaryReason = allViolations.get(0);
             String violationType = determineViolationType(primaryReason);
@@ -373,7 +423,12 @@ public class PacketListener extends PacketListenerAbstract {
                     if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
                         Player player = Bukkit.getPlayer(playerUUID);
                         if (player != null) {
-                            notifyModifiedChannel(player, channel);
+                            // Check if we've already sent this specific modified channel alert
+                            String alertType = "MODIFIED_CHANNEL:" + channel;
+                            if (!hasAlertBeenSent(playerUUID, alertType)) {
+                                notifyModifiedChannel(player, channel);
+                                markAlertSent(playerUUID, alertType);
+                            }
                         }
                     }
                 }
@@ -417,7 +472,12 @@ public class PacketListener extends PacketListenerAbstract {
                         if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
                             Player player = Bukkit.getPlayer(playerUUID);
                             if (player != null) {
-                                notifyModifiedChannel(player, registeredChannel);
+                                // Check if we've already sent this specific modified channel alert
+                                String alertType = "MODIFIED_CHANNEL:" + registeredChannel;
+                                if (!hasAlertBeenSent(playerUUID, alertType)) {
+                                    notifyModifiedChannel(player, registeredChannel);
+                                    markAlertSent(playerUUID, alertType);
+                                }
                             }
                         }
                     }
@@ -434,12 +494,17 @@ public class PacketListener extends PacketListenerAbstract {
     }
     
     private void notifyModifiedChannel(Player player, String channel) {
-        // Only notify if player hasn't been flagged for spoofing or has been punished
+        // Only notify if player hasn't been punished
         UUID playerUUID = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(playerUUID);
         
         // Don't send additional blocked channel alerts when notifying about modified channels
         if (data != null && data.isAlreadyPunished()) {
+            return;
+        }
+        
+        String alertType = "MODIFIED_CHANNEL:" + channel;
+        if (hasAlertBeenSent(playerUUID, alertType)) {
             return;
         }
         
@@ -466,14 +531,18 @@ public class PacketListener extends PacketListenerAbstract {
         
         // Send to Discord webhook if enabled
         if (plugin.getConfigManager().isModifiedChannelsDiscordEnabled()) {
+            String reason = "Modified channel: " + channel;
             plugin.getDiscordWebhookHandler().sendAlert(
                 player, 
-                "Modified channel: " + channel,
+                reason,
                 plugin.getClientBrand(player), 
                 channel, 
                 null // No violations list
             );
         }
+        
+        // Mark this alert as sent
+        markAlertSent(playerUUID, alertType);
     }
     
     private boolean hasInvalidFormatting(String brand) {
@@ -484,6 +553,11 @@ public class PacketListener extends PacketListenerAbstract {
     // Send alert message for multiple violations
     private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand) {
         UUID playerUUID = player.getUniqueId();
+        
+        // Skip if we've already sent a multiple violations alert for this player
+        if (hasAlertBeenSent(playerUUID, "MULTIPLE_VIOLATIONS")) {
+            return;
+        }
         
         // Join all reasons with commas
         String reasonsList = String.join(", ", violations);
@@ -513,11 +587,19 @@ public class PacketListener extends PacketListenerAbstract {
         
         // Send to Discord if enabled
         plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
+        
+        // Mark this alert as sent
+        markAlertSent(playerUUID, "MULTIPLE_VIOLATIONS");
     }
     
     // Send alert message to staff and console with rate limiting
     private void sendAlert(Player player, String reason, String brand, String violatedChannel, String violationType) {
         UUID playerUUID = player.getUniqueId();
+        
+        // Skip if we've already sent this specific alert type
+        if (hasAlertBeenSent(playerUUID, violationType)) {
+            return;
+        }
         
         // Select the appropriate alert message based on violation type
         String alertTemplate;
@@ -539,7 +621,6 @@ public class PacketListener extends PacketListenerAbstract {
                 consoleAlertTemplate = plugin.getConfigManager().getBrandFormattingConsoleAlertMessage();
                 break;
                 
-            case "BLOCKED_CHANNEL":
             case "CHANNEL_WHITELIST":
                 alertTemplate = plugin.getConfigManager().getBlockedChannelsAlertMessage();
                 consoleAlertTemplate = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
@@ -556,9 +637,14 @@ public class PacketListener extends PacketListenerAbstract {
                 break;
                 
             default:
-                // Fallback to global messages
-                alertTemplate = plugin.getConfigManager().getAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getConsoleAlertMessage();
+                if (violationType.startsWith("BLOCKED_CHANNEL:")) {
+                    alertTemplate = plugin.getConfigManager().getBlockedChannelsAlertMessage();
+                    consoleAlertTemplate = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
+                } else {
+                    // Fallback to global messages
+                    alertTemplate = plugin.getConfigManager().getAlertMessage();
+                    consoleAlertTemplate = plugin.getConfigManager().getConsoleAlertMessage();
+                }
         }
         
         // Format the player alert message with placeholders
@@ -593,6 +679,9 @@ public class PacketListener extends PacketListenerAbstract {
         List<String> singleViolation = new ArrayList<>();
         singleViolation.add(reason);
         plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
+        
+        // Mark this alert as sent
+        markAlertSent(playerUUID, violationType);
     }
     
     // Execute punishment commands
@@ -662,6 +751,7 @@ public class PacketListener extends PacketListenerAbstract {
     public void playerDisconnected(UUID playerUUID) {
         flaggedPlayers.remove(playerUUID);
         initialRegistrationTime.remove(playerUUID);
+        alertTypesSent.remove(playerUUID);
         
         // Also clear the player's alert status in the Discord webhook handler
         plugin.clearPlayerAlertStatus(playerUUID);
