@@ -12,6 +12,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,6 +29,8 @@ public class DiscordWebhookHandler {
     private final Map<UUID, Long> lastWebhookTime = new ConcurrentHashMap<>();
     // Map to store the most severe alert for each player during cooldown
     private final Map<UUID, WebhookAlert> pendingAlerts = new ConcurrentHashMap<>();
+    // Map to track the initial channels for a player
+    private final Map<UUID, Set<String>> initialChannels = new ConcurrentHashMap<>();
     
     // Default cooldown period in milliseconds (10 seconds)
     private static final long DEFAULT_COOLDOWN = 10000;
@@ -125,6 +129,21 @@ public class DiscordWebhookHandler {
         // Create current alert object
         WebhookAlert currentAlert = new WebhookAlert(player, reason, brand, channel, violations);
         
+        // Store initial channels for comparison later
+        PlayerData data = plugin.getPlayerDataMap().get(playerUuid);
+        if (data != null) {
+            // Save current channels if not already saved
+            if (!initialChannels.containsKey(playerUuid)) {
+                Set<String> channelsCopy = new HashSet<>(data.getChannels());
+                initialChannels.put(playerUuid, channelsCopy);
+                
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Stored initial channels for " + player.getName() + 
+                                           ": " + String.join(", ", channelsCopy));
+                }
+            }
+        }
+        
         // Check if player is in cooldown
         Long lastTime = lastWebhookTime.get(playerUuid);
         if (lastTime != null && now - lastTime < cooldownPeriod) {
@@ -147,24 +166,37 @@ public class DiscordWebhookHandler {
             return;
         }
         
-        // Set the last webhook time and remove any pending alerts
+        // If this is the first alert for this player, delay it for the cooldown period
+        // This allows time for more channels to register before sending
+        if (lastTime == null) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] First alert for " + player.getName() + ", delaying for " + cooldownPeriod + "ms");
+            }
+            
+            pendingAlerts.put(playerUuid, currentAlert);
+            lastWebhookTime.put(playerUuid, now);
+            
+            // Schedule the actual webhook to be sent after the cooldown
+            Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                WebhookAlert pendingAlert = pendingAlerts.remove(playerUuid);
+                if (pendingAlert != null && pendingAlert.player.isOnline()) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Sending delayed alert for " + pendingAlert.player.getName());
+                    }
+                    sendWebhookWithDelayedChannels(pendingAlert);
+                }
+                initialChannels.remove(playerUuid); // Clean up
+            }, cooldownPeriod / 50); // Convert ms to ticks (20 ticks = 1 second)
+            
+            return;
+        }
+        
+        // For subsequent alerts (rare case), update the time and remove pending
         lastWebhookTime.put(playerUuid, now);
         pendingAlerts.remove(playerUuid);
         
         // Send the alert
-        sendWebhookDirectly(currentAlert);
-        
-        // Schedule a task to send any pending alerts after cooldown
-        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
-            WebhookAlert pendingAlert = pendingAlerts.remove(playerUuid);
-            if (pendingAlert != null) {
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Sending pending alert for " + pendingAlert.player.getName() + " after cooldown");
-                }
-                sendWebhookDirectly(pendingAlert);
-                lastWebhookTime.put(playerUuid, System.currentTimeMillis());
-            }
-        }, cooldownPeriod / 50 + 1); // Convert ms to ticks (20 ticks = 1 second) and add 1 for safety
+        sendWebhookWithDelayedChannels(currentAlert);
     }
     
     /**
@@ -180,9 +212,42 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Send webhook with all current channels, highlighting any that were added after the initial check
+     */
+    private void sendWebhookWithDelayedChannels(WebhookAlert alert) {
+        UUID playerUuid = alert.player.getUniqueId();
+        PlayerData data = plugin.getPlayerDataMap().get(playerUuid);
+        Set<String> initialChannelSet = initialChannels.get(playerUuid);
+        
+        Set<String> delayedChannels = new HashSet<>();
+        
+        // Determine which channels were added after the initial check
+        if (data != null && initialChannelSet != null) {
+            Set<String> currentChannels = data.getChannels();
+            
+            for (String channel : currentChannels) {
+                if (!initialChannelSet.contains(channel)) {
+                    delayedChannels.add(channel);
+                }
+            }
+            
+            if (config.isDebugMode() && !delayedChannels.isEmpty()) {
+                plugin.getLogger().info("[Discord] Detected delayed channels for " + alert.player.getName() + 
+                                      ": " + String.join(", ", delayedChannels));
+            }
+        }
+        
+        // Clean up after use
+        initialChannels.remove(playerUuid);
+        
+        // Send the webhook with the delayed channels info
+        sendWebhookDirectly(alert, delayedChannels);
+    }
+    
+    /**
      * Directly sends a webhook without cooldown checks
      */
-    private void sendWebhookDirectly(WebhookAlert alert) {
+    private void sendWebhookDirectly(WebhookAlert alert, Set<String> delayedChannels) {
         String webhookUrl = config.getDiscordWebhookUrl();
         
         // Validate webhook URL format
@@ -210,7 +275,8 @@ public class DiscordWebhookHandler {
                 connection.setDoOutput(true);
                 
                 // Create JSON payload
-                String json = createWebhookJson(alert.player, alert.reason, alert.brand, alert.channel, alert.violations, consoleAlert);
+                String json = createWebhookJson(alert.player, alert.reason, alert.brand, alert.channel, 
+                                               alert.violations, consoleAlert, delayedChannels);
                 
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Discord] Webhook payload: " + json);
@@ -327,7 +393,8 @@ public class DiscordWebhookHandler {
     /**
      * Creates the JSON payload for the Discord webhook
      */
-    private String createWebhookJson(Player player, String reason, String brand, String channel, List<String> violations, String consoleAlert) {
+    private String createWebhookJson(Player player, String reason, String brand, String channel, 
+                                    List<String> violations, String consoleAlert, Set<String> delayedChannels) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"embeds\":[{");
         
@@ -424,6 +491,14 @@ public class DiscordWebhookHandler {
                 for (String ch : data.getChannels()) {
                     sb.append("• ").append(escapeJson(ch)).append("\\n");
                 }
+            }
+        }
+
+        // Add delayed channels section if there are any
+        if (delayedChannels != null && !delayedChannels.isEmpty()) {
+            sb.append("\\n**Delayed Channels**:\\n");
+            for (String ch : delayedChannels) {
+                sb.append("• ").append(escapeJson(ch)).append("\\n");
             }
         }
         
