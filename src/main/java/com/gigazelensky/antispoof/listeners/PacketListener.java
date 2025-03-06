@@ -15,9 +15,21 @@ import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PacketListener extends PacketListenerAbstract {
     private final AntiSpoofPlugin plugin;
+    
+    // Track which players have been flagged for spoofing to avoid duplicate flags
+    private final Set<UUID> flaggedPlayers = new HashSet<>();
+    
+    // Track players' initial channel registration phase
+    private final Map<UUID, Long> initialRegistrationTime = new ConcurrentHashMap<>();
+    
+    // Time window for initial channel registration (in milliseconds)
+    private static final long INITIAL_REGISTRATION_WINDOW = 5000; // 5 seconds
 
     public PacketListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -53,8 +65,8 @@ public class PacketListener extends PacketListenerAbstract {
         if (wasChannelRegistered && plugin.getConfigManager().getCheckDelay() <= 0) {
             // Since we can't call it directly, we'll schedule an immediate task
             Bukkit.getScheduler().runTask(plugin, () -> {
-                // Only check if player is still online
-                if (player.isOnline() && !data.isAlreadyPunished()) {
+                // Only check if player is still online and not already punished
+                if (player.isOnline() && !data.isAlreadyPunished() && !flaggedPlayers.contains(playerUUID)) {
                     // Check if player is spoofing after channel registration
                     checkAndProcessPlayer(player);
                 }
@@ -212,6 +224,9 @@ public class PacketListener extends PacketListenerAbstract {
         }
 
         if (shouldAlert) {
+            // Mark player as flagged to prevent duplicate alerts
+            flaggedPlayers.add(uuid);
+            
             // Always send the alert if a violation is detected
             if (violations.size() > 1) {
                 sendMultipleViolationsAlert(player, violations, brand);
@@ -304,18 +319,30 @@ public class PacketListener extends PacketListenerAbstract {
         
         // Handle channel registration/unregistration (for Fabric/Forge mods)
         if (channel.equals("minecraft:register") || channel.equals("minecraft:unregister")) {
-            channelRegistered = handleChannelRegistration(channel, data, playerData);
+            channelRegistered = handleChannelRegistration(playerUUID, channel, data, playerData);
         } else {
+            // Mark the start of initial registration period if this is the first channel
+            if (!initialRegistrationTime.containsKey(playerUUID) && playerData.getChannels().isEmpty()) {
+                initialRegistrationTime.put(playerUUID, System.currentTimeMillis());
+                logDebug("Starting initial registration period for " + playerUUID);
+            }
+            
             // Direct channel usage - check if this is a new channel
             if (!playerData.getChannels().contains(channel)) {
-                // This is a new channel, consider it as "modified"
+                // This is a new channel, add it
                 playerData.addChannel(channel);
+                long currentTime = System.currentTimeMillis();
                 
-                // If modified channels alerts are enabled, notify
-                if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
-                    Player player = Bukkit.getPlayer(playerUUID);
-                    if (player != null) {
-                        notifyModifiedChannel(player, channel);
+                // Only consider it as "modified" if we're past the initial registration window
+                if (initialRegistrationTime.containsKey(playerUUID) && 
+                    currentTime - initialRegistrationTime.get(playerUUID) > INITIAL_REGISTRATION_WINDOW) {
+                    
+                    // If modified channels alerts are enabled, notify
+                    if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
+                        Player player = Bukkit.getPlayer(playerUUID);
+                        if (player != null) {
+                            notifyModifiedChannel(player, channel);
+                        }
                     }
                 }
                 
@@ -330,10 +357,20 @@ public class PacketListener extends PacketListenerAbstract {
         return channelRegistered;
     }
     
-    private boolean handleChannelRegistration(String channel, byte[] data, PlayerData playerData) {
+    private boolean handleChannelRegistration(UUID playerUUID, String channel, byte[] data, PlayerData playerData) {
         String payload = new String(data, StandardCharsets.UTF_8);
         String[] channels = payload.split("\0");
         boolean didRegister = false;
+        
+        // Mark the start of initial registration period if this is the first channel registration
+        if (!initialRegistrationTime.containsKey(playerUUID) && channel.equals("minecraft:register")) {
+            initialRegistrationTime.put(playerUUID, System.currentTimeMillis());
+            logDebug("Starting initial registration period for " + playerUUID);
+        }
+        
+        long currentTime = System.currentTimeMillis();
+        boolean isPastInitialRegistration = initialRegistrationTime.containsKey(playerUUID) && 
+                                          currentTime - initialRegistrationTime.get(playerUUID) > INITIAL_REGISTRATION_WINDOW;
         
         for (String registeredChannel : channels) {
             if (channel.equals("minecraft:register")) {
@@ -342,16 +379,13 @@ public class PacketListener extends PacketListenerAbstract {
                     playerData.addChannel(registeredChannel);
                     logDebug("Channel registered: " + registeredChannel);
                     
-                    // If modified channels alerts are enabled, notify
-                    if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
-                        // Try to get the player from the player data
-                        for (Map.Entry<UUID, PlayerData> entry : plugin.getPlayerDataMap().entrySet()) {
-                            if (entry.getValue() == playerData) {
-                                Player player = Bukkit.getPlayer(entry.getKey());
-                                if (player != null) {
-                                    notifyModifiedChannel(player, registeredChannel);
-                                }
-                                break;
+                    // Only consider it as "modified" if we're past the initial registration window
+                    if (isPastInitialRegistration) {
+                        // If modified channels alerts are enabled, notify
+                        if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
+                            Player player = Bukkit.getPlayer(playerUUID);
+                            if (player != null) {
+                                notifyModifiedChannel(player, registeredChannel);
                             }
                         }
                     }
@@ -368,6 +402,15 @@ public class PacketListener extends PacketListenerAbstract {
     }
     
     private void notifyModifiedChannel(Player player, String channel) {
+        // Only notify if player hasn't been flagged for spoofing or has been punished
+        UUID playerUUID = player.getUniqueId();
+        PlayerData data = plugin.getPlayerDataMap().get(playerUUID);
+        
+        // Don't send additional blocked channel alerts when notifying about modified channels
+        if (data != null && data.isAlreadyPunished()) {
+            return;
+        }
+        
         // Format the player alert message
         String alertMessage = plugin.getConfigManager().getModifiedChannelsAlertMessage()
                 .replace("%player%", player.getName())
@@ -390,13 +433,15 @@ public class PacketListener extends PacketListenerAbstract {
                 .forEach(p -> p.sendMessage(coloredPlayerAlert));
         
         // Send to Discord webhook if enabled
-        plugin.getDiscordWebhookHandler().sendAlert(
-            player, 
-            "Modified channel: " + channel,
-            plugin.getClientBrand(player), 
-            channel, 
-            null // No violations list
-        );
+        if (plugin.getConfigManager().isModifiedChannelsDiscordEnabled()) {
+            plugin.getDiscordWebhookHandler().sendAlert(
+                player, 
+                "Modified channel: " + channel,
+                plugin.getClientBrand(player), 
+                channel, 
+                null // No violations list
+            );
+        }
     }
     
     private boolean hasInvalidFormatting(String brand) {
@@ -577,5 +622,13 @@ public class PacketListener extends PacketListenerAbstract {
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("[Debug] " + message);
         }
+    }
+    
+    /**
+     * Cleanup method to remove player data on disconnect
+     */
+    public void playerDisconnected(UUID playerUUID) {
+        flaggedPlayers.remove(playerUUID);
+        initialRegistrationTime.remove(playerUUID);
     }
 }
