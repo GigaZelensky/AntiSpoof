@@ -34,6 +34,7 @@ jobs:
       with:
         name: AntiSpoof
         path: target/antispoof-*.jar
+        compression-level: 0
         
     # Only publish to GitHub Packages when a release is created
     - name: Publish to GitHub Packages
