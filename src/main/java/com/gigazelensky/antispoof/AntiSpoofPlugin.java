@@ -26,6 +26,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<String, String> playerBrands = new HashMap<>();
     private FloodgateApi floodgateApi = null;
+    private PacketListener packetListener;
     
     // Add a map to track the last alert time for each player
     private final Map<UUID, Long> lastAlertTime = new HashMap<>();
@@ -85,7 +86,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         // Register event listeners
         new PlayerJoinListener(this).register();
-        PacketEvents.getAPI().getEventManager().registerListener(new PacketListener(this));
+        packetListener = new PacketListener(this);
+        PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         
         // Register command with tab completion
         AntiSpoofCommand commandExecutor = new AntiSpoofCommand(this);
@@ -132,6 +134,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public Map<String, String> getPlayerBrands() {
         return playerBrands;
+    }
+    
+    public PacketListener getPacketListener() {
+        return packetListener;
     }
     
     // Add a method to check if an alert can be sent for a player
