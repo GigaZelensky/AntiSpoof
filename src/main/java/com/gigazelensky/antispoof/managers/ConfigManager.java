@@ -185,6 +185,25 @@ public class ConfigManager {
         return config.getStringList("blocked-channels.punishments");
     }
     
+    // Modified Channels alerts
+    public boolean isModifiedChannelsEnabled() {
+        return config.getBoolean("blocked-channels.modifiedchannels.enabled", false);
+    }
+    
+    public boolean isModifiedChannelsDiscordEnabled() {
+        return config.getBoolean("blocked-channels.modifiedchannels.discord-alert", false);
+    }
+    
+    public String getModifiedChannelsAlertMessage() {
+        return config.getString("blocked-channels.modifiedchannels.alert-message", 
+                               "&8[&cAntiSpoof&8] &e%player% modified channel: &f%channel%");
+    }
+    
+    public String getModifiedChannelsConsoleAlertMessage() {
+        return config.getString("blocked-channels.modifiedchannels.console-alert-message", 
+                               "%player% modified channel: %channel%");
+    }
+    
     // Channel regex matching
     public boolean matchesChannelPattern(String channel) {
         boolean isWhitelist = isChannelWhitelistEnabled();
