@@ -28,9 +28,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private FloodgateApi floodgateApi = null;
     private PacketListener packetListener;
     
-    // Add a map to track the last alert time for each player
-    private final Map<UUID, Long> lastAlertTime = new HashMap<>();
-    
     @Override
     public void onEnable() {
         saveDefaultConfig();
@@ -147,20 +144,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
     }
     
-    // Add a method to check if an alert can be sent for a player
-    public boolean canSendAlert(UUID playerUUID) {
-        long now = System.currentTimeMillis();
-        Long lastAlert = lastAlertTime.get(playerUUID);
-        
-        // Allow alert if no previous alert or if it's been more than 3 seconds
-        if (lastAlert == null || now - lastAlert > 3000) {
-            lastAlertTime.put(playerUUID, now);
-            return true;
-        }
-        
-        return false;
-    }
-    
     public boolean isBedrockPlayer(Player player) {
         if (player == null) return false;
         
@@ -238,11 +221,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         // Handle potential Geyser spoofing
         if (configManager.isPunishSpoofingGeyser() && isSpoofingGeyser(player)) {
-            return true;
-        }
-        
-        // Check for invalid brand formatting
-        if (configManager.checkBrandFormatting() && hasInvalidFormatting(brand)) {
             return true;
         }
         
@@ -355,11 +333,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         return null; // No blocked channels found
     }
-    
-    private boolean hasInvalidFormatting(String brand) {
-        return brand.matches(".*[§&].*") || 
-               !brand.matches("^[a-zA-Z0-9 _-]+$");
-    }
 
     @Override
     public void onDisable() {
@@ -367,7 +340,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
             PacketEvents.getAPI().terminate();
         }
         playerBrands.clear();
-        lastAlertTime.clear();
         getLogger().info("AntiSpoof disabled!");
     }
 }

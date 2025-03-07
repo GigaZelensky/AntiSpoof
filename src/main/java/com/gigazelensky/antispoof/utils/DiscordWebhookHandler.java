@@ -119,6 +119,43 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Check if Discord alerts are enabled for the given violation type
+     * @param violationType The type of violation
+     * @return True if Discord alerts are enabled for this violation type
+     */
+    private boolean isDiscordAlertEnabledForViolation(String violationType, String reason) {
+        if (!config.isDiscordWebhookEnabled()) {
+            return false;
+        }
+        
+        if (violationType.equals("VANILLA_WITH_CHANNELS") || reason.contains("Vanilla client with plugin channels")) {
+            return config.isVanillaCheckDiscordEnabled();
+        }
+        else if (violationType.equals("NON_VANILLA_WITH_CHANNELS") || reason.contains("Non-vanilla client with channels")) {
+            return config.isNonVanillaCheckDiscordEnabled();
+        }
+        else if (violationType.startsWith("BLOCKED_CHANNEL:") || reason.contains("Blocked channel:") || 
+                 violationType.equals("CHANNEL_WHITELIST") || reason.contains("Client channels don't match whitelist")) {
+            return config.isBlockedChannelsDiscordEnabled();
+        }
+        else if (violationType.equals("BLOCKED_BRAND") || reason.contains("Blocked client brand:")) {
+            return config.isBlockedBrandsDiscordEnabled();
+        }
+        else if (violationType.equals("GEYSER_SPOOF") || reason.contains("Spoofing Geyser client")) {
+            return config.isGeyserSpoofDiscordEnabled();
+        }
+        else if (violationType.startsWith("MODIFIED_CHANNEL:") || reason.contains("Modified channel:")) {
+            return config.isModifiedChannelsDiscordEnabled();
+        }
+        else if (violationType.startsWith("CLIENT_BRAND:") || reason.contains("joined using client brand:")) {
+            return config.isJoinBrandAlertsEnabled();
+        }
+        
+        // Default to true if we can't determine the type
+        return true;
+    }
+    
+    /**
      * Sends an alert to Discord webhook
      * @param player The player who triggered the alert
      * @param reason The reason for the alert
@@ -143,16 +180,6 @@ public class DiscordWebhookHandler {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Discord] Skipping alert for " + player.getName() + " due to cooldown");
             }
-            return;
-        }
-        
-        // Update last alert time
-        lastAlertTime.put(playerUuid, System.currentTimeMillis());
-        
-        PlayerData data = plugin.getPlayerDataMap().get(playerUuid);
-        
-        // No data, no channels to check
-        if (data == null) {
             return;
         }
         
@@ -186,6 +213,22 @@ public class DiscordWebhookHandler {
             return;
         }
         
+        // Check if Discord alerts are enabled for this violation type
+        if (!isDiscordAlertEnabledForViolation(alertType, reason)) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Skipping alert for " + player.getName() + " - Discord alerts disabled for " + alertType);
+            }
+            return;
+        }
+        
+        // Update last alert time
+        lastAlertTime.put(playerUuid, System.currentTimeMillis());
+        
+        PlayerData data = plugin.getPlayerDataMap().get(playerUuid);
+        if (data == null) {
+            return;
+        }
+        
         // Mark this alert type as sent
         markAlertSent(playerUuid, alertType);
         
@@ -200,11 +243,6 @@ public class DiscordWebhookHandler {
             // Store the current channels for future comparison
             lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
             
-            // Send the full webhook for the alert
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending alert for player: " + player.getName() + ", reason: " + reason);
-            }
-            
             // If the player has previously had a violation, don't send a brand alert
             if (alertType.equals("CLIENT_BRAND:" + brand) && hasAnyViolationAlerts(playerUuid)) {
                 if (config.isDebugMode()) {
@@ -213,22 +251,27 @@ public class DiscordWebhookHandler {
                 return;
             }
             
+            // Send the full webhook for the alert
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Sending alert for player: " + player.getName() + ", reason: " + reason);
+            }
+            
             // Send the full webhook
             sendFullWebhook(player, reason, brand, channel, violations);
         }
-        // It's a modified channel alert - only handled by the packet listener in special cases
-        else if (config.isModifiedChannelsEnabled() && config.isModifiedChannelsDiscordEnabled()) {
-            // Send a compact update webhook for the modified channel
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending modified channel alert for: " + channel);
-            }
-            
+        // It's a modified channel alert
+        else if (config.isModifiedChannelsEnabled()) {
             // If the player already has violation alerts, skip the modified channel alert
             if (hasAnyViolationAlerts(playerUuid)) {
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Discord] Skipping modified channel alert because player has violation alerts");
                 }
                 return;
+            }
+            
+            // Send a compact update webhook for the modified channel
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Sending modified channel alert for: " + channel);
             }
             
             sendModifiedChannelWebhook(player, channel);
@@ -245,6 +288,14 @@ public class DiscordWebhookHandler {
      */
     public void sendInitialChannelsWebhook(Player player, Set<String> channels) {
         if (!config.isDiscordWebhookEnabled()) {
+            return;
+        }
+        
+        // Check if initial channels alerts are enabled
+        if (!config.isInitialChannelsAlertsEnabled()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Skipping initial channels alert - feature disabled in config");
+            }
             return;
         }
         
