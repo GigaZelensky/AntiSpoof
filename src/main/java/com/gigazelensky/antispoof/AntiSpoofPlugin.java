@@ -3,19 +3,18 @@ package com.gigazelensky.antispoof;
 import com.gigazelensky.antispoof.commands.AntiSpoofCommand;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
-import com.gigazelensky.antispoof.listeners.PacketListener;
-import com.gigazelensky.antispoof.listeners.PlayerJoinListener;
+import com.gigazelensky.antispoof.listeners.PlayerEventListener;
+import com.gigazelensky.antispoof.managers.AlertManager;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import com.gigazelensky.antispoof.managers.DetectionManager;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.geysermc.floodgate.api.FloodgateApi;
-import java.util.HashMap;
-import java.util.List;
+
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,18 +22,22 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     private ConfigManager configManager;
     private DiscordWebhookHandler discordWebhookHandler;
-    private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
-    private final Map<String, String> playerBrands = new HashMap<>();
-    private FloodgateApi floodgateApi = null;
-    private PacketListener packetListener;
+    private AlertManager alertManager;
+    private DetectionManager detectionManager;
+    private PlayerEventListener playerEventListener;
     
-    // Add a map to track the last alert time for each player
-    private final Map<UUID, Long> lastAlertTime = new HashMap<>();
+    private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
+    private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
+    private FloodgateApi floodgateApi = null;
     
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        
+        // Initialize managers
         this.configManager = new ConfigManager(this);
+        this.alertManager = new AlertManager(this);
+        this.detectionManager = new DetectionManager(this);
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize PacketEvents
@@ -61,33 +64,11 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
         
         // Register plugin channels for client brand
-        if (getServer().getBukkitVersion().contains("1.13") || 
-            Integer.parseInt(getServer().getBukkitVersion().split("-")[0].split("\\.")[1]) >= 13) {
-            getServer().getMessenger().registerIncomingPluginChannel(this, "minecraft:brand", 
-                (channel, player, message) -> {
-                    // Brand message format: [length][brand]
-                    String brand = new String(message).substring(1);
-                    playerBrands.put(player.getName(), brand);
-                    if (configManager.isDebugMode()) {
-                        getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
-                    }
-                });
-        } else {
-            getServer().getMessenger().registerIncomingPluginChannel(this, "MC|Brand", 
-                (channel, player, message) -> {
-                    // Brand message format: [length][brand]
-                    String brand = new String(message).substring(1);
-                    playerBrands.put(player.getName(), brand);
-                    if (configManager.isDebugMode()) {
-                        getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
-                    }
-                });
-        }
+        registerClientBrandChannel();
         
-        // Register event listeners
-        new PlayerJoinListener(this).register();
-        packetListener = new PacketListener(this);
-        PacketEvents.getAPI().getEventManager().registerListener(packetListener);
+        // Register unified event listener
+        this.playerEventListener = new PlayerEventListener(this);
+        this.playerEventListener.register();
         
         // Register command with tab completion
         AntiSpoofCommand commandExecutor = new AntiSpoofCommand(this);
@@ -112,6 +93,29 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
+    
+    private void registerClientBrandChannel() {
+        // Use version-appropriate channel name
+        String channelName = getServer().getBukkitVersion().contains("1.13") || 
+                            Integer.parseInt(getServer().getBukkitVersion().split("-")[0].split("\\.")[1]) >= 13 ?
+                            "minecraft:brand" : "MC|Brand";
+        
+        getServer().getMessenger().registerIncomingPluginChannel(this, channelName, 
+            (channel, player, message) -> {
+                // Brand message format: [length][brand]
+                String brand = new String(message).substring(1);
+                
+                // Store brand by UUID to avoid name conflicts
+                playerBrands.put(player.getUniqueId(), brand);
+                
+                if (configManager.isDebugMode()) {
+                    getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
+                }
+                
+                // Trigger a check for this player if brand is now known
+                detectionManager.checkPlayerAsync(player, false);
+            });
+    }
 
     public ConfigManager getConfigManager() {
         return configManager;
@@ -121,37 +125,27 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return discordWebhookHandler;
     }
     
+    public AlertManager getAlertManager() {
+        return alertManager;
+    }
+    
+    public DetectionManager getDetectionManager() {
+        return detectionManager;
+    }
+    
     public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
         return playerDataMap;
     }
 
     public String getClientBrand(Player player) {
         if (player != null) {
-            return playerBrands.get(player.getName());
+            return playerBrands.get(player.getUniqueId());
         }
         return null;
     }
     
-    public Map<String, String> getPlayerBrands() {
+    public Map<UUID, String> getPlayerBrands() {
         return playerBrands;
-    }
-    
-    public PacketListener getPacketListener() {
-        return packetListener;
-    }
-    
-    // Add a method to check if an alert can be sent for a player
-    public boolean canSendAlert(UUID playerUUID) {
-        long now = System.currentTimeMillis();
-        Long lastAlert = lastAlertTime.get(playerUUID);
-        
-        // Allow alert if no previous alert or if it's been more than 3 seconds
-        if (lastAlert == null || now - lastAlert > 3000) {
-            lastAlertTime.put(playerUUID, now);
-            return true;
-        }
-        
-        return false;
     }
     
     public boolean isBedrockPlayer(Player player) {
@@ -189,25 +183,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         return false;
     }
-    
-    public boolean isSpoofingGeyser(Player player) {
-        if (player == null) return false;
-        
-        // Don't check if not configured to detect Geyser spoofing
-        if (!configManager.isPunishSpoofingGeyser()) {
-            return false;
-        }
-        
-        String brand = getClientBrand(player);
-        if (brand == null) return false;
-        
-        // Check if brand contains "geyser" (case insensitive)
-        boolean claimsGeyser = brand.toLowerCase().contains("geyser");
-        
-        // If player claims to be using Geyser but isn't detected as a Bedrock player
-        return claimsGeyser && !isBedrockPlayer(player);
-    }
-    
+
+    /**
+     * Backward compatibility method to check if a player is spoofing
+     * @param player The player to check
+     * @return True if the player is found to be spoofing, false otherwise
+     */
     public boolean isPlayerSpoofing(Player player) {
         if (player == null) return false;
         
@@ -234,7 +215,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
             return true;
         }
         
-        // Check for brand blocking - Now using configManager.isBrandBlocked method
+        // Check for brand blocking
         if (configManager.isBlockedBrandsEnabled()) {
             boolean brandBlocked = configManager.isBrandBlocked(brand);
             
@@ -258,12 +239,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (configManager.isBlockedChannelsEnabled()) {
             if (configManager.isChannelWhitelistEnabled()) {
                 // Whitelist mode
-                if (!checkChannelWhitelist(data.getChannels())) {
+                if (!detectionManager.checkChannelWhitelist(data.getChannels())) {
                     return true;
                 }
             } else {
                 // Blacklist mode
-                String blockedChannel = findBlockedChannel(data.getChannels());
+                String blockedChannel = detectionManager.findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
                     return true;
                 }
@@ -277,71 +258,28 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         return false;
     }
-    
-    private boolean checkChannelWhitelist(Set<String> playerChannels) {
-        boolean strictMode = configManager.isChannelWhitelistStrict();
-        List<String> whitelistedChannels = configManager.getBlockedChannels();
+
+    /**
+     * Backward compatibility method to check if a player is spoofing Geyser
+     * @param player The player to check
+     * @return True if the player is spoofing Geyser, false otherwise
+     */
+    public boolean isSpoofingGeyser(Player player) {
+        if (player == null) return false;
         
-        // If no channels are whitelisted, then fail if player has any channels
-        if (whitelistedChannels.isEmpty()) {
-            return playerChannels.isEmpty();
+        // Don't check if not configured to detect Geyser spoofing
+        if (!configManager.isPunishSpoofingGeyser()) {
+            return false;
         }
         
-        // SIMPLE mode: Player must have at least one of the whitelisted channels
-        if (!strictMode) {
-            for (String playerChannel : playerChannels) {
-                if (configManager.matchesChannelPattern(playerChannel)) {
-                    return true; // Pass if player has at least one whitelisted channel
-                }
-            }
-            return false; // Fail if player has no whitelisted channels
-        } 
-        // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
-        else {
-            // 1. Check if every player channel is whitelisted
-            for (String playerChannel : playerChannels) {
-                if (!configManager.matchesChannelPattern(playerChannel)) {
-                    return false; // Fail if any player channel is not whitelisted
-                }
-            }
-            
-            // 2. Also check if player has ALL whitelisted channels
-            for (String whitelistedChannel : whitelistedChannels) {
-                boolean playerHasChannel = false;
-                
-                for (String playerChannel : playerChannels) {
-                    try {
-                        if (playerChannel.matches(whitelistedChannel)) {
-                            playerHasChannel = true;
-                            break;
-                        }
-                    } catch (Exception e) {
-                        // If regex is invalid, just do direct match as fallback
-                        if (playerChannel.equals(whitelistedChannel)) {
-                            playerHasChannel = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!playerHasChannel) {
-                    return false; // Fail if player is missing any whitelisted channel
-                }
-            }
-            
-            // Player has passed both checks
-            return true;
-        }
-    }
-    
-    public String findBlockedChannel(Set<String> playerChannels) {
-        for (String playerChannel : playerChannels) {
-            if (configManager.matchesChannelPattern(playerChannel)) {
-                return playerChannel;
-            }
-        }
+        String brand = getClientBrand(player);
+        if (brand == null) return false;
         
-        return null; // No blocked channels found
+        // Check if brand contains "geyser" (case insensitive)
+        boolean claimsGeyser = brand.toLowerCase().contains("geyser");
+        
+        // If player claims to be using Geyser but isn't detected as a Bedrock player
+        return claimsGeyser && !isBedrockPlayer(player);
     }
 
     @Override
@@ -350,7 +288,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
             PacketEvents.getAPI().terminate();
         }
         playerBrands.clear();
-        lastAlertTime.clear();
+        playerDataMap.clear();
         getLogger().info("AntiSpoof disabled!");
     }
 }
