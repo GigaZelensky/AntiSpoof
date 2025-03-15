@@ -3,7 +3,6 @@ package com.gigazelensky.antispoof.listeners;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
-import com.gigazelensky.antispoof.utils.BrandAlertManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -16,19 +15,15 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
 
 public class PlayerJoinListener implements Listener {
    private final AntiSpoofPlugin plugin;
    private final ConfigManager config;
    private static boolean listenerRegistered = false;
-   private final BrandAlertManager alertManager;
 
    public PlayerJoinListener(AntiSpoofPlugin plugin) {
        this.plugin = plugin;
        this.config = plugin.getConfigManager();
-       this.alertManager = BrandAlertManager.getInstance();
        
        // Add plugin instance to debug log for verification
        if (config.isDebugMode()) {
@@ -73,7 +68,11 @@ public class PlayerJoinListener implements Listener {
        UUID uuid = event.getPlayer().getUniqueId();
        plugin.getPlayerDataMap().remove(uuid);
        plugin.getPlayerBrands().remove(event.getPlayer().getName());
-       alertManager.playerDisconnected(uuid);
+       
+       // Clean up brand channel handler tracking
+       if (plugin.getBrandChannelHandler() != null) {
+           plugin.getBrandChannelHandler().playerDisconnected(uuid);
+       }
        
        // Clean up packet listener tracking
        if (plugin.getPacketListener() != null) {
@@ -110,11 +109,8 @@ public class PlayerJoinListener implements Listener {
            return;
        }
        
-       // Always show client brand join message for operators if it's not in the whitelist
-       // This happens regardless of any violations, using singleton manager for deduplication
-       if (config.isBlockedBrandsEnabled() && !config.matchesBrandPattern(brand)) {
-           alertManager.sendBrandAlert(plugin, player, brand);
-       }
+       // NOTE: Brand alerts are now handled directly by the BrandChannelHandler
+       // No brand alerts sent from here anymore
        
        // List to collect all violations
        List<String> violations = new ArrayList<>();

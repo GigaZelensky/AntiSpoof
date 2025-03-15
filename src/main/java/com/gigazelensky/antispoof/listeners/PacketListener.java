@@ -2,7 +2,6 @@ package com.gigazelensky.antispoof.listeners;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
-import com.gigazelensky.antispoof.utils.BrandAlertManager;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -22,7 +21,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PacketListener extends PacketListenerAbstract {
     private final AntiSpoofPlugin plugin;
-    private final BrandAlertManager alertManager;
     
     // Track which players have been flagged for spoofing to avoid duplicate flags
     private final Set<UUID> flaggedPlayers = new HashSet<>();
@@ -35,7 +33,6 @@ public class PacketListener extends PacketListenerAbstract {
 
     public PacketListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
-        this.alertManager = BrandAlertManager.getInstance();
         
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("[Debug] PacketListener created for plugin instance: " + plugin.toString());
@@ -126,22 +123,17 @@ public class PacketListener extends PacketListenerAbstract {
         if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
             boolean brandBlocked = isBrandBlocked(brand);
             
-            // If brand is not whitelisted/is blocked, send brand alert (through central manager)
-            if (brandBlocked) {
-                alertManager.sendBrandAlert(plugin, player, brand);
-                
-                // Only add as a violation if count-as-flag is true
-                if (plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
-                    String reason = "Blocked client brand: " + brand;
-                    violations.add(reason);
-                    if (primaryReason.isEmpty()) {
-                        primaryReason = reason;
-                        violationType = "BLOCKED_BRAND";
-                    }
-                    shouldAlert = true;
-                    if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
-                        shouldPunish = true;
-                    }
+            // Only add as a violation if count-as-flag is true
+            if (brandBlocked && plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
+                String reason = "Blocked client brand: " + brand;
+                violations.add(reason);
+                if (primaryReason.isEmpty()) {
+                    primaryReason = reason;
+                    violationType = "BLOCKED_BRAND";
+                }
+                shouldAlert = true;
+                if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
+                    shouldPunish = true;
                 }
             }
         }
@@ -594,8 +586,5 @@ public class PacketListener extends PacketListenerAbstract {
     public void playerDisconnected(UUID playerUUID) {
         flaggedPlayers.remove(playerUUID);
         initialRegistrationTime.remove(playerUUID);
-        
-        // Also clear from alert manager
-        alertManager.playerDisconnected(playerUUID);
     }
 }
