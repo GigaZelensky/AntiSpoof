@@ -234,11 +234,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
             return true;
         }
         
-        // Check for invalid brand formatting
-        if (configManager.checkBrandFormatting() && hasInvalidFormatting(brand)) {
-            return true;
-        }
-        
         // Check for brand blocking - Now using configManager.isBrandBlocked method
         if (configManager.isBlockedBrandsEnabled()) {
             boolean brandBlocked = configManager.isBrandBlocked(brand);
@@ -347,11 +342,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
         
         return null; // No blocked channels found
-    }
-    
-    private boolean hasInvalidFormatting(String brand) {
-        return brand.matches(".*[§&].*") || 
-               !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
 
     @Override

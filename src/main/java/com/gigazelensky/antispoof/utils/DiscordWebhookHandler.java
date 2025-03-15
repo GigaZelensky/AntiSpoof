@@ -56,7 +56,7 @@ public class DiscordWebhookHandler {
         }
         
         // Check if Discord alerts are enabled for this violation type
-        if (!isDiscordAlertEnabledForViolation(violationType)) {
+        if (!config.isDiscordAlertEnabledForViolation(violationType)) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Discord] Alerts disabled for violation type: " + violationType);
             }
@@ -125,48 +125,6 @@ public class DiscordWebhookHandler {
                 // Update last alert channels
                 lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
             }
-        }
-    }
-    
-    /**
-     * Determines if Discord alerts are enabled for a specific violation type
-     */
-    private boolean isDiscordAlertEnabledForViolation(String violationType) {
-        if (violationType == null) {
-            return true; // Default to true if no violation type specified
-        }
-        
-        switch(violationType) {
-            case "VANILLA_WITH_CHANNELS":
-                return config.isVanillaCheckDiscordAlertEnabled();
-                
-            case "NON_VANILLA_WITH_CHANNELS":
-                return config.isNonVanillaCheckDiscordAlertEnabled();
-                
-            case "BRAND_FORMAT":
-                return config.isBrandFormattingDiscordAlertEnabled();
-                
-            case "BLOCKED_CHANNEL":
-            case "CHANNEL_WHITELIST":
-                return config.isBlockedChannelsDiscordAlertEnabled();
-                
-            case "BLOCKED_BRAND":
-                return config.isBlockedBrandsDiscordAlertEnabled();
-                
-            case "GEYSER_SPOOF":
-                return config.isGeyserSpoofDiscordAlertEnabled();
-                
-            case "JOIN_BRAND":
-                return config.isJoinBrandAlertsEnabled();
-                
-            case "INITIAL_CHANNELS":
-                return config.isInitialChannelsAlertsEnabled();
-                
-            case "MODIFIED_CHANNEL":
-                return config.isModifiedChannelsDiscordEnabled();
-                
-            default:
-                return true; // Default to enabled for unknown types
         }
     }
     
@@ -365,12 +323,6 @@ public class DiscordWebhookHandler {
         } 
         else if (reason.contains("Non-vanilla client with channels")) {
             return config.getNonVanillaCheckConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-        }
-        else if (reason.contains("Invalid brand formatting")) {
-            return config.getBrandFormattingConsoleAlertMessage()
                     .replace("%player%", player.getName())
                     .replace("%brand%", brand != null ? brand : "unknown")
                     .replace("%reason%", reason);

@@ -114,21 +114,6 @@ public class PacketListener extends PacketListenerAbstract {
                 shouldPunish = true;
             }
         }
-
-        // Check the brand formatting
-        if (plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
-            String reason = "Invalid brand formatting";
-            violations.add(reason);
-            if (primaryReason.isEmpty()) {
-                primaryReason = reason;
-                violationType = "BRAND_FORMAT";
-            }
-            shouldAlert = true;
-            // Only enable punishment if it's explicitly enabled in the config
-            if (plugin.getConfigManager().shouldPunishBrandFormatting()) {
-                shouldPunish = true;
-            }
-        }
         
         // Check for brand blocking/whitelist
         if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
@@ -228,12 +213,8 @@ public class PacketListener extends PacketListenerAbstract {
             // Mark player as flagged to prevent duplicate alerts
             flaggedPlayers.add(uuid);
             
-            // Always send the alert if a violation is detected
-            if (violations.size() > 1) {
-                sendMultipleViolationsAlert(player, violations, brand);
-            } else {
-                sendAlert(player, primaryReason, brand, violatedChannel, violationType);
-            }
+            // Send a single alert for all violations
+            sendViolationsAlert(player, violations, brand, violatedChannel, violationType);
             
             // Only execute punishment if enabled for this violation type
             if (shouldPunish) {
@@ -435,114 +416,90 @@ public class PacketListener extends PacketListenerAbstract {
         
         // Send to Discord webhook if enabled
         if (plugin.getConfigManager().isModifiedChannelsDiscordEnabled()) {
+            List<String> singleViolation = new ArrayList<>();
+            singleViolation.add("Modified channel: " + channel);
+            
             plugin.getDiscordWebhookHandler().sendAlert(
                 player, 
                 "Modified channel: " + channel,
                 plugin.getClientBrand(player), 
                 channel, 
-                null, // No violations list
+                singleViolation,
                 "MODIFIED_CHANNEL"
             );
         }
     }
     
-    private boolean hasInvalidFormatting(String brand) {
-        return brand.matches(".*[§&].*") || 
-               !brand.matches("^[a-zA-Z0-9 _-]+$");
-    }
-    
-    // Send alert message for multiple violations
-    private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand) {
+    // Send alert message for all violations
+    private void sendViolationsAlert(Player player, List<String> violations, String brand, String violatedChannel, String violationType) {
         UUID playerUUID = player.getUniqueId();
         
-        // Join all reasons with commas
-        String reasonsList = String.join(", ", violations);
+        // Format the player alert message based on the number of violations
+        String playerAlert;
+        String consoleAlert;
         
-        // Format the player alert message for multiple violations
-        String playerAlert = plugin.getConfigManager().getMultipleFlagsMessage()
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand != null ? brand : "unknown")
-                .replace("%reasons%", reasonsList);
-        
-        // Format the console alert message for multiple violations
-        String consoleAlert = plugin.getConfigManager().getConsoleMultipleFlagsMessage()
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand != null ? brand : "unknown")
-                .replace("%reasons%", reasonsList);
-        
-        // Convert color codes for player messages
-        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-        
-        // Log to console directly using the console format (no need to strip colors)
-        plugin.getLogger().info(consoleAlert);
-        
-        // Notify players with permission
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
-        
-        // Send to Discord if enabled
-        plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations, "MULTIPLE");
-    }
-    
-    // Send alert message to staff and console with rate limiting
-    private void sendAlert(Player player, String reason, String brand, String violatedChannel, String violationType) {
-        UUID playerUUID = player.getUniqueId();
-        
-        // Select the appropriate alert message based on violation type
-        String alertTemplate;
-        String consoleAlertTemplate;
-        
-        switch(violationType) {
-            case "VANILLA_WITH_CHANNELS":
-                alertTemplate = plugin.getConfigManager().getVanillaCheckAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getVanillaCheckConsoleAlertMessage();
-                break;
-                
-            case "NON_VANILLA_WITH_CHANNELS":
-                alertTemplate = plugin.getConfigManager().getNonVanillaCheckAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getNonVanillaCheckConsoleAlertMessage();
-                break;
-                
-            case "BRAND_FORMAT":
-                alertTemplate = plugin.getConfigManager().getBrandFormattingAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getBrandFormattingConsoleAlertMessage();
-                break;
-                
-            case "BLOCKED_CHANNEL":
-            case "CHANNEL_WHITELIST":
-                alertTemplate = plugin.getConfigManager().getBlockedChannelsAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
-                break;
-                
-            case "BLOCKED_BRAND":
-                alertTemplate = plugin.getConfigManager().getBlockedBrandsAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getBlockedBrandsConsoleAlertMessage();
-                break;
-                
-            case "GEYSER_SPOOF":
-                alertTemplate = plugin.getConfigManager().getGeyserSpoofAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getGeyserSpoofConsoleAlertMessage();
-                break;
-                
-            default:
-                // Fallback to global messages
-                alertTemplate = plugin.getConfigManager().getAlertMessage();
-                consoleAlertTemplate = plugin.getConfigManager().getConsoleAlertMessage();
+        if (violations.size() > 1) {
+            // Join all reasons with commas
+            String reasonsList = String.join(", ", violations);
+            
+            // Multiple violations format
+            playerAlert = plugin.getConfigManager().getMultipleFlagsMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reasons%", reasonsList);
+            
+            consoleAlert = plugin.getConfigManager().getConsoleMultipleFlagsMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reasons%", reasonsList);
+        } else {
+            // Single violation format - select the appropriate message based on violation type
+            switch(violationType) {
+                case "VANILLA_WITH_CHANNELS":
+                    playerAlert = plugin.getConfigManager().getVanillaCheckAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getVanillaCheckConsoleAlertMessage();
+                    break;
+                    
+                case "NON_VANILLA_WITH_CHANNELS":
+                    playerAlert = plugin.getConfigManager().getNonVanillaCheckAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getNonVanillaCheckConsoleAlertMessage();
+                    break;
+                    
+                case "BLOCKED_CHANNEL":
+                case "CHANNEL_WHITELIST":
+                    playerAlert = plugin.getConfigManager().getBlockedChannelsAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
+                    break;
+                    
+                case "BLOCKED_BRAND":
+                    playerAlert = plugin.getConfigManager().getBlockedBrandsAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getBlockedBrandsConsoleAlertMessage();
+                    break;
+                    
+                case "GEYSER_SPOOF":
+                    playerAlert = plugin.getConfigManager().getGeyserSpoofAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getGeyserSpoofConsoleAlertMessage();
+                    break;
+                    
+                default:
+                    // Fallback to global messages
+                    playerAlert = plugin.getConfigManager().getAlertMessage();
+                    consoleAlert = plugin.getConfigManager().getConsoleAlertMessage();
+            }
+            
+            // Replace placeholders
+            playerAlert = playerAlert
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", violations.get(0));
+            
+            consoleAlert = consoleAlert
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", violations.get(0));
         }
         
-        // Format the player alert message with placeholders
-        String playerAlert = alertTemplate
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand != null ? brand : "unknown")
-                .replace("%reason%", reason);
-        
-        // Format the console alert message with placeholders
-        String consoleAlert = consoleAlertTemplate
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand != null ? brand : "unknown")
-                .replace("%reason%", reason);
-        
+        // Add channel info if available
         if (violatedChannel != null) {
             playerAlert = playerAlert.replace("%channel%", violatedChannel);
             consoleAlert = consoleAlert.replace("%channel%", violatedChannel);
@@ -560,9 +517,7 @@ public class PacketListener extends PacketListenerAbstract {
                 .forEach(p -> p.sendMessage(coloredPlayerAlert));
         
         // Send to Discord if enabled
-        List<String> singleViolation = new ArrayList<>();
-        singleViolation.add(reason);
-        plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation, violationType);
+        plugin.getDiscordWebhookHandler().sendAlert(player, violations.get(0), brand, violatedChannel, violations, violationType);
     }
     
     // Execute punishment commands
@@ -577,10 +532,6 @@ public class PacketListener extends PacketListenerAbstract {
                 
             case "NON_VANILLA_WITH_CHANNELS":
                 punishments = plugin.getConfigManager().getNonVanillaCheckPunishments();
-                break;
-                
-            case "BRAND_FORMAT":
-                punishments = plugin.getConfigManager().getBrandFormattingPunishments();
                 break;
                 
             case "BLOCKED_CHANNEL":

@@ -134,31 +134,6 @@ public class ConfigManager {
         return config.getBoolean("non-vanilla-check.discord-alert", false);
     }
     
-    // Brand Formatting Check
-    public boolean checkBrandFormatting() {
-        return config.getBoolean("brand-formatting.enabled", true);
-    }
-    
-    public boolean shouldPunishBrandFormatting() {
-        return config.getBoolean("brand-formatting.punish", false);
-    }
-    
-    public String getBrandFormattingAlertMessage() {
-        return config.getString("brand-formatting.alert-message", getAlertMessage());
-    }
-    
-    public String getBrandFormattingConsoleAlertMessage() {
-        return config.getString("brand-formatting.console-alert-message", getConsoleAlertMessage());
-    }
-    
-    public List<String> getBrandFormattingPunishments() {
-        return config.getStringList("brand-formatting.punishments");
-    }
-    
-    public boolean isBrandFormattingDiscordAlertEnabled() {
-        return config.getBoolean("brand-formatting.discord-alert", false);
-    }
-    
     // Blocked Channels Check
     public boolean isBlockedChannelsEnabled() {
         return config.getBoolean("blocked-channels.enabled", false);
@@ -368,5 +343,44 @@ public class ConfigManager {
     
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
+    }
+    
+    /**
+     * Determines if Discord alerts are enabled for a specific violation type
+     */
+    public boolean isDiscordAlertEnabledForViolation(String violationType) {
+        if (violationType == null) {
+            return true; // Default to true if no violation type specified
+        }
+        
+        switch(violationType) {
+            case "VANILLA_WITH_CHANNELS":
+                return isVanillaCheckDiscordAlertEnabled();
+                
+            case "NON_VANILLA_WITH_CHANNELS":
+                return isNonVanillaCheckDiscordAlertEnabled();
+                
+            case "BLOCKED_CHANNEL":
+            case "CHANNEL_WHITELIST":
+                return isBlockedChannelsDiscordAlertEnabled();
+                
+            case "BLOCKED_BRAND":
+                return isBlockedBrandsDiscordAlertEnabled();
+                
+            case "GEYSER_SPOOF":
+                return isGeyserSpoofDiscordAlertEnabled();
+                
+            case "JOIN_BRAND":
+                return isJoinBrandAlertsEnabled();
+                
+            case "INITIAL_CHANNELS":
+                return isInitialChannelsAlertsEnabled();
+                
+            case "MODIFIED_CHANNEL":
+                return isModifiedChannelsDiscordEnabled();
+                
+            default:
+                return true; // Default to enabled for unknown types
+        }
     }
 }
