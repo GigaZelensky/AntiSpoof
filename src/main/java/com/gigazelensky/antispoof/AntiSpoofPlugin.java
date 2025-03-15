@@ -6,6 +6,7 @@ import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
 import com.gigazelensky.antispoof.listeners.PacketListener;
 import com.gigazelensky.antispoof.listeners.PlayerJoinListener;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import com.gigazelensky.antispoof.utils.BrandAlertManager;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
@@ -27,15 +28,25 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private final Map<String, String> playerBrands = new HashMap<>();
     private FloodgateApi floodgateApi = null;
     private PacketListener packetListener;
+    private BrandAlertManager alertManager;
     
-    // Add a map to track the last alert time for each player
-    private final Map<UUID, Long> lastAlertTime = new HashMap<>();
+    // Plugin instance for safety
+    private static AntiSpoofPlugin instance;
     
     @Override
     public void onEnable() {
+        // Set instance - this is important to prevent duplicate issues
+        instance = this;
+        
         saveDefaultConfig();
         this.configManager = new ConfigManager(this);
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
+        
+        // Initialize the alert manager
+        this.alertManager = BrandAlertManager.getInstance();
+        
+        // Add debug info about this plugin instance
+        getLogger().info("AntiSpoofPlugin instance initialized: " + this.toString());
         
         // Initialize PacketEvents
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
@@ -113,6 +124,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
 
+    /**
+     * Get the plugin instance (singleton pattern)
+     */
+    public static AntiSpoofPlugin getInstance() {
+        return instance;
+    }
+
     public ConfigManager getConfigManager() {
         return configManager;
     }
@@ -140,18 +158,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return packetListener;
     }
     
-    // Add a method to check if an alert can be sent for a player
-    public boolean canSendAlert(UUID playerUUID) {
-        long now = System.currentTimeMillis();
-        Long lastAlert = lastAlertTime.get(playerUUID);
-        
-        // Allow alert if no previous alert or if it's been more than 3 seconds
-        if (lastAlert == null || now - lastAlert > 3000) {
-            lastAlertTime.put(playerUUID, now);
-            return true;
-        }
-        
-        return false;
+    public BrandAlertManager getAlertManager() {
+        return alertManager;
     }
     
     public boolean isBedrockPlayer(Player player) {
@@ -349,8 +357,14 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (PacketEvents.getAPI() != null) {
             PacketEvents.getAPI().terminate();
         }
+        
         playerBrands.clear();
-        lastAlertTime.clear();
+        
+        // Clear all alerts when plugin disables
+        if (alertManager != null) {
+            alertManager.clearAll();
+        }
+        
         getLogger().info("AntiSpoof disabled!");
     }
 }

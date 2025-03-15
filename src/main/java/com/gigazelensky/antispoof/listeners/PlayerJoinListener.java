@@ -3,10 +3,12 @@ package com.gigazelensky.antispoof.listeners;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import com.gigazelensky.antispoof.utils.BrandAlertManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -14,22 +16,24 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 
 public class PlayerJoinListener implements Listener {
    private final AntiSpoofPlugin plugin;
    private final ConfigManager config;
-   
-   // Global static tracking for brand alerts to prevent duplicates across the entire plugin
-   private static final Map<UUID, Long> BRAND_ALERT_TRACKING = new ConcurrentHashMap<>();
-   private static final long BRAND_ALERT_COOLDOWN = 10000; // 10 seconds cooldown
    private static boolean listenerRegistered = false;
+   private final BrandAlertManager alertManager;
 
    public PlayerJoinListener(AntiSpoofPlugin plugin) {
        this.plugin = plugin;
        this.config = plugin.getConfigManager();
+       this.alertManager = BrandAlertManager.getInstance();
+       
+       // Add plugin instance to debug log for verification
+       if (config.isDebugMode()) {
+           plugin.getLogger().info("[Debug] PlayerJoinListener created for plugin instance: " + plugin.toString());
+       }
    }
 
    public void register() {
@@ -38,10 +42,12 @@ public class PlayerJoinListener implements Listener {
            Bukkit.getPluginManager().registerEvents(this, plugin);
            listenerRegistered = true;
            plugin.getLogger().info("PlayerJoinListener registered");
+       } else if (config.isDebugMode()) {
+           plugin.getLogger().info("[Debug] Avoided duplicate PlayerJoinListener registration");
        }
    }
 
-   @EventHandler
+   @EventHandler(priority = EventPriority.LOW)
    public void onPlayerJoin(PlayerJoinEvent event) {
        Player player = event.getPlayer();
        if (player.hasPermission("antispoof.bypass")) return;
@@ -62,73 +68,17 @@ public class PlayerJoinListener implements Listener {
        // If delay is negative, rely completely on packet listener checks
    }
    
-   @EventHandler
+   @EventHandler(priority = EventPriority.MONITOR)
    public void onPlayerQuit(PlayerQuitEvent event) {
        UUID uuid = event.getPlayer().getUniqueId();
        plugin.getPlayerDataMap().remove(uuid);
        plugin.getPlayerBrands().remove(event.getPlayer().getName());
-       BRAND_ALERT_TRACKING.remove(uuid);
+       alertManager.playerDisconnected(uuid);
        
        // Clean up packet listener tracking
        if (plugin.getPacketListener() != null) {
            plugin.getPacketListener().playerDisconnected(uuid);
        }
-   }
-
-   /**
-    * Send a brand alert message with global cooldown tracking
-    * This is the ONLY method that should be used to send brand alerts in the entire plugin
-    */
-   public static synchronized boolean sendBrandAlert(AntiSpoofPlugin plugin, Player player, String brand) {
-       UUID uuid = player.getUniqueId();
-       ConfigManager config = plugin.getConfigManager();
-       
-       // Check if we've recently sent a brand alert for this player
-       long now = System.currentTimeMillis();
-       Long lastAlert = BRAND_ALERT_TRACKING.get(uuid);
-       
-       if (lastAlert != null && now - lastAlert <= BRAND_ALERT_COOLDOWN) {
-           plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName() + " - within cooldown period");
-           return false;
-       }
-       
-       // Mark this player as having received a brand alert
-       BRAND_ALERT_TRACKING.put(uuid, now);
-       
-       // Format the player alert message with placeholders
-       String playerAlert = config.getBlockedBrandsAlertMessage()
-               .replace("%player%", player.getName())
-               .replace("%brand%", brand != null ? brand : "unknown");
-       
-       // Format the console alert message with placeholders
-       String consoleAlert = config.getBlockedBrandsConsoleAlertMessage()
-               .replace("%player%", player.getName())
-               .replace("%brand%", brand != null ? brand : "unknown");
-       
-       // Convert color codes for player messages
-       String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-       
-       // Log to console directly using the console format (no need to strip colors)
-       plugin.getLogger().info(consoleAlert);
-       
-       // Notify players with permission
-       Bukkit.getOnlinePlayers().stream()
-               .filter(p -> p.hasPermission("antispoof.alerts"))
-               .forEach(p -> p.sendMessage(coloredPlayerAlert));
-       
-       // Send to Discord if enabled for join brand alerts
-       if (config.isDiscordWebhookEnabled() && config.isJoinBrandAlertsEnabled()) {
-           plugin.getDiscordWebhookHandler().sendAlert(
-               player, 
-               "Joined using client brand: " + brand, 
-               brand, 
-               null,
-               null,
-               "JOIN_BRAND"
-           );
-       }
-       
-       return true;
    }
 
    private void checkPlayer(Player player) {
@@ -161,9 +111,9 @@ public class PlayerJoinListener implements Listener {
        }
        
        // Always show client brand join message for operators if it's not in the whitelist
-       // This happens regardless of any violations, but we'll use our global cooldown system
+       // This happens regardless of any violations, using singleton manager for deduplication
        if (config.isBlockedBrandsEnabled() && !config.matchesBrandPattern(brand)) {
-           sendBrandAlert(plugin, player, brand);
+           alertManager.sendBrandAlert(plugin, player, brand);
        }
        
        // List to collect all violations
@@ -367,7 +317,7 @@ public class PlayerJoinListener implements Listener {
        return null; // No blocked channels found
    }
 
-   // Send alert message for multiple violations - This is now the ONLY alert method
+   // Send alert message for multiple violations
    private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand, String violatedChannel, String violationType) {
        UUID playerUUID = player.getUniqueId();
        
