@@ -20,7 +20,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 public class DiscordWebhookHandler {
     private final AntiSpoofPlugin plugin;
@@ -29,130 +28,12 @@ public class DiscordWebhookHandler {
     // Map to track the channels a player has at the time of their last alert
     private final Map<UUID, Set<String>> lastAlertChannels = new ConcurrentHashMap<>();
     
-    // Set to track the types of alerts already sent for each player in the current session
-    private final Map<UUID, Set<String>> alertTypesSent = new ConcurrentHashMap<>();
-    
-    // Track when the last alert was sent for each player
-    private final Map<UUID, Long> lastAlertTime = new ConcurrentHashMap<>();
-    
-    // Cooldown time in milliseconds
-    private static final long ALERT_COOLDOWN = 5000; // 5 seconds
+    // Set to track players who have already been alerted for spoofing
+    private final Set<UUID> alertedPlayers = new HashSet<>();
     
     public DiscordWebhookHandler(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
-    }
-    
-    /**
-     * Clears the alert status for a player
-     * @param playerUUID The UUID of the player to clear
-     */
-    public void clearPlayerAlertStatus(UUID playerUUID) {
-        // Clear alert tracking
-        alertTypesSent.remove(playerUUID);
-        lastAlertChannels.remove(playerUUID);
-        lastAlertTime.remove(playerUUID);
-        
-        if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("[Discord] Cleared alert status for player UUID: " + playerUUID);
-        }
-    }
-    
-    /**
-     * Check if an alert of a specific type has already been sent for this player
-     * @param playerUUID Player UUID
-     * @param alertType The type of alert
-     * @return True if this alert type has already been sent
-     */
-    public boolean hasAlertBeenSent(UUID playerUUID, String alertType) {
-        Set<String> sentTypes = alertTypesSent.getOrDefault(playerUUID, new HashSet<>());
-        return sentTypes.contains(alertType);
-    }
-    
-    /**
-     * Mark an alert type as sent for this player
-     * @param playerUUID Player UUID
-     * @param alertType The type of alert
-     */
-    public void markAlertSent(UUID playerUUID, String alertType) {
-        Set<String> sentTypes = alertTypesSent.computeIfAbsent(playerUUID, k -> new HashSet<>());
-        sentTypes.add(alertType);
-    }
-    
-    /**
-     * Check if any violation alerts have been sent for this player
-     * @param playerUUID Player UUID
-     * @return True if any violation alerts have been sent
-     */
-    public boolean hasAnyViolationAlerts(UUID playerUUID) {
-        Set<String> sentTypes = alertTypesSent.getOrDefault(playerUUID, new HashSet<>());
-        
-        // Check for common violation alert types
-        for (String alertType : sentTypes) {
-            if (alertType.startsWith("BLOCKED_CHANNEL:") ||
-                alertType.equals("CHANNEL_WHITELIST") ||
-                alertType.equals("VANILLA_WITH_CHANNELS") ||
-                alertType.equals("NON_VANILLA_WITH_CHANNELS") ||
-                alertType.equals("BLOCKED_BRAND") ||
-                alertType.equals("GEYSER_SPOOF")) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Check if we should send an alert for this player based on cooldown
-     * @param playerUUID Player UUID
-     * @return True if we should send an alert
-     */
-    private boolean isOnCooldown(UUID playerUUID) {
-        long now = System.currentTimeMillis();
-        Long lastAlert = lastAlertTime.get(playerUUID);
-        
-        if (lastAlert == null) {
-            return false;
-        }
-        
-        return (now - lastAlert) < ALERT_COOLDOWN;
-    }
-    
-    /**
-     * Check if Discord alerts are enabled for the given violation type
-     * @param violationType The type of violation
-     * @return True if Discord alerts are enabled for this violation type
-     */
-    private boolean isDiscordAlertEnabledForViolation(String violationType, String reason) {
-        if (!config.isDiscordWebhookEnabled()) {
-            return false;
-        }
-        
-        if (violationType.equals("VANILLA_WITH_CHANNELS") || reason.contains("Vanilla client with plugin channels")) {
-            return config.isVanillaCheckDiscordEnabled();
-        }
-        else if (violationType.equals("NON_VANILLA_WITH_CHANNELS") || reason.contains("Non-vanilla client with channels")) {
-            return config.isNonVanillaCheckDiscordEnabled();
-        }
-        else if (violationType.startsWith("BLOCKED_CHANNEL:") || reason.contains("Blocked channel:") || 
-                 violationType.equals("CHANNEL_WHITELIST") || reason.contains("Client channels don't match whitelist")) {
-            return config.isBlockedChannelsDiscordEnabled();
-        }
-        else if (violationType.equals("BLOCKED_BRAND") || reason.contains("Blocked client brand:")) {
-            return config.isBlockedBrandsDiscordEnabled();
-        }
-        else if (violationType.equals("GEYSER_SPOOF") || reason.contains("Spoofing Geyser client")) {
-            return config.isGeyserSpoofDiscordEnabled();
-        }
-        else if (violationType.startsWith("MODIFIED_CHANNEL:") || reason.contains("Modified channel:")) {
-            return config.isModifiedChannelsDiscordEnabled();
-        }
-        else if (violationType.startsWith("CLIENT_BRAND:") || reason.contains("joined using client brand:")) {
-            return config.isJoinBrandAlertsEnabled();
-        }
-        
-        // Default to true if we can't determine the type
-        return true;
     }
     
     /**
@@ -162,8 +43,9 @@ public class DiscordWebhookHandler {
      * @param brand The client brand
      * @param channel The channel that triggered the alert (can be null)
      * @param violations List of all violations (for multiple flags)
+     * @param violationType The type of violation that triggered the alert
      */
-    public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations) {
+    public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations, String violationType) {
         if (!config.isDiscordWebhookEnabled()) {
             return;
         }
@@ -172,219 +54,150 @@ public class DiscordWebhookHandler {
         if (webhookUrl == null || webhookUrl.isEmpty()) {
             return;
         }
-
-        UUID playerUuid = player.getUniqueId();
-        
-        // Check if we're on cooldown
-        if (isOnCooldown(playerUuid)) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Skipping alert for " + player.getName() + " due to cooldown");
-            }
-            return;
-        }
-        
-        // Determine alert type
-        String alertType;
-        if (reason.contains("modified channel")) {
-            alertType = "MODIFIED_CHANNEL:" + channel;
-        } else if (reason.contains("Blocked channel:")) {
-            alertType = "BLOCKED_CHANNEL:" + channel;
-        } else if (reason.contains("Client channels don't match whitelist")) {
-            alertType = "CHANNEL_WHITELIST";
-        } else if (reason.contains("Blocked client brand:")) {
-            alertType = "BLOCKED_BRAND:" + brand;
-        } else if (reason.contains("joined using client brand:")) {
-            alertType = "CLIENT_BRAND:" + brand;
-        } else if (reason.contains("Vanilla client with plugin channels")) {
-            alertType = "VANILLA_WITH_CHANNELS";
-        } else if (reason.contains("Non-vanilla client with channels")) {
-            alertType = "NON_VANILLA_WITH_CHANNELS";
-        } else if (reason.contains("Spoofing Geyser client")) {
-            alertType = "GEYSER_SPOOF";
-        } else {
-            alertType = "UNKNOWN:" + reason;
-        }
-        
-        // Check if this alert type has already been sent for this player
-        if (hasAlertBeenSent(playerUuid, alertType)) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Skipping duplicate alert of type " + alertType + " for player " + player.getName());
-            }
-            return;
-        }
         
         // Check if Discord alerts are enabled for this violation type
-        if (!isDiscordAlertEnabledForViolation(alertType, reason)) {
+        if (!isDiscordAlertEnabledForViolation(violationType)) {
             if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Skipping alert for " + player.getName() + " - Discord alerts disabled for " + alertType);
+                plugin.getLogger().info("[Discord] Alerts disabled for violation type: " + violationType);
             }
             return;
         }
-        
-        // Update last alert time
-        lastAlertTime.put(playerUuid, System.currentTimeMillis());
-        
+
+        UUID playerUuid = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(playerUuid);
+        
+        // No data, no channels to check
         if (data == null) {
             return;
         }
         
-        // Mark this alert type as sent
-        markAlertSent(playerUuid, alertType);
-        
-        // Save current channels for comparison
+        // Get the current set of channels
         Set<String> currentChannels = new HashSet<>(data.getChannels());
         
-        // Check if this is a modified channel alert
+        // Check if this is a modified channel alert by looking for the text pattern
         boolean isModifiedChannelAlert = reason.contains("modified channel");
         
-        // If it's a brand alert or violation alert
+        // If it's a normal spoofing alert (not a modified channel alert)
         if (!isModifiedChannelAlert) {
-            // Store the current channels for future comparison
-            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
-            
-            // If the player has previously had a violation, don't send a brand alert
-            if (alertType.equals("CLIENT_BRAND:" + brand) && hasAnyViolationAlerts(playerUuid)) {
+            // Skip if player has already been alerted for spoofing
+            if (alertedPlayers.contains(playerUuid)) {
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Skipping brand alert because player has violation alerts");
+                    plugin.getLogger().info("[Discord] Player " + player.getName() + " already alerted for spoofing, skipping");
                 }
+                
+                // Even though we're skipping the spoofing alert, we should still check for modified channels
+                // if the feature is enabled and we already have channel data
+                if (config.isModifiedChannelsEnabled() && lastAlertChannels.containsKey(playerUuid)) {
+                    checkForModifiedChannels(player, currentChannels);
+                }
+                
                 return;
             }
             
-            // Send the full webhook for the alert
+            // Mark player as alerted
+            alertedPlayers.add(playerUuid);
+            
+            // Store the current channels for future comparison
+            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+            
+            // Send the full webhook for the spoofing alert
             if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending alert for player: " + player.getName() + ", reason: " + reason);
+                plugin.getLogger().info("[Discord] Sending first spoofing alert for player: " + player.getName());
             }
             
             // Send the full webhook
             sendFullWebhook(player, reason, brand, channel, violations);
         }
         // It's a modified channel alert
-        else if (config.isModifiedChannelsEnabled()) {
-            // If the player already has violation alerts, skip the modified channel alert
-            if (hasAnyViolationAlerts(playerUuid)) {
+        else {
+            // Only send if modified channel discord alerts are enabled
+            if (config.isModifiedChannelsDiscordEnabled()) {
+                // Get the modified channel from the reason
+                String modifiedChannel = channel; // The channel should be passed by the caller
+                
+                // Send a compact update webhook for the modified channel
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Skipping modified channel alert because player has violation alerts");
+                    plugin.getLogger().info("[Discord] Sending modified channel alert for: " + modifiedChannel);
                 }
-                return;
+                
+                sendModifiedChannelWebhook(player, modifiedChannel);
+                
+                // Update last alert channels
+                lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
             }
-            
-            // Send a compact update webhook for the modified channel
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending modified channel alert for: " + channel);
+        }
+    }
+    
+    /**
+     * Determines if Discord alerts are enabled for a specific violation type
+     */
+    private boolean isDiscordAlertEnabledForViolation(String violationType) {
+        if (violationType == null) {
+            return true; // Default to true if no violation type specified
+        }
+        
+        switch(violationType) {
+            case "VANILLA_WITH_CHANNELS":
+                return config.isVanillaCheckDiscordAlertEnabled();
+                
+            case "NON_VANILLA_WITH_CHANNELS":
+                return config.isNonVanillaCheckDiscordAlertEnabled();
+                
+            case "BRAND_FORMAT":
+                return config.isBrandFormattingDiscordAlertEnabled();
+                
+            case "BLOCKED_CHANNEL":
+            case "CHANNEL_WHITELIST":
+                return config.isBlockedChannelsDiscordAlertEnabled();
+                
+            case "BLOCKED_BRAND":
+                return config.isBlockedBrandsDiscordAlertEnabled();
+                
+            case "GEYSER_SPOOF":
+                return config.isGeyserSpoofDiscordAlertEnabled();
+                
+            case "JOIN_BRAND":
+                return config.isJoinBrandAlertsEnabled();
+                
+            case "INITIAL_CHANNELS":
+                return config.isInitialChannelsAlertsEnabled();
+                
+            case "MODIFIED_CHANNEL":
+                return config.isModifiedChannelsDiscordEnabled();
+                
+            default:
+                return true; // Default to enabled for unknown types
+        }
+    }
+    
+    /**
+     * Checks for modified channels and sends alerts if needed
+     */
+    private void checkForModifiedChannels(Player player, Set<String> currentChannels) {
+        UUID playerUuid = player.getUniqueId();
+        Set<String> previousChannels = lastAlertChannels.get(playerUuid);
+        
+        // Find channels that are in current but not in previous
+        Set<String> newChannels = new HashSet<>(currentChannels);
+        newChannels.removeAll(previousChannels);
+        
+        // If there are new channels, send alerts
+        if (!newChannels.isEmpty() && config.isModifiedChannelsEnabled()) {
+            // Only process one channel at a time - usually only one is added at once
+            for (String newChannel : newChannels) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Detected modified channel: " + newChannel);
+                }
+                
+                // Send a discord webhook if enabled
+                if (config.isModifiedChannelsDiscordEnabled()) {
+                    sendModifiedChannelWebhook(player, newChannel);
+                }
             }
-            
-            sendModifiedChannelWebhook(player, channel);
             
             // Update last alert channels
             lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
         }
-    }
-    
-    /**
-     * Send an initial channel registration webhook with all channels
-     * @param player The player
-     * @param channels The set of channels
-     */
-    public void sendInitialChannelsWebhook(Player player, Set<String> channels) {
-        if (!config.isDiscordWebhookEnabled()) {
-            return;
-        }
-        
-        // Check if initial channels alerts are enabled
-        if (!config.isInitialChannelsAlertsEnabled()) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Skipping initial channels alert - feature disabled in config");
-            }
-            return;
-        }
-        
-        String webhookUrl = config.getDiscordWebhookUrl();
-        if (webhookUrl == null || webhookUrl.isEmpty()) {
-            return;
-        }
-        
-        UUID playerUuid = player.getUniqueId();
-        
-        // Check if we're on cooldown
-        if (isOnCooldown(playerUuid)) {
-            return;
-        }
-        
-        // Check if we've already sent an initial channels alert
-        if (hasAlertBeenSent(playerUuid, "INITIAL_CHANNELS")) {
-            return;
-        }
-        
-        // Don't send initial channels if we already have any violation alerts
-        if (hasAnyViolationAlerts(playerUuid)) {
-            return;
-        }
-        
-        // Mark as sent
-        markAlertSent(playerUuid, "INITIAL_CHANNELS");
-        
-        // Update last alert time
-        lastAlertTime.put(playerUuid, System.currentTimeMillis());
-        
-        // Store these channels
-        lastAlertChannels.put(playerUuid, new HashSet<>(channels));
-        
-        // Send webhook if there are channels
-        if (!channels.isEmpty()) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending initial channels webhook for player: " + player.getName());
-            }
-            
-            sendInitialChannelsWebhook(player, "Initial Channels Registered", channels);
-        }
-    }
-    
-    /**
-     * Sends a webhook with initial channel registration
-     */
-    private void sendInitialChannelsWebhook(Player player, String reason, Set<String> channels) {
-        String brand = plugin.getClientBrand(player);
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"embeds\":[{");
-        
-        // Title
-        String title = config.getDiscordEmbedTitle()
-                .replace("%player%", player.getName())
-                .replace("%reason%", reason);
-        sb.append("\"title\":\"").append(escapeJson(title)).append("\",");
-        
-        // Color (convert hex to decimal)
-        String colorHex = config.getDiscordEmbedColor().replace("#", "");
-        try {
-            Color color = Color.decode("#" + colorHex);
-            int decimal = color.getRGB() & 0xFFFFFF;
-            sb.append("\"color\":").append(decimal).append(",");
-        } catch (NumberFormatException e) {
-            sb.append("\"color\":2831050,"); // Default teal color
-        }
-        
-        // Description - Just player name and channel list
-        sb.append("\"description\":\"");
-        sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-        sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
-        
-        sb.append("**Registered Channels**:\\n");
-        for (String channel : channels) {
-            sb.append("• ").append(escapeJson(channel)).append("\\n");
-        }
-        
-        // Close the description
-        sb.append("\",");
-        
-        // Timestamp
-        sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
-        
-        sb.append("}]}");
-        
-        // Send the webhook
-        sendWebhookPayload(sb.toString());
     }
     
     /**
@@ -394,28 +207,28 @@ public class DiscordWebhookHandler {
         // Get the appropriate console alert message
         String consoleAlert = determineConsoleAlert(player, reason, brand, channel, violations);
         
-        // Build the webhook JSON
-        String json = createFullWebhookJson(player, reason, brand, channel, violations, consoleAlert);
-        
-        // Send the webhook
-        sendWebhookPayload(json);
+        // Send the full webhook
+        sendWebhookDirectly(player, reason, brand, channel, violations, consoleAlert, false, null);
     }
     
     /**
      * Sends a compact webhook for a modified channel
      */
     private void sendModifiedChannelWebhook(Player player, String modifiedChannel) {
-        // Build the webhook JSON
-        String json = createModifiedChannelJson(player, modifiedChannel);
+        String reason = "Modified channel";
+        Set<String> modifiedChannels = new HashSet<>();
+        modifiedChannels.add(modifiedChannel);
         
-        // Send the webhook
-        sendWebhookPayload(json);
+        // Send a compact webhook
+        sendWebhookDirectly(player, reason, null, modifiedChannel, null, null, true, modifiedChannels);
     }
     
     /**
-     * Send a webhook payload
+     * Directly sends a webhook
      */
-    private void sendWebhookPayload(String json) {
+    private void sendWebhookDirectly(Player player, String reason, String brand, String channel, 
+                                    List<String> violations, String consoleAlert, 
+                                    boolean isCompactUpdate, Set<String> modifiedChannels) {
         String webhookUrl = config.getDiscordWebhookUrl();
         
         // Validate webhook URL format
@@ -428,12 +241,25 @@ public class DiscordWebhookHandler {
         // Execute webhook request asynchronously
         CompletableFuture.runAsync(() -> {
             try {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Sending webhook for player: " + player.getName() + 
+                                          (isCompactUpdate ? " (modified channel)" : ""));
+                }
+                
                 URL url = new URL(webhookUrl);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");
                 connection.setRequestProperty("User-Agent", "AntiSpoof-Plugin");
                 connection.setDoOutput(true);
+                
+                // Create JSON payload based on the webhook type
+                String json;
+                if (isCompactUpdate) {
+                    json = createModifiedChannelJson(player, reason, modifiedChannels);
+                } else {
+                    json = createFullWebhookJson(player, reason, brand, channel, violations, consoleAlert);
+                }
                 
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Discord] Webhook payload: " + json);
@@ -449,9 +275,6 @@ public class DiscordWebhookHandler {
                     if (config.isDebugMode()) {
                         plugin.getLogger().info("[Discord] Webhook sent successfully!");
                     }
-                } else if (responseCode == 429) {
-                    // Rate limited
-                    plugin.getLogger().warning("[Discord] Rate limited. Try again later.");
                 } else {
                     plugin.getLogger().warning("[Discord] Failed to send webhook, response code: " + responseCode);
                     
@@ -480,20 +303,35 @@ public class DiscordWebhookHandler {
     /**
      * Creates a compact JSON payload for modified channels
      */
-    private String createModifiedChannelJson(Player player, String modifiedChannel) {
+    private String createModifiedChannelJson(Player player, String reason, Set<String> modifiedChannels) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"embeds\":[{");
         
-        // Title - Just a simple title for modified channels
-        sb.append("\"title\":\"Channel Modified\",");
+        // Title
+        String title = config.getDiscordEmbedTitle()
+                .replace("%player%", player.getName())
+                .replace("%reason%", reason);
+        sb.append("\"title\":\"").append(escapeJson(title)).append("\",");
         
-        // Color - Use a different color for modified channels (light blue)
-        sb.append("\"color\":5814783,");
+        // Color (convert hex to decimal)
+        String colorHex = config.getDiscordEmbedColor().replace("#", "");
+        try {
+            Color color = Color.decode("#" + colorHex);
+            int decimal = color.getRGB() & 0xFFFFFF;
+            sb.append("\"color\":").append(decimal).append(",");
+        } catch (NumberFormatException e) {
+            sb.append("\"color\":2831050,"); // Default teal color
+        }
         
-        // Description - Just player name and modified channel
+        // Description - Just player name and modified channels
         sb.append("\"description\":\"");
         sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-        sb.append("**Modified Channel**: ").append(escapeJson(modifiedChannel));
+        
+        // Use specific message for modified channels
+        sb.append("**Modified channel(s)**:\\n");
+        for (String channel : modifiedChannels) {
+            sb.append("• ").append(escapeJson(channel)).append("\\n");
+        }
         
         // Close the description
         sb.append("\",");
@@ -527,6 +365,12 @@ public class DiscordWebhookHandler {
         } 
         else if (reason.contains("Non-vanilla client with channels")) {
             return config.getNonVanillaCheckConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("Invalid brand formatting")) {
+            return config.getBrandFormattingConsoleAlertMessage()
                     .replace("%player%", player.getName())
                     .replace("%brand%", brand != null ? brand : "unknown")
                     .replace("%reason%", reason);
@@ -603,47 +447,82 @@ public class DiscordWebhookHandler {
         
         // Description - Use violation content from config
         sb.append("\"description\":\"");
+        List<String> contentLines = config.getDiscordViolationContent();
         
-        // Add player info
-        sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-        
-        // Add reason/alert
-        sb.append("**Reason**: ").append(escapeJson(consoleAlert)).append("\\n");
-        
-        // Add brand info
-        sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
-        
-        // Add ViaVersion if available
-        if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion") && 
-            Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-            try {
-                String version = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
-                    player, "%viaversion_player_protocol_version%");
-                sb.append("**Client Version**: ").append(escapeJson(version)).append("\\n");
-            } catch (Exception e) {
-                if (config.isDebugMode()) {
-                    plugin.getLogger().warning("[Discord] Error getting ViaVersion: " + e.getMessage());
+        if (contentLines != null && !contentLines.isEmpty()) {
+            for (String line : contentLines) {
+                // Handle special placeholders
+                String processedLine = line;
+                
+                // Handle %player% placeholder
+                processedLine = processedLine.replace("%player%", player.getName());
+                
+                // Handle %console_alert% placeholder
+                processedLine = processedLine.replace("%console_alert%", consoleAlert);
+                
+                // Handle %brand% placeholder
+                processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
+                
+                // Handle %viaversion_version% placeholder if ViaVersion is installed
+                if (processedLine.contains("%viaversion_version%")) {
+                    String version = "Unknown";
+                    // Check if ViaVersion and PlaceholderAPI are installed
+                    if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion") && 
+                        Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+                        try {
+                            // If so, try to get the version through PlaceholderAPI
+                            version = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                                player, "%viaversion_player_protocol_version%");
+                        } catch (Exception e) {
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().warning("[Discord] Error getting ViaVersion: " + e.getMessage());
+                            }
+                        }
+                    }
+                    processedLine = processedLine.replace("%viaversion_version%", version);
+                }
+                
+                // Handle %channel% placeholder for listing all channels
+                if (line.contains("%channel%")) {
+                    PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                    if (data != null && !data.getChannels().isEmpty()) {
+                        Set<String> channels = data.getChannels();
+                        for (String ch : channels) {
+                            sb.append("• ").append(escapeJson(ch)).append("\\n");
+                        }
+                    } else {
+                        sb.append("• None detected\\n");
+                    }
+                } else {
+                    sb.append(escapeJson(processedLine)).append("\\n");
                 }
             }
-        }
-        
-        // If we have specific violations, add them
-        if (violations != null && !violations.isEmpty()) {
-            sb.append("**Violations**:\\n");
-            for (String violation : violations) {
-                sb.append("• ").append(escapeJson(violation)).append("\\n");
-            }
-        }
-        
-        // Add the player's channels
-        PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-        sb.append("**Channels**:\\n");
-        if (data != null && !data.getChannels().isEmpty()) {
-            for (String ch : data.getChannels()) {
-                sb.append("• ").append(escapeJson(ch)).append("\\n");
-            }
         } else {
-            sb.append("• None detected\\n");
+            // Fallback if no content lines configured
+            sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
+            sb.append("**Console Alert**: ").append(escapeJson(consoleAlert)).append("\\n");
+            sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
+            
+            if (violations != null && !violations.isEmpty()) {
+                sb.append("**Violations**:\\n");
+                for (String violation : violations) {
+                    sb.append("• ").append(escapeJson(violation)).append("\\n");
+                }
+            } else {
+                sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
+            }
+            
+            if (channel != null) {
+                sb.append("**Channel**: ").append(escapeJson(channel)).append("\\n");
+            }
+            
+            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+            if (data != null && !data.getChannels().isEmpty()) {
+                sb.append("**All Channels**:\\n");
+                for (String ch : data.getChannels()) {
+                    sb.append("• ").append(escapeJson(ch)).append("\\n");
+                }
+            }
         }
         
         // Close the description

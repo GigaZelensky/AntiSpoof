@@ -154,6 +154,24 @@ blocked-brands:
     # - "tempban %player% 12h &cUsing blocked client"
 
 # ──────────────────────────────────────────────────────────
+#                  Brand Formatting Check
+# ──────────────────────────────────────────────────────────
+brand-formatting:
+  # Whether to check for invalid characters in client brands
+  enabled: true
+  # Whether to send alerts to Discord for brand formatting violations
+  discord-alert: false
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cInvalid brand formatting"
+  console-alert-message: "%player% flagged! Invalid brand formatting"
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%, %brand%
+  punishments:
+    - "kick %player% &cInvalid brand formatting detected"
+
+# ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
 # ──────────────────────────────────────────────────────────
 bedrock-handling:

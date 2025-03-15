@@ -89,10 +89,6 @@ public class ConfigManager {
         return config.getBoolean("vanillaspoof-check.enabled", true);
     }
     
-    public boolean isVanillaCheckDiscordEnabled() {
-        return config.getBoolean("vanillaspoof-check.discord-alert", true);
-    }
-    
     public boolean shouldPunishVanillaCheck() {
         return config.getBoolean("vanillaspoof-check.punish", true);
     }
@@ -109,13 +105,13 @@ public class ConfigManager {
         return config.getStringList("vanillaspoof-check.punishments");
     }
     
+    public boolean isVanillaCheckDiscordAlertEnabled() {
+        return config.getBoolean("vanillaspoof-check.discord-alert", true);
+    }
+    
     // Non-Vanilla Check (anything not vanilla with channels)
     public boolean shouldBlockNonVanillaWithChannels() {
         return config.getBoolean("non-vanilla-check.enabled", false);
-    }
-    
-    public boolean isNonVanillaCheckDiscordEnabled() {
-        return config.getBoolean("non-vanilla-check.discord-alert", true);
     }
     
     public boolean shouldPunishNonVanillaCheck() {
@@ -134,15 +130,17 @@ public class ConfigManager {
         return config.getStringList("non-vanilla-check.punishments");
     }
     
-    // Brand Formatting Check - DISABLED
+    public boolean isNonVanillaCheckDiscordAlertEnabled() {
+        return config.getBoolean("non-vanilla-check.discord-alert", false);
+    }
+    
+    // Brand Formatting Check
     public boolean checkBrandFormatting() {
-        // Always return false to disable this check
-        return false;
+        return config.getBoolean("brand-formatting.enabled", true);
     }
     
     public boolean shouldPunishBrandFormatting() {
-        // Since the check is disabled, this doesn't matter
-        return false;
+        return config.getBoolean("brand-formatting.punish", false);
     }
     
     public String getBrandFormattingAlertMessage() {
@@ -157,13 +155,13 @@ public class ConfigManager {
         return config.getStringList("brand-formatting.punishments");
     }
     
+    public boolean isBrandFormattingDiscordAlertEnabled() {
+        return config.getBoolean("brand-formatting.discord-alert", false);
+    }
+    
     // Blocked Channels Check
     public boolean isBlockedChannelsEnabled() {
         return config.getBoolean("blocked-channels.enabled", false);
-    }
-    
-    public boolean isBlockedChannelsDiscordEnabled() {
-        return config.getBoolean("blocked-channels.discord-alert", true);
     }
     
     public String getChannelWhitelistMode() {
@@ -197,6 +195,10 @@ public class ConfigManager {
     
     public List<String> getBlockedChannelsPunishments() {
         return config.getStringList("blocked-channels.punishments");
+    }
+    
+    public boolean isBlockedChannelsDiscordAlertEnabled() {
+        return config.getBoolean("blocked-channels.discord-alert", false);
     }
     
     // Modified Channels alerts
@@ -236,10 +238,6 @@ public class ConfigManager {
         return config.getBoolean("blocked-brands.enabled", false);
     }
     
-    public boolean isBlockedBrandsDiscordEnabled() {
-        return config.getBoolean("blocked-brands.discord-alert", true);
-    }
-    
     public boolean isBrandWhitelistEnabled() {
         return config.getBoolean("blocked-brands.whitelist-mode", false);
     }
@@ -266,6 +264,10 @@ public class ConfigManager {
     
     public List<String> getBlockedBrandsPunishments() {
         return config.getStringList("blocked-brands.punishments");
+    }
+    
+    public boolean isBlockedBrandsDiscordAlertEnabled() {
+        return config.getBoolean("blocked-brands.discord-alert", false);
     }
     
     // Brand regex matching
@@ -309,10 +311,6 @@ public class ConfigManager {
         return config.getBoolean("bedrock-handling.geyser-spoof.enabled", true);
     }
     
-    public boolean isGeyserSpoofDiscordEnabled() {
-        return config.getBoolean("bedrock-handling.geyser-spoof.discord-alert", true);
-    }
-    
     public boolean shouldPunishGeyserSpoof() {
         return config.getBoolean("bedrock-handling.geyser-spoof.punish", true);
     }
@@ -329,6 +327,10 @@ public class ConfigManager {
         return config.getStringList("bedrock-handling.geyser-spoof.punishments");
     }
     
+    public boolean isGeyserSpoofDiscordAlertEnabled() {
+        return config.getBoolean("bedrock-handling.geyser-spoof.discord-alert", true);
+    }
+    
     // Bedrock Prefix Check
     public boolean isBedrockPrefixCheckEnabled() {
         return config.getBoolean("bedrock-handling.prefix-check.enabled", true);
@@ -338,13 +340,13 @@ public class ConfigManager {
         return config.getString("bedrock-handling.prefix-check.prefix", ".");
     }
     
-    // Global alert settings
+    // Global alerts settings
     public boolean isJoinBrandAlertsEnabled() {
-        return config.getBoolean("global-alerts.join-brand-alerts", true);
+        return config.getBoolean("global-alerts.join-brand-alerts", false);
     }
     
     public boolean isInitialChannelsAlertsEnabled() {
-        return config.getBoolean("global-alerts.initial-channels-alerts", true);
+        return config.getBoolean("global-alerts.initial-channels-alerts", false);
     }
     
     // Discord webhook settings

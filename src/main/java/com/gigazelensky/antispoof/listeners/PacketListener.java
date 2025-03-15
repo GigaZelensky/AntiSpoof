@@ -28,55 +28,11 @@ public class PacketListener extends PacketListenerAbstract {
     // Track players' initial channel registration phase
     private final Map<UUID, Long> initialRegistrationTime = new ConcurrentHashMap<>();
     
-    // Map to track which alert types have already been shown to players
-    private final Map<UUID, Set<String>> alertTypesSent = new ConcurrentHashMap<>();
-    
-    // Track last alert time for rate limiting
-    private final Map<UUID, Long> lastAlertTime = new ConcurrentHashMap<>();
-    private static final long ALERT_COOLDOWN = 3000; // 3 seconds
-    
     // Time window for initial channel registration (in milliseconds)
     private static final long INITIAL_REGISTRATION_WINDOW = 5000; // 5 seconds
 
     public PacketListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
-    }
-    
-    /**
-     * Check if an alert of a specific type has already been sent for this player
-     * @param playerUUID Player UUID
-     * @param alertType The type of alert
-     * @return True if this alert type has already been sent
-     */
-    public boolean hasAlertBeenSent(UUID playerUUID, String alertType) {
-        Set<String> sentTypes = alertTypesSent.getOrDefault(playerUUID, new HashSet<>());
-        return sentTypes.contains(alertType);
-    }
-    
-    /**
-     * Mark an alert type as sent for this player
-     * @param playerUUID Player UUID
-     * @param alertType The type of alert
-     */
-    public void markAlertSent(UUID playerUUID, String alertType) {
-        Set<String> sentTypes = alertTypesSent.computeIfAbsent(playerUUID, k -> new HashSet<>());
-        sentTypes.add(alertType);
-    }
-    
-    /**
-     * Check if we should send an alert based on rate limiting
-     * @param playerUUID The player's UUID
-     * @return True if we should send the alert, false if it's on cooldown
-     */
-    private boolean isOnCooldown(UUID playerUUID) {
-        long now = System.currentTimeMillis();
-        Long lastAlert = lastAlertTime.get(playerUUID);
-        
-        if (lastAlert == null) {
-            return false;
-        }
-        
-        return (now - lastAlert) < ALERT_COOLDOWN;
     }
 
     @Override
@@ -110,7 +66,7 @@ public class PacketListener extends PacketListenerAbstract {
             // Since we can't call it directly, we'll schedule an immediate task
             Bukkit.getScheduler().runTask(plugin, () -> {
                 // Only check if player is still online and not already punished
-                if (player.isOnline() && !data.isAlreadyPunished()) {
+                if (player.isOnline() && !data.isAlreadyPunished() && !flaggedPlayers.contains(playerUUID)) {
                     // Check if player is spoofing after channel registration
                     checkAndProcessPlayer(player);
                 }
@@ -137,34 +93,43 @@ public class PacketListener extends PacketListenerAbstract {
         String brand = plugin.getClientBrand(player);
         if (brand == null) return;
         
-        // Track all violations and whether to punish
-        List<String> allViolations = new ArrayList<>();
+        // List to collect all violations
+        List<String> violations = new ArrayList<>();
+        boolean shouldAlert = false;
         boolean shouldPunish = false;
-        boolean anyViolationDetected = false;
-        
-        // Process each violation separately
+        String primaryReason = "";
+        String violationType = "";
+        String violatedChannel = null;
 
         // Handle potential Geyser spoofing
         if (plugin.getConfigManager().isPunishSpoofingGeyser() && plugin.isSpoofingGeyser(player)) {
             String reason = "Spoofing Geyser client";
-            String violationType = "GEYSER_SPOOF";
-            allViolations.add(reason);
-            anyViolationDetected = true;
-            
-            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-            } else {
-                if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                    sendAlert(player, reason, brand, null, violationType);
-                    markAlertSent(uuid, violationType);
-                    lastAlertTime.put(uuid, System.currentTimeMillis());
-                }
-                if (plugin.getConfigManager().shouldPunishGeyserSpoof()) {
-                    shouldPunish = true;
-                }
+            violations.add(reason);
+            if (primaryReason.isEmpty()) {
+                primaryReason = reason;
+                violationType = "GEYSER_SPOOF";
+            }
+            shouldAlert = true;
+            if (plugin.getConfigManager().shouldPunishGeyserSpoof()) {
+                shouldPunish = true;
             }
         }
 
+        // Check the brand formatting
+        if (plugin.getConfigManager().checkBrandFormatting() && hasInvalidFormatting(brand)) {
+            String reason = "Invalid brand formatting";
+            violations.add(reason);
+            if (primaryReason.isEmpty()) {
+                primaryReason = reason;
+                violationType = "BRAND_FORMAT";
+            }
+            shouldAlert = true;
+            // Only enable punishment if it's explicitly enabled in the config
+            if (plugin.getConfigManager().shouldPunishBrandFormatting()) {
+                shouldPunish = true;
+            }
+        }
+        
         // Check for brand blocking/whitelist
         if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
             boolean brandBlocked = isBrandBlocked(brand);
@@ -172,21 +137,14 @@ public class PacketListener extends PacketListenerAbstract {
                 // Only add as a violation if count-as-flag is true
                 if (plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
                     String reason = "Blocked client brand: " + brand;
-                    String violationType = "BLOCKED_BRAND";
-                    allViolations.add(reason);
-                    anyViolationDetected = true;
-                    
-                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-                    } else {
-                        if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                            sendAlert(player, reason, brand, null, violationType);
-                            markAlertSent(uuid, violationType);
-                            lastAlertTime.put(uuid, System.currentTimeMillis());
-                        }
-                        if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
-                            shouldPunish = true;
-                        }
+                    violations.add(reason);
+                    if (primaryReason.isEmpty()) {
+                        primaryReason = reason;
+                        violationType = "BLOCKED_BRAND";
+                    }
+                    shouldAlert = true;
+                    if (plugin.getConfigManager().shouldPunishBlockedBrands()) {
+                        shouldPunish = true;
                     }
                 }
             }
@@ -199,42 +157,28 @@ public class PacketListener extends PacketListenerAbstract {
         if (plugin.getConfigManager().isVanillaCheckEnabled() && 
             claimsVanilla && hasChannels) {
             String reason = "Vanilla client with plugin channels";
-            String violationType = "VANILLA_WITH_CHANNELS";
-            allViolations.add(reason);
-            anyViolationDetected = true;
-            
-            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-            } else {
-                if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                    sendAlert(player, reason, brand, null, violationType);
-                    markAlertSent(uuid, violationType);
-                    lastAlertTime.put(uuid, System.currentTimeMillis());
-                }
-                if (plugin.getConfigManager().shouldPunishVanillaCheck()) {
-                    shouldPunish = true;
-                }
+            violations.add(reason);
+            if (primaryReason.isEmpty()) {
+                primaryReason = reason;
+                violationType = "VANILLA_WITH_CHANNELS";
+            }
+            shouldAlert = true;
+            if (plugin.getConfigManager().shouldPunishVanillaCheck()) {
+                shouldPunish = true;
             }
         }
         // Non-vanilla with channels check
         else if (plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && 
                 !claimsVanilla && hasChannels) {
             String reason = "Non-vanilla client with channels";
-            String violationType = "NON_VANILLA_WITH_CHANNELS";
-            allViolations.add(reason);
-            anyViolationDetected = true;
-            
-            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-            } else {
-                if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                    sendAlert(player, reason, brand, null, violationType);
-                    markAlertSent(uuid, violationType);
-                    lastAlertTime.put(uuid, System.currentTimeMillis());
-                }
-                if (plugin.getConfigManager().shouldPunishNonVanillaCheck()) {
-                    shouldPunish = true;
-                }
+            violations.add(reason);
+            if (primaryReason.isEmpty()) {
+                primaryReason = reason;
+                violationType = "NON_VANILLA_WITH_CHANNELS";
+            }
+            shouldAlert = true;
+            if (plugin.getConfigManager().shouldPunishNonVanillaCheck()) {
+                shouldPunish = true;
             }
         }
         
@@ -245,21 +189,14 @@ public class PacketListener extends PacketListenerAbstract {
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
                     String reason = "Client channels don't match whitelist";
-                    String violationType = "CHANNEL_WHITELIST";
-                    allViolations.add(reason);
-                    anyViolationDetected = true;
-                    
-                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-                    } else {
-                        if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                            sendAlert(player, reason, brand, null, violationType);
-                            markAlertSent(uuid, violationType);
-                            lastAlertTime.put(uuid, System.currentTimeMillis());
-                        }
-                        if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
-                            shouldPunish = true;
-                        }
+                    violations.add(reason);
+                    if (primaryReason.isEmpty()) {
+                        primaryReason = reason;
+                        violationType = "CHANNEL_WHITELIST";
+                    }
+                    shouldAlert = true;
+                    if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
+                        shouldPunish = true;
                     }
                 }
             } else {
@@ -267,73 +204,43 @@ public class PacketListener extends PacketListenerAbstract {
                 String blockedChannel = findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
                     String reason = "Blocked channel: " + blockedChannel;
-                    String violationType = "BLOCKED_CHANNEL:" + blockedChannel;
-                    allViolations.add(reason);
-                    anyViolationDetected = true;
-                    
-                    if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-                        logDebug("Bedrock player " + player.getName() + " would be flagged for: " + reason + ", but is exempt");
-                    } else {
-                        if (!hasAlertBeenSent(uuid, violationType) && !isOnCooldown(uuid)) {
-                            sendAlert(player, reason, brand, blockedChannel, violationType);
-                            markAlertSent(uuid, violationType);
-                            lastAlertTime.put(uuid, System.currentTimeMillis());
-                        }
-                        if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
-                            shouldPunish = true;
-                        }
+                    violations.add(reason);
+                    if (primaryReason.isEmpty()) {
+                        primaryReason = reason;
+                        violationType = "BLOCKED_CHANNEL";
+                        violatedChannel = blockedChannel;
+                    }
+                    shouldAlert = true;
+                    if (plugin.getConfigManager().shouldPunishBlockedChannels()) {
+                        shouldPunish = true;
                     }
                 }
             }
         }
 
         // If player is a Bedrock player and we're in EXEMPT mode, don't punish
-        if (!allViolations.isEmpty() && isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
-            logDebug("Bedrock player " + player.getName() + " would be processed for violations, but is exempt");
+        if ((shouldAlert || shouldPunish) && isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+            logDebug("Bedrock player " + player.getName() + " would be processed for: " + primaryReason + ", but is exempt");
             return;
         }
 
-        // Only execute punishment if any violations were found
-        if (shouldPunish && !allViolations.isEmpty() && !data.isAlreadyPunished()) {
-            // Choose the first violation as the primary reason for punishment
-            String primaryReason = allViolations.get(0);
-            String violationType = determineViolationType(primaryReason);
-            String violatedChannel = extractChannelFromReason(primaryReason);
+        if (shouldAlert) {
+            // Mark player as flagged to prevent duplicate alerts
+            flaggedPlayers.add(uuid);
             
-            executePunishment(player, primaryReason, brand, violationType, violatedChannel);
-            data.setAlreadyPunished(true);
+            // Always send the alert if a violation is detected
+            if (violations.size() > 1) {
+                sendMultipleViolationsAlert(player, violations, brand);
+            } else {
+                sendAlert(player, primaryReason, brand, violatedChannel, violationType);
+            }
+            
+            // Only execute punishment if enabled for this violation type
+            if (shouldPunish) {
+                executePunishment(player, primaryReason, brand, violationType, violatedChannel);
+                data.setAlreadyPunished(true);
+            }
         }
-        
-        // Send initial channels webhook only if no violations
-        if (!anyViolationDetected && !data.getChannels().isEmpty()) {
-            plugin.getDiscordWebhookHandler().sendInitialChannelsWebhook(player, data.getChannels());
-        }
-    }
-    
-    // Helper method to determine violation type from reason
-    private String determineViolationType(String reason) {
-        if (reason.contains("Vanilla client with plugin channels")) {
-            return "VANILLA_WITH_CHANNELS";
-        } else if (reason.contains("Non-vanilla client with channels")) {
-            return "NON_VANILLA_WITH_CHANNELS";
-        } else if (reason.contains("Blocked channel:")) {
-            return "BLOCKED_CHANNEL";
-        } else if (reason.contains("Client channels don't match whitelist")) {
-            return "CHANNEL_WHITELIST";
-        } else if (reason.contains("Blocked client brand:")) {
-            return "BLOCKED_BRAND";
-        } else if (reason.contains("Spoofing Geyser client")) {
-            return "GEYSER_SPOOF";
-        }
-        return "";
-    }
-
-    // Helper method to extract channel from reason
-    private String extractChannelFromReason(String reason) {
-        if (reason.contains("Blocked channel: ")) {
-            return reason.substring("Blocked channel: ".length());
-        }
-        return null;
     }
     
     private boolean isBrandBlocked(String brand) {
@@ -435,13 +342,7 @@ public class PacketListener extends PacketListenerAbstract {
                     if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
                         Player player = Bukkit.getPlayer(playerUUID);
                         if (player != null) {
-                            // Check if we've already sent this specific modified channel alert
-                            String alertType = "MODIFIED_CHANNEL:" + channel;
-                            if (!hasAlertBeenSent(playerUUID, alertType) && !isOnCooldown(playerUUID)) {
-                                notifyModifiedChannel(player, channel);
-                                markAlertSent(playerUUID, alertType);
-                                lastAlertTime.put(playerUUID, System.currentTimeMillis());
-                            }
+                            notifyModifiedChannel(player, channel);
                         }
                     }
                 }
@@ -485,13 +386,7 @@ public class PacketListener extends PacketListenerAbstract {
                         if (plugin.getConfigManager().isModifiedChannelsEnabled()) {
                             Player player = Bukkit.getPlayer(playerUUID);
                             if (player != null) {
-                                // Check if we've already sent this specific modified channel alert
-                                String alertType = "MODIFIED_CHANNEL:" + registeredChannel;
-                                if (!hasAlertBeenSent(playerUUID, alertType) && !isOnCooldown(playerUUID)) {
-                                    notifyModifiedChannel(player, registeredChannel);
-                                    markAlertSent(playerUUID, alertType);
-                                    lastAlertTime.put(playerUUID, System.currentTimeMillis());
-                                }
+                                notifyModifiedChannel(player, registeredChannel);
                             }
                         }
                     }
@@ -508,22 +403,12 @@ public class PacketListener extends PacketListenerAbstract {
     }
     
     private void notifyModifiedChannel(Player player, String channel) {
-        // Only notify if player hasn't been punished
+        // Only notify if player hasn't been flagged for spoofing or has been punished
         UUID playerUUID = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(playerUUID);
         
         // Don't send additional blocked channel alerts when notifying about modified channels
         if (data != null && data.isAlreadyPunished()) {
-            return;
-        }
-        
-        // Skip if on cooldown
-        if (isOnCooldown(playerUUID)) {
-            return;
-        }
-        
-        String alertType = "MODIFIED_CHANNEL:" + channel;
-        if (hasAlertBeenSent(playerUUID, alertType)) {
             return;
         }
         
@@ -550,34 +435,25 @@ public class PacketListener extends PacketListenerAbstract {
         
         // Send to Discord webhook if enabled
         if (plugin.getConfigManager().isModifiedChannelsDiscordEnabled()) {
-            String reason = "Modified channel: " + channel;
             plugin.getDiscordWebhookHandler().sendAlert(
                 player, 
-                reason,
+                "Modified channel: " + channel,
                 plugin.getClientBrand(player), 
                 channel, 
-                null // No violations list
+                null, // No violations list
+                "MODIFIED_CHANNEL"
             );
         }
-        
-        // Mark this alert as sent
-        markAlertSent(playerUUID, alertType);
-        lastAlertTime.put(playerUUID, System.currentTimeMillis());
+    }
+    
+    private boolean hasInvalidFormatting(String brand) {
+        return brand.matches(".*[§&].*") || 
+               !brand.matches("^[a-zA-Z0-9 _-]+$");
     }
     
     // Send alert message for multiple violations
     private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand) {
         UUID playerUUID = player.getUniqueId();
-        
-        // Skip if on cooldown
-        if (isOnCooldown(playerUUID)) {
-            return;
-        }
-        
-        // Skip if we've already sent a multiple violations alert for this player
-        if (hasAlertBeenSent(playerUUID, "MULTIPLE_VIOLATIONS")) {
-            return;
-        }
         
         // Join all reasons with commas
         String reasonsList = String.join(", ", violations);
@@ -606,26 +482,12 @@ public class PacketListener extends PacketListenerAbstract {
                 .forEach(p -> p.sendMessage(coloredPlayerAlert));
         
         // Send to Discord if enabled
-        plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
-        
-        // Mark this alert as sent
-        markAlertSent(playerUUID, "MULTIPLE_VIOLATIONS");
-        lastAlertTime.put(playerUUID, System.currentTimeMillis());
+        plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations, "MULTIPLE");
     }
     
     // Send alert message to staff and console with rate limiting
     private void sendAlert(Player player, String reason, String brand, String violatedChannel, String violationType) {
         UUID playerUUID = player.getUniqueId();
-        
-        // Skip if on cooldown
-        if (isOnCooldown(playerUUID)) {
-            return;
-        }
-        
-        // Skip if we've already sent this specific alert type
-        if (hasAlertBeenSent(playerUUID, violationType)) {
-            return;
-        }
         
         // Select the appropriate alert message based on violation type
         String alertTemplate;
@@ -642,6 +504,12 @@ public class PacketListener extends PacketListenerAbstract {
                 consoleAlertTemplate = plugin.getConfigManager().getNonVanillaCheckConsoleAlertMessage();
                 break;
                 
+            case "BRAND_FORMAT":
+                alertTemplate = plugin.getConfigManager().getBrandFormattingAlertMessage();
+                consoleAlertTemplate = plugin.getConfigManager().getBrandFormattingConsoleAlertMessage();
+                break;
+                
+            case "BLOCKED_CHANNEL":
             case "CHANNEL_WHITELIST":
                 alertTemplate = plugin.getConfigManager().getBlockedChannelsAlertMessage();
                 consoleAlertTemplate = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
@@ -658,14 +526,9 @@ public class PacketListener extends PacketListenerAbstract {
                 break;
                 
             default:
-                if (violationType.startsWith("BLOCKED_CHANNEL:")) {
-                    alertTemplate = plugin.getConfigManager().getBlockedChannelsAlertMessage();
-                    consoleAlertTemplate = plugin.getConfigManager().getBlockedChannelsConsoleAlertMessage();
-                } else {
-                    // Fallback to global messages
-                    alertTemplate = plugin.getConfigManager().getAlertMessage();
-                    consoleAlertTemplate = plugin.getConfigManager().getConsoleAlertMessage();
-                }
+                // Fallback to global messages
+                alertTemplate = plugin.getConfigManager().getAlertMessage();
+                consoleAlertTemplate = plugin.getConfigManager().getConsoleAlertMessage();
         }
         
         // Format the player alert message with placeholders
@@ -699,11 +562,7 @@ public class PacketListener extends PacketListenerAbstract {
         // Send to Discord if enabled
         List<String> singleViolation = new ArrayList<>();
         singleViolation.add(reason);
-        plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
-        
-        // Mark this alert as sent
-        markAlertSent(playerUUID, violationType);
-        lastAlertTime.put(playerUUID, System.currentTimeMillis());
+        plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation, violationType);
     }
     
     // Execute punishment commands
@@ -718,6 +577,10 @@ public class PacketListener extends PacketListenerAbstract {
                 
             case "NON_VANILLA_WITH_CHANNELS":
                 punishments = plugin.getConfigManager().getNonVanillaCheckPunishments();
+                break;
+                
+            case "BRAND_FORMAT":
+                punishments = plugin.getConfigManager().getBrandFormattingPunishments();
                 break;
                 
             case "BLOCKED_CHANNEL":
@@ -769,10 +632,5 @@ public class PacketListener extends PacketListenerAbstract {
     public void playerDisconnected(UUID playerUUID) {
         flaggedPlayers.remove(playerUUID);
         initialRegistrationTime.remove(playerUUID);
-        alertTypesSent.remove(playerUUID);
-        lastAlertTime.remove(playerUUID);
-        
-        // Also clear the player's alert status in the Discord webhook handler
-        plugin.clearPlayerAlertStatus(playerUUID);
     }
 }
