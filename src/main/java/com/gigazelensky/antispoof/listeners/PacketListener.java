@@ -118,7 +118,11 @@ public class PacketListener extends PacketListenerAbstract {
         // Check for brand blocking/whitelist
         if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
             boolean brandBlocked = isBrandBlocked(brand);
+            
+            // If brand is not whitelisted/is blocked, send brand alert (through central method)
             if (brandBlocked) {
+                PlayerJoinListener.sendBrandAlert(plugin, player, brand);
+                
                 // Only add as a violation if count-as-flag is true
                 if (plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
                     String reason = "Blocked client brand: " + brand;

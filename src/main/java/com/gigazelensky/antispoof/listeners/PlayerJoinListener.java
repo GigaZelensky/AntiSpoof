@@ -16,13 +16,16 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerJoinListener implements Listener {
    private final AntiSpoofPlugin plugin;
    private final ConfigManager config;
-   // Track players that have already received a brand alert
-   private final Map<UUID, Long> lastBrandAlert = new HashMap<>();
+   
+   // Global static tracking for brand alerts to prevent duplicates across the entire plugin
+   private static final Map<UUID, Long> BRAND_ALERT_TRACKING = new ConcurrentHashMap<>();
    private static final long BRAND_ALERT_COOLDOWN = 10000; // 10 seconds cooldown
+   private static boolean listenerRegistered = false;
 
    public PlayerJoinListener(AntiSpoofPlugin plugin) {
        this.plugin = plugin;
@@ -30,7 +33,12 @@ public class PlayerJoinListener implements Listener {
    }
 
    public void register() {
-       Bukkit.getPluginManager().registerEvents(this, plugin);
+       // Ensure listener is only registered once
+       if (!listenerRegistered) {
+           Bukkit.getPluginManager().registerEvents(this, plugin);
+           listenerRegistered = true;
+           plugin.getLogger().info("PlayerJoinListener registered");
+       }
    }
 
    @EventHandler
@@ -59,12 +67,68 @@ public class PlayerJoinListener implements Listener {
        UUID uuid = event.getPlayer().getUniqueId();
        plugin.getPlayerDataMap().remove(uuid);
        plugin.getPlayerBrands().remove(event.getPlayer().getName());
-       lastBrandAlert.remove(uuid);
+       BRAND_ALERT_TRACKING.remove(uuid);
        
        // Clean up packet listener tracking
        if (plugin.getPacketListener() != null) {
            plugin.getPacketListener().playerDisconnected(uuid);
        }
+   }
+
+   /**
+    * Send a brand alert message with global cooldown tracking
+    * This is the ONLY method that should be used to send brand alerts in the entire plugin
+    */
+   public static synchronized boolean sendBrandAlert(AntiSpoofPlugin plugin, Player player, String brand) {
+       UUID uuid = player.getUniqueId();
+       ConfigManager config = plugin.getConfigManager();
+       
+       // Check if we've recently sent a brand alert for this player
+       long now = System.currentTimeMillis();
+       Long lastAlert = BRAND_ALERT_TRACKING.get(uuid);
+       
+       if (lastAlert != null && now - lastAlert <= BRAND_ALERT_COOLDOWN) {
+           plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName() + " - within cooldown period");
+           return false;
+       }
+       
+       // Mark this player as having received a brand alert
+       BRAND_ALERT_TRACKING.put(uuid, now);
+       
+       // Format the player alert message with placeholders
+       String playerAlert = config.getBlockedBrandsAlertMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown");
+       
+       // Format the console alert message with placeholders
+       String consoleAlert = config.getBlockedBrandsConsoleAlertMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown");
+       
+       // Convert color codes for player messages
+       String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
+       
+       // Log to console directly using the console format (no need to strip colors)
+       plugin.getLogger().info(consoleAlert);
+       
+       // Notify players with permission
+       Bukkit.getOnlinePlayers().stream()
+               .filter(p -> p.hasPermission("antispoof.alerts"))
+               .forEach(p -> p.sendMessage(coloredPlayerAlert));
+       
+       // Send to Discord if enabled for join brand alerts
+       if (config.isDiscordWebhookEnabled() && config.isJoinBrandAlertsEnabled()) {
+           plugin.getDiscordWebhookHandler().sendAlert(
+               player, 
+               "Joined using client brand: " + brand, 
+               brand, 
+               null,
+               null,
+               "JOIN_BRAND"
+           );
+       }
+       
+       return true;
    }
 
    private void checkPlayer(Player player) {
@@ -97,48 +161,9 @@ public class PlayerJoinListener implements Listener {
        }
        
        // Always show client brand join message for operators if it's not in the whitelist
-       // This happens regardless of any violations, but we'll add a cooldown to prevent duplicates
+       // This happens regardless of any violations, but we'll use our global cooldown system
        if (config.isBlockedBrandsEnabled() && !config.matchesBrandPattern(brand)) {
-           // Check if we've recently sent a brand alert for this player
-           long now = System.currentTimeMillis();
-           Long lastAlert = lastBrandAlert.get(uuid);
-           
-           if (lastAlert == null || now - lastAlert > BRAND_ALERT_COOLDOWN) {
-               lastBrandAlert.put(uuid, now);
-               
-               // Format the player alert message with placeholders
-               String playerAlert = config.getBlockedBrandsAlertMessage()
-                       .replace("%player%", player.getName())
-                       .replace("%brand%", brand != null ? brand : "unknown");
-               
-               // Format the console alert message with placeholders
-               String consoleAlert = config.getBlockedBrandsConsoleAlertMessage()
-                       .replace("%player%", player.getName())
-                       .replace("%brand%", brand != null ? brand : "unknown");
-               
-               // Convert color codes for player messages
-               String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-               
-               // Log to console directly using the console format (no need to strip colors)
-               plugin.getLogger().info(consoleAlert);
-               
-               // Notify players with permission
-               Bukkit.getOnlinePlayers().stream()
-                       .filter(p -> p.hasPermission("antispoof.alerts"))
-                       .forEach(p -> p.sendMessage(coloredPlayerAlert));
-               
-               // Send to Discord if enabled for join brand alerts
-               if (config.isDiscordWebhookEnabled() && config.isJoinBrandAlertsEnabled()) {
-                   plugin.getDiscordWebhookHandler().sendAlert(
-                       player, 
-                       "Joined using client brand: " + brand, 
-                       brand, 
-                       null,
-                       null,
-                       "JOIN_BRAND"
-                   );
-               }
-           }
+           sendBrandAlert(plugin, player, brand);
        }
        
        // List to collect all violations
