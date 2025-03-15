@@ -7,7 +7,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -19,30 +18,17 @@ import java.util.ArrayList;
 public class PlayerJoinListener implements Listener {
    private final AntiSpoofPlugin plugin;
    private final ConfigManager config;
-   private static boolean listenerRegistered = false;
 
    public PlayerJoinListener(AntiSpoofPlugin plugin) {
        this.plugin = plugin;
        this.config = plugin.getConfigManager();
-       
-       // Add plugin instance to debug log for verification
-       if (config.isDebugMode()) {
-           plugin.getLogger().info("[Debug] PlayerJoinListener created for plugin instance: " + plugin.toString());
-       }
    }
 
    public void register() {
-       // Ensure listener is only registered once
-       if (!listenerRegistered) {
-           Bukkit.getPluginManager().registerEvents(this, plugin);
-           listenerRegistered = true;
-           plugin.getLogger().info("PlayerJoinListener registered");
-       } else if (config.isDebugMode()) {
-           plugin.getLogger().info("[Debug] Avoided duplicate PlayerJoinListener registration");
-       }
+       Bukkit.getPluginManager().registerEvents(this, plugin);
    }
 
-   @EventHandler(priority = EventPriority.LOW)
+   @EventHandler
    public void onPlayerJoin(PlayerJoinEvent event) {
        Player player = event.getPlayer();
        if (player.hasPermission("antispoof.bypass")) return;
@@ -63,16 +49,11 @@ public class PlayerJoinListener implements Listener {
        // If delay is negative, rely completely on packet listener checks
    }
    
-   @EventHandler(priority = EventPriority.MONITOR)
+   @EventHandler
    public void onPlayerQuit(PlayerQuitEvent event) {
        UUID uuid = event.getPlayer().getUniqueId();
        plugin.getPlayerDataMap().remove(uuid);
        plugin.getPlayerBrands().remove(event.getPlayer().getName());
-       
-       // Clean up brand channel handler tracking
-       if (plugin.getBrandChannelHandler() != null) {
-           plugin.getBrandChannelHandler().playerDisconnected(uuid);
-       }
        
        // Clean up packet listener tracking
        if (plugin.getPacketListener() != null) {
@@ -109,8 +90,44 @@ public class PlayerJoinListener implements Listener {
            return;
        }
        
-       // NOTE: Brand alerts are now handled directly by the BrandChannelHandler
-       // No brand alerts sent from here anymore
+       // Always show client brand join message for operators if it's not in the ignored list
+       // This happens regardless of any violations
+       if (config.isBlockedBrandsEnabled() && !config.matchesBrandPattern(brand)) {
+           // Format the player alert message with placeholders
+           String playerAlert = config.getBlockedBrandsAlertMessage()
+                   .replace("%player%", player.getName())
+                   .replace("%brand%", brand != null ? brand : "unknown");
+           
+           // Format the console alert message with placeholders
+           String consoleAlert = config.getBlockedBrandsConsoleAlertMessage()
+                   .replace("%player%", player.getName())
+                   .replace("%brand%", brand != null ? brand : "unknown");
+           
+           // Convert color codes for player messages
+           String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
+           
+           // Log to console directly using the console format (no need to strip colors)
+           plugin.getLogger().info(consoleAlert);
+           
+           // Notify players with permission
+           Bukkit.getOnlinePlayers().stream()
+                   .filter(p -> p.hasPermission("antispoof.alerts"))
+                   .forEach(p -> p.sendMessage(coloredPlayerAlert));
+           
+           // Send to Discord if brand join alerts are enabled
+           if (plugin.getConfigManager().isDiscordWebhookEnabled() && 
+               config.isBlockedBrandsDiscordAlertEnabled() && 
+               config.isJoinBrandAlertsEnabled()) {
+               
+               plugin.getDiscordWebhookHandler().sendAlert(
+                   player, 
+                   "Joined with client brand: " + brand,
+                   brand,
+                   null,
+                   null
+               );
+           }
+       }
        
        // List to collect all violations
        List<String> violations = new ArrayList<>();
@@ -221,8 +238,10 @@ public class PlayerJoinListener implements Listener {
 
        if (shouldAlert) {
            // Always send the alert if a violation is detected
-           if (violations.size() > 0) {
-               sendMultipleViolationsAlert(player, violations, brand, violatedChannel, violationType);
+           if (violations.size() > 1) {
+               sendMultipleViolationsAlert(player, violations, brand);
+           } else {
+               sendAlert(player, primaryReason, brand, violatedChannel, violationType);
            }
            
            // Only execute punishment if enabled for this violation type
@@ -314,75 +333,99 @@ public class PlayerJoinListener implements Listener {
    }
 
    // Send alert message for multiple violations
-   private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand, String violatedChannel, String violationType) {
+   private void sendMultipleViolationsAlert(Player player, List<String> violations, String brand) {
        UUID playerUUID = player.getUniqueId();
        
        // Join all reasons with commas
        String reasonsList = String.join(", ", violations);
        
-       // Format the player alert message based on the number of violations
-       String playerAlert;
-       String consoleAlert;
+       // Format the player alert message for multiple violations
+       String playerAlert = config.getMultipleFlagsMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reasons%", reasonsList);
        
-       if (violations.size() > 1) {
-           // Multiple violations format
-           playerAlert = config.getMultipleFlagsMessage()
-                   .replace("%player%", player.getName())
-                   .replace("%brand%", brand != null ? brand : "unknown")
-                   .replace("%reasons%", reasonsList);
-           
-           consoleAlert = config.getConsoleMultipleFlagsMessage()
-                   .replace("%player%", player.getName())
-                   .replace("%brand%", brand != null ? brand : "unknown")
-                   .replace("%reasons%", reasonsList);
-       } else {
-           // Single violation format - select the appropriate message based on violation type
-           switch(violationType) {
-               case "VANILLA_WITH_CHANNELS":
-                   playerAlert = config.getVanillaCheckAlertMessage();
-                   consoleAlert = config.getVanillaCheckConsoleAlertMessage();
-                   break;
-                   
-               case "NON_VANILLA_WITH_CHANNELS":
-                   playerAlert = config.getNonVanillaCheckAlertMessage();
-                   consoleAlert = config.getNonVanillaCheckConsoleAlertMessage();
-                   break;
-                   
-               case "BLOCKED_CHANNEL":
-               case "CHANNEL_WHITELIST":
-                   playerAlert = config.getBlockedChannelsAlertMessage();
-                   consoleAlert = config.getBlockedChannelsConsoleAlertMessage();
-                   break;
-                   
-               case "BLOCKED_BRAND":
-                   playerAlert = config.getBlockedBrandsAlertMessage();
-                   consoleAlert = config.getBlockedBrandsConsoleAlertMessage();
-                   break;
-                   
-               case "GEYSER_SPOOF":
-                   playerAlert = config.getGeyserSpoofAlertMessage();
-                   consoleAlert = config.getGeyserSpoofConsoleAlertMessage();
-                   break;
-                   
-               default:
-                   // Fallback to global messages
-                   playerAlert = config.getAlertMessage();
-                   consoleAlert = config.getConsoleAlertMessage();
-           }
-           
-           // Replace placeholders
-           playerAlert = playerAlert
-                   .replace("%player%", player.getName())
-                   .replace("%brand%", brand != null ? brand : "unknown")
-                   .replace("%reason%", violations.get(0));
-           
-           consoleAlert = consoleAlert
-                   .replace("%player%", player.getName())
-                   .replace("%brand%", brand != null ? brand : "unknown")
-                   .replace("%reason%", violations.get(0));
+       // Format the console alert message for multiple violations
+       String consoleAlert = config.getConsoleMultipleFlagsMessage()
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reasons%", reasonsList);
+       
+       // Convert color codes for player messages
+       String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
+       
+       // Log to console directly using the console format (no need to strip colors)
+       plugin.getLogger().info(consoleAlert);
+       
+       // Notify players with permission
+       Bukkit.getOnlinePlayers().stream()
+               .filter(p -> p.hasPermission("antispoof.alerts"))
+               .forEach(p -> p.sendMessage(coloredPlayerAlert));
+       
+       // Send to Discord if enabled
+       plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
+   }
+
+   // Send alert message to staff and console with rate limiting
+   private void sendAlert(Player player, String reason, String brand, String violatedChannel, String violationType) {
+       UUID playerUUID = player.getUniqueId();
+       
+       // Select the appropriate alert message based on violation type
+       String alertTemplate;
+       String consoleAlertTemplate;
+       boolean sendDiscordAlert = false;
+       
+       switch(violationType) {
+           case "VANILLA_WITH_CHANNELS":
+               alertTemplate = config.getVanillaCheckAlertMessage();
+               consoleAlertTemplate = config.getVanillaCheckConsoleAlertMessage();
+               sendDiscordAlert = config.isVanillaCheckDiscordAlertEnabled();
+               break;
+               
+           case "NON_VANILLA_WITH_CHANNELS":
+               alertTemplate = config.getNonVanillaCheckAlertMessage();
+               consoleAlertTemplate = config.getNonVanillaCheckConsoleAlertMessage();
+               sendDiscordAlert = config.isNonVanillaCheckDiscordAlertEnabled();
+               break;
+               
+           case "BLOCKED_CHANNEL":
+           case "CHANNEL_WHITELIST":
+               alertTemplate = config.getBlockedChannelsAlertMessage();
+               consoleAlertTemplate = config.getBlockedChannelsConsoleAlertMessage();
+               sendDiscordAlert = config.isBlockedChannelsDiscordAlertEnabled();
+               break;
+               
+           case "BLOCKED_BRAND":
+               alertTemplate = config.getBlockedBrandsAlertMessage();
+               consoleAlertTemplate = config.getBlockedBrandsConsoleAlertMessage();
+               sendDiscordAlert = config.isBlockedBrandsDiscordAlertEnabled();
+               break;
+               
+           case "GEYSER_SPOOF":
+               alertTemplate = config.getGeyserSpoofAlertMessage();
+               consoleAlertTemplate = config.getGeyserSpoofConsoleAlertMessage();
+               sendDiscordAlert = config.isGeyserSpoofDiscordAlertEnabled();
+               break;
+               
+           default:
+               // Fallback to global messages
+               alertTemplate = config.getAlertMessage();
+               consoleAlertTemplate = config.getConsoleAlertMessage();
+               sendDiscordAlert = true; // Default to true for unknown types
        }
        
-       // Add channel info if available
+       // Format the player alert message with placeholders
+       String playerAlert = alertTemplate
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reason%", reason);
+       
+       // Format the console alert message with placeholders
+       String consoleAlert = consoleAlertTemplate
+               .replace("%player%", player.getName())
+               .replace("%brand%", brand != null ? brand : "unknown")
+               .replace("%reason%", reason);
+       
        if (violatedChannel != null) {
            playerAlert = playerAlert.replace("%channel%", violatedChannel);
            consoleAlert = consoleAlert.replace("%channel%", violatedChannel);
@@ -399,8 +442,12 @@ public class PlayerJoinListener implements Listener {
                .filter(p -> p.hasPermission("antispoof.alerts"))
                .forEach(p -> p.sendMessage(coloredPlayerAlert));
        
-       // Send to Discord if enabled
-       plugin.getDiscordWebhookHandler().sendAlert(player, violations.get(0), brand, violatedChannel, violations, violationType);
+       // Send to Discord if enabled and this type should send alerts
+       if (plugin.getConfigManager().isDiscordWebhookEnabled() && sendDiscordAlert) {
+           List<String> singleViolation = new ArrayList<>();
+           singleViolation.add(reason);
+           plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
+       }
    }
 
    // Execute punishment commands

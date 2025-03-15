@@ -43,23 +43,14 @@ public class DiscordWebhookHandler {
      * @param brand The client brand
      * @param channel The channel that triggered the alert (can be null)
      * @param violations List of all violations (for multiple flags)
-     * @param violationType The type of violation that triggered the alert
      */
-    public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations, String violationType) {
+    public void sendAlert(Player player, String reason, String brand, String channel, List<String> violations) {
         if (!config.isDiscordWebhookEnabled()) {
             return;
         }
         
         String webhookUrl = config.getDiscordWebhookUrl();
         if (webhookUrl == null || webhookUrl.isEmpty()) {
-            return;
-        }
-        
-        // Check if Discord alerts are enabled for this violation type
-        if (!config.isDiscordAlertEnabledForViolation(violationType)) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Alerts disabled for violation type: " + violationType);
-            }
             return;
         }
 

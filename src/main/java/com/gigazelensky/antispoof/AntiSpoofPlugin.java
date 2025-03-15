@@ -6,7 +6,6 @@ import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
 import com.gigazelensky.antispoof.listeners.PacketListener;
 import com.gigazelensky.antispoof.listeners.PlayerJoinListener;
 import com.gigazelensky.antispoof.managers.ConfigManager;
-import com.gigazelensky.antispoof.utils.BrandChannelHandler;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
@@ -28,16 +27,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private final Map<String, String> playerBrands = new HashMap<>();
     private FloodgateApi floodgateApi = null;
     private PacketListener packetListener;
-    private BrandChannelHandler brandChannelHandler;
     
-    // Plugin instance for safety
-    private static AntiSpoofPlugin instance;
+    // Add a map to track the last alert time for each player
+    private final Map<UUID, Long> lastAlertTime = new HashMap<>();
     
     @Override
     public void onEnable() {
-        // Set instance - this is important to prevent duplicate issues
-        instance = this;
-        
         saveDefaultConfig();
         this.configManager = new ConfigManager(this);
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
@@ -65,15 +60,28 @@ public class AntiSpoofPlugin extends JavaPlugin {
             getLogger().info("Successfully registered PlaceholderAPI expansion!");
         }
         
-        // Create our custom brand handler
-        this.brandChannelHandler = new BrandChannelHandler(this);
-        
-        // Register plugin channels for client brand using our custom handler
+        // Register plugin channels for client brand
         if (getServer().getBukkitVersion().contains("1.13") || 
             Integer.parseInt(getServer().getBukkitVersion().split("-")[0].split("\\.")[1]) >= 13) {
-            getServer().getMessenger().registerIncomingPluginChannel(this, "minecraft:brand", brandChannelHandler);
+            getServer().getMessenger().registerIncomingPluginChannel(this, "minecraft:brand", 
+                (channel, player, message) -> {
+                    // Brand message format: [length][brand]
+                    String brand = new String(message).substring(1);
+                    playerBrands.put(player.getName(), brand);
+                    if (configManager.isDebugMode()) {
+                        getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
+                    }
+                });
         } else {
-            getServer().getMessenger().registerIncomingPluginChannel(this, "MC|Brand", brandChannelHandler);
+            getServer().getMessenger().registerIncomingPluginChannel(this, "MC|Brand", 
+                (channel, player, message) -> {
+                    // Brand message format: [length][brand]
+                    String brand = new String(message).substring(1);
+                    playerBrands.put(player.getName(), brand);
+                    if (configManager.isDebugMode()) {
+                        getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
+                    }
+                });
         }
         
         // Register event listeners
@@ -105,13 +113,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
 
-    /**
-     * Get the plugin instance (singleton pattern)
-     */
-    public static AntiSpoofPlugin getInstance() {
-        return instance;
-    }
-
     public ConfigManager getConfigManager() {
         return configManager;
     }
@@ -139,8 +140,18 @@ public class AntiSpoofPlugin extends JavaPlugin {
         return packetListener;
     }
     
-    public BrandChannelHandler getBrandChannelHandler() {
-        return brandChannelHandler;
+    // Add a method to check if an alert can be sent for a player
+    public boolean canSendAlert(UUID playerUUID) {
+        long now = System.currentTimeMillis();
+        Long lastAlert = lastAlertTime.get(playerUUID);
+        
+        // Allow alert if no previous alert or if it's been more than 3 seconds
+        if (lastAlert == null || now - lastAlert > 3000) {
+            lastAlertTime.put(playerUUID, now);
+            return true;
+        }
+        
+        return false;
     }
     
     public boolean isBedrockPlayer(Player player) {
@@ -338,22 +349,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (PacketEvents.getAPI() != null) {
             PacketEvents.getAPI().terminate();
         }
-        
-        // Unregister brand channel
-        if (getServer().getBukkitVersion().contains("1.13") || 
-            Integer.parseInt(getServer().getBukkitVersion().split("-")[0].split("\\.")[1]) >= 13) {
-            getServer().getMessenger().unregisterIncomingPluginChannel(this, "minecraft:brand", brandChannelHandler);
-        } else {
-            getServer().getMessenger().unregisterIncomingPluginChannel(this, "MC|Brand", brandChannelHandler);
-        }
-        
         playerBrands.clear();
-        
-        // Clean up channel handler
-        if (brandChannelHandler != null) {
-            brandChannelHandler.clearAll();
-        }
-        
+        lastAlertTime.clear();
         getLogger().info("AntiSpoof disabled!");
     }
 }

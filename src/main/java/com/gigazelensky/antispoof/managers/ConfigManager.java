@@ -89,6 +89,10 @@ public class ConfigManager {
         return config.getBoolean("vanillaspoof-check.enabled", true);
     }
     
+    public boolean isVanillaCheckDiscordAlertEnabled() {
+        return config.getBoolean("vanillaspoof-check.discord-alert", true);
+    }
+    
     public boolean shouldPunishVanillaCheck() {
         return config.getBoolean("vanillaspoof-check.punish", true);
     }
@@ -105,13 +109,13 @@ public class ConfigManager {
         return config.getStringList("vanillaspoof-check.punishments");
     }
     
-    public boolean isVanillaCheckDiscordAlertEnabled() {
-        return config.getBoolean("vanillaspoof-check.discord-alert", true);
-    }
-    
     // Non-Vanilla Check (anything not vanilla with channels)
     public boolean shouldBlockNonVanillaWithChannels() {
         return config.getBoolean("non-vanilla-check.enabled", false);
+    }
+    
+    public boolean isNonVanillaCheckDiscordAlertEnabled() {
+        return config.getBoolean("non-vanilla-check.discord-alert", false);
     }
     
     public boolean shouldPunishNonVanillaCheck() {
@@ -130,13 +134,13 @@ public class ConfigManager {
         return config.getStringList("non-vanilla-check.punishments");
     }
     
-    public boolean isNonVanillaCheckDiscordAlertEnabled() {
-        return config.getBoolean("non-vanilla-check.discord-alert", false);
-    }
-    
     // Blocked Channels Check
     public boolean isBlockedChannelsEnabled() {
         return config.getBoolean("blocked-channels.enabled", false);
+    }
+    
+    public boolean isBlockedChannelsDiscordAlertEnabled() {
+        return config.getBoolean("blocked-channels.discord-alert", false);
     }
     
     public String getChannelWhitelistMode() {
@@ -170,10 +174,6 @@ public class ConfigManager {
     
     public List<String> getBlockedChannelsPunishments() {
         return config.getStringList("blocked-channels.punishments");
-    }
-    
-    public boolean isBlockedChannelsDiscordAlertEnabled() {
-        return config.getBoolean("blocked-channels.discord-alert", false);
     }
     
     // Modified Channels alerts
@@ -213,6 +213,10 @@ public class ConfigManager {
         return config.getBoolean("blocked-brands.enabled", false);
     }
     
+    public boolean isBlockedBrandsDiscordAlertEnabled() {
+        return config.getBoolean("blocked-brands.discord-alert", false);
+    }
+    
     public boolean isBrandWhitelistEnabled() {
         return config.getBoolean("blocked-brands.whitelist-mode", false);
     }
@@ -239,10 +243,6 @@ public class ConfigManager {
     
     public List<String> getBlockedBrandsPunishments() {
         return config.getStringList("blocked-brands.punishments");
-    }
-    
-    public boolean isBlockedBrandsDiscordAlertEnabled() {
-        return config.getBoolean("blocked-brands.discord-alert", false);
     }
     
     // Brand regex matching
@@ -286,6 +286,10 @@ public class ConfigManager {
         return config.getBoolean("bedrock-handling.geyser-spoof.enabled", true);
     }
     
+    public boolean isGeyserSpoofDiscordAlertEnabled() {
+        return config.getBoolean("bedrock-handling.geyser-spoof.discord-alert", true);
+    }
+    
     public boolean shouldPunishGeyserSpoof() {
         return config.getBoolean("bedrock-handling.geyser-spoof.punish", true);
     }
@@ -302,10 +306,6 @@ public class ConfigManager {
         return config.getStringList("bedrock-handling.geyser-spoof.punishments");
     }
     
-    public boolean isGeyserSpoofDiscordAlertEnabled() {
-        return config.getBoolean("bedrock-handling.geyser-spoof.discord-alert", true);
-    }
-    
     // Bedrock Prefix Check
     public boolean isBedrockPrefixCheckEnabled() {
         return config.getBoolean("bedrock-handling.prefix-check.enabled", true);
@@ -315,7 +315,7 @@ public class ConfigManager {
         return config.getString("bedrock-handling.prefix-check.prefix", ".");
     }
     
-    // Global alerts settings
+    // Global Alert settings
     public boolean isJoinBrandAlertsEnabled() {
         return config.getBoolean("global-alerts.join-brand-alerts", false);
     }
@@ -343,44 +343,5 @@ public class ConfigManager {
     
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
-    }
-    
-    /**
-     * Determines if Discord alerts are enabled for a specific violation type
-     */
-    public boolean isDiscordAlertEnabledForViolation(String violationType) {
-        if (violationType == null) {
-            return true; // Default to true if no violation type specified
-        }
-        
-        switch(violationType) {
-            case "VANILLA_WITH_CHANNELS":
-                return isVanillaCheckDiscordAlertEnabled();
-                
-            case "NON_VANILLA_WITH_CHANNELS":
-                return isNonVanillaCheckDiscordAlertEnabled();
-                
-            case "BLOCKED_CHANNEL":
-            case "CHANNEL_WHITELIST":
-                return isBlockedChannelsDiscordAlertEnabled();
-                
-            case "BLOCKED_BRAND":
-                return isBlockedBrandsDiscordAlertEnabled();
-                
-            case "GEYSER_SPOOF":
-                return isGeyserSpoofDiscordAlertEnabled();
-                
-            case "JOIN_BRAND":
-                return isJoinBrandAlertsEnabled();
-                
-            case "INITIAL_CHANNELS":
-                return isInitialChannelsAlertsEnabled();
-                
-            case "MODIFIED_CHANNEL":
-                return isModifiedChannelsDiscordEnabled();
-                
-            default:
-                return true; // Default to enabled for unknown types
-        }
     }
 }
