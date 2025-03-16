@@ -94,73 +94,133 @@ public class DiscordWebhookHandler {
         Set<String> currentChannels = new HashSet<>(data.getChannels());
         
         // Check if this is a modified channel alert by looking for the text pattern
-        boolean isModifiedChannelAlert = reason.contains("modified channel");
+        boolean isModifiedChannelAlert = reason.contains("Modified channel");
         
         // If it's a normal spoofing alert (not a modified channel alert)
         if (!isModifiedChannelAlert) {
-            // Skip if player has already been alerted for spoofing in this session
-            if (alertedPlayers.getOrDefault(playerUuid, false)) {
+            // For multiple violations, use the violations list
+            if (violations != null && violations.size() > 1) {
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Player " + player.getName() + " already alerted for spoofing in this session, skipping");
+                    plugin.getLogger().info("[Discord] Sending alert with multiple violations (" + 
+                                        violations.size() + ") for player: " + player.getName());
                 }
                 
-                // Even though we're skipping the spoofing alert, we should still check for modified channels
-                // if the feature is enabled and we already have channel data
-                if (config.isModifiedChannelsEnabled() && lastAlertChannels.containsKey(playerUuid)) {
-                    checkForModifiedChannels(player, currentChannels);
-                }
+                // Get the configured delay before sending discord alerts (in seconds)
+                int delaySeconds = config.getCheckDelay();
                 
-                return;
-            }
-            
-            // Mark player as alerted for this session
-            alertedPlayers.put(playerUuid, true);
-            
-            // Store the current channels for future comparison
-            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
-            
-            // Get the configured delay before sending discord alerts (in seconds)
-            int delaySeconds = config.getCheckDelay();
-            
-            // If there's a delay configured, schedule the webhook after the delay
-            if (delaySeconds > 0) {
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Scheduling alert for player: " + player.getName() + 
-                                           " after " + delaySeconds + " seconds");
-                }
-                
-                // Schedule the webhook after the configured delay
-                Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
-                    // Re-fetch the player data to get the most up-to-date channels
-                    PlayerData updatedData = plugin.getPlayerDataMap().get(playerUuid);
-                    if (updatedData != null && player.isOnline()) {
-                        Set<String> updatedChannels = updatedData.getChannels();
-                        lastAlertChannels.put(playerUuid, new HashSet<>(updatedChannels));
-                        
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Discord] Sending delayed spoofing alert for player: " + 
-                                                   player.getName() + " with " + updatedChannels.size() + " channels");
-                        }
-                        
-                        // Mark the player's initial registration time
-                        playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
-                        
-                        // Send the full webhook with updated channel information
-                        sendFullWebhook(player, reason, brand, channel, violations);
+                // If there's a delay configured, schedule the webhook after the delay
+                if (delaySeconds > 0 && !alertedPlayers.getOrDefault(playerUuid, false)) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Scheduling alert for player: " + player.getName() + 
+                                               " after " + delaySeconds + " seconds");
                     }
-                }, delaySeconds * 20L); // Convert seconds to ticks (20 ticks = 1 second)
-            } else {
-                // No delay, send immediate webhook
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Sending immediate spoofing alert for player: " + 
-                                           player.getName());
+                    
+                    // Schedule the webhook after the configured delay
+                    Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                        // Re-fetch the player data to get the most up-to-date channels
+                        PlayerData updatedData = plugin.getPlayerDataMap().get(playerUuid);
+                        if (updatedData != null && player.isOnline()) {
+                            Set<String> updatedChannels = updatedData.getChannels();
+                            lastAlertChannels.put(playerUuid, new HashSet<>(updatedChannels));
+                            
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().info("[Discord] Sending delayed violations alert for player: " + 
+                                                     player.getName() + " with " + violations.size() + " violations");
+                            }
+                            
+                            // Mark the player's initial registration time and as alerted
+                            playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                            alertedPlayers.put(playerUuid, true);
+                            
+                            // Send the full webhook with all violations and updated channel information
+                            sendFullWebhook(player, "Multiple violations detected", brand, null, violations);
+                        }
+                    }, delaySeconds * 20L); // Convert seconds to ticks (20 ticks = 1 second)
+                } 
+                else {
+                    // No delay needed or player already alerted earlier - this must be a new set of violations
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Sending immediate multiple violations alert for player: " + 
+                                              player.getName());
+                    }
+                    
+                    // Store the current channels for future comparison
+                    lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+                    
+                    // Mark the player's initial registration time and as alerted
+                    playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                    alertedPlayers.put(playerUuid, true);
+                    
+                    // Send the full webhook
+                    sendFullWebhook(player, "Multiple violations detected", brand, channel, violations);
+                }
+            }
+            // For single violation
+            else {
+                // Skip if player has already been alerted for spoofing in this session
+                if (alertedPlayers.getOrDefault(playerUuid, false)) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Player " + player.getName() + " already alerted for spoofing in this session, skipping");
+                    }
+                    
+                    // Even though we're skipping the spoofing alert, we should still check for modified channels
+                    // if the feature is enabled and we already have channel data
+                    if (config.isModifiedChannelsEnabled() && lastAlertChannels.containsKey(playerUuid)) {
+                        checkForModifiedChannels(player, currentChannels);
+                    }
+                    
+                    return;
                 }
                 
-                // Mark the player's initial registration time
-                playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                // Mark player as alerted for this session
+                alertedPlayers.put(playerUuid, true);
                 
-                // Send the full webhook
-                sendFullWebhook(player, reason, brand, channel, violations);
+                // Store the current channels for future comparison
+                lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+                
+                // Get the configured delay before sending discord alerts (in seconds)
+                int delaySeconds = config.getCheckDelay();
+                
+                // If there's a delay configured, schedule the webhook after the delay
+                if (delaySeconds > 0) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Scheduling alert for player: " + player.getName() + 
+                                               " after " + delaySeconds + " seconds");
+                    }
+                    
+                    // Schedule the webhook after the configured delay
+                    Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                        // Re-fetch the player data to get the most up-to-date channels
+                        PlayerData updatedData = plugin.getPlayerDataMap().get(playerUuid);
+                        if (updatedData != null && player.isOnline()) {
+                            Set<String> updatedChannels = updatedData.getChannels();
+                            lastAlertChannels.put(playerUuid, new HashSet<>(updatedChannels));
+                            
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().info("[Discord] Sending delayed spoofing alert for player: " + 
+                                                     player.getName() + " with " + updatedChannels.size() + " channels");
+                            }
+                            
+                            // Mark the player's initial registration time
+                            playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                            
+                            // Send the full webhook with updated channel information
+                            sendFullWebhook(player, reason, brand, channel, violations);
+                        }
+                    }, delaySeconds * 20L); // Convert seconds to ticks (20 ticks = 1 second)
+                } else {
+                    // No delay, send immediate webhook
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Sending immediate spoofing alert for player: " + 
+                                               player.getName());
+                    }
+                    
+                    // Mark the player's initial registration time
+                    playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                    
+                    // Send the full webhook
+                    sendFullWebhook(player, reason, brand, channel, violations);
+                }
             }
         }
         // It's a modified channel alert
@@ -344,7 +404,8 @@ public class DiscordWebhookHandler {
             try {
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Discord] Sending webhook for player: " + player.getName() + 
-                                          (isCompactUpdate ? " (modified channel)" : ""));
+                                          (isCompactUpdate ? " (modified channel)" : "") + 
+                                          (violations != null ? ", violations: " + violations.size() : ""));
                 }
                 
                 URL url = new URL(webhookUrl);
@@ -577,6 +638,16 @@ public class DiscordWebhookHandler {
                     processedLine = processedLine.replace("%viaversion_version%", version);
                 }
                 
+                // Special handling for violations list
+                if (violations != null && violations.size() > 1 && line.contains("%console_alert%")) {
+                    sb.append("**Violations detected**:\\n");
+                    for (String violation : violations) {
+                        sb.append("• ").append(escapeJson(violation)).append("\\n");
+                    }
+                    // Skip adding the original line since we replaced it
+                    continue;
+                }
+                
                 // Handle %channel% placeholder for listing all channels
                 if (line.contains("%channel%")) {
                     PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
@@ -599,9 +670,13 @@ public class DiscordWebhookHandler {
             sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
             
             if (violations != null && !violations.isEmpty()) {
-                sb.append("**Violations**:\\n");
-                for (String violation : violations) {
-                    sb.append("• ").append(escapeJson(violation)).append("\\n");
+                if (violations.size() > 1) {
+                    sb.append("**Violations**:\\n");
+                    for (String violation : violations) {
+                        sb.append("• ").append(escapeJson(violation)).append("\\n");
+                    }
+                } else {
+                    sb.append("**Reason**: ").append(escapeJson(violations.get(0))).append("\\n");
                 }
             } else {
                 sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");

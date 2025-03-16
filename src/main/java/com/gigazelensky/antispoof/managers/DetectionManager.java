@@ -7,6 +7,7 @@ import org.bukkit.entity.Player;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DetectionManager {
     private final AntiSpoofPlugin plugin;
@@ -17,6 +18,12 @@ public class DetectionManager {
     
     // Track player violation states to prevent duplicate alerts
     private final Map<UUID, Map<String, Boolean>> playerViolations = new ConcurrentHashMap<>();
+    
+    // Accumulate detected violations during the check period
+    private final Map<UUID, Map<String, String>> pendingViolations = new ConcurrentHashMap<>();
+    
+    // Track players who have a check scheduled
+    private final Map<UUID, AtomicBoolean> checkScheduled = new ConcurrentHashMap<>();
     
     // Player check cooldown in milliseconds (500ms by default)
     private static final long CHECK_COOLDOWN = 500;
@@ -112,18 +119,53 @@ public class DetectionManager {
             return;
         }
         
+        UUID playerUUID = player.getUniqueId();
+        
+        // Initialize pending violations map if needed
+        pendingViolations.putIfAbsent(playerUUID, new ConcurrentHashMap<>());
+        
+        // Initialize or get the check scheduled flag
+        AtomicBoolean hasScheduledCheck = checkScheduled.computeIfAbsent(
+            playerUUID, uuid -> new AtomicBoolean(false));
+            
+        // Check if an alert is already scheduled
+        if (!hasScheduledCheck.compareAndSet(false, true)) {
+            // Another check is already scheduled, just add this one to the queue
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Another check already scheduled for " + player.getName() + 
+                                      ", just adding violations to pending list");
+            }
+            
+            // Perform the check to collect violations now
+            collectViolations(player, isJoinCheck);
+            
+            return;
+        }
+        
         // Run check asynchronously to avoid lag
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            checkPlayer(player, isJoinCheck);
+            // First, collect violations
+            collectViolations(player, isJoinCheck);
+            
+            // Get the configured delay
+            int delaySeconds = config.getCheckDelay();
+            
+            // Schedule processing of all accumulated violations after the delay
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                processAllViolations(player);
+                
+                // Reset the check scheduled flag
+                hasScheduledCheck.set(false);
+            }, Math.max(1, delaySeconds) * 20L); // Convert seconds to ticks, minimum 1 second
         });
     }
     
     /**
-     * Performs a comprehensive check on a player
+     * Collects all violations for a player without processing them
      * @param player The player to check
-     * @param isJoinCheck Whether this is an initial join check
+     * @param isJoinCheck Whether this is a join check
      */
-    private void checkPlayer(Player player, boolean isJoinCheck) {
+    private void collectViolations(Player player, boolean isJoinCheck) {
         UUID uuid = player.getUniqueId();
         
         // Skip if player is offline or has been punished
@@ -146,6 +188,10 @@ public class DetectionManager {
             return;
         }
         
+        // Get access to the pending violations map
+        Map<String, String> detectedViolations = pendingViolations.computeIfAbsent(
+            uuid, k -> new ConcurrentHashMap<>());
+        
         // Check if player is a Bedrock player
         boolean isBedrockPlayer = plugin.isBedrockPlayer(player);
         
@@ -159,14 +205,14 @@ public class DetectionManager {
         
         // Initialize violations map for this player if not exists
         playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
-        Map<String, Boolean> violations = playerViolations.get(uuid);
+        Map<String, Boolean> previousViolations = playerViolations.get(uuid);
         
         // Always show client brand join message if it's enabled and this is a join check
         if (isJoinCheck && config.isJoinBrandAlertsEnabled() && 
-            !violations.getOrDefault("JOIN_BRAND", false)) {
+            !previousViolations.getOrDefault("JOIN_BRAND", false)) {
             
             // Only send the join-brand alert once per player session
-            violations.put("JOIN_BRAND", true);
+            previousViolations.put("JOIN_BRAND", true);
             
             // Send join brand alert on main thread
             Bukkit.getScheduler().runTask(plugin, () -> {
@@ -175,7 +221,8 @@ public class DetectionManager {
         }
         
         // Collect all detected violations
-        Map<String, String> detectedViolations = new HashMap<>();
+        boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
+        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Check for Geyser spoofing
         if (config.isPunishSpoofingGeyser() && isSpoofingGeyser(player, brand)) {
@@ -193,9 +240,6 @@ public class DetectionManager {
                 }
             }
         }
-        
-        boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
-        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Vanilla client check - this takes precedence
         if (config.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
@@ -237,88 +281,109 @@ public class DetectionManager {
             }
         }
         
-        // If player is a Bedrock player and we're in EXEMPT mode, don't process violations
+        // If player is a Bedrock player and we're in EXEMPT mode, clear all detected violations
         if (!detectedViolations.isEmpty() && isBedrockPlayer && config.isBedrockExemptMode()) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Bedrock player " + player.getName() + 
                                       " would be processed for violations, but is exempt");
             }
-            return;
-        }
-        
-        // Process detected violations on the main thread
-        if (!detectedViolations.isEmpty()) {
-            final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
-            
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                processViolations(player, finalViolations, brand);
-            });
+            detectedViolations.clear();
         }
     }
     
     /**
-     * Process detected violations for a player
-     * @param player The player
-     * @param detectedViolations Map of violation types to reasons
-     * @param brand The player's client brand
+     * Process all accumulated violations after the delay
+     * @param player The player to process
      */
-    private void processViolations(Player player, Map<String, String> detectedViolations, String brand) {
+    private void processAllViolations(Player player) {
         if (!player.isOnline()) return;
         
         UUID uuid = player.getUniqueId();
-        PlayerData data = plugin.getPlayerDataMap().get(uuid);
+        Map<String, String> allViolations = pendingViolations.getOrDefault(uuid, Collections.emptyMap());
         
-        if (data == null || data.isAlreadyPunished() || detectedViolations.isEmpty()) return;
+        // Clear pending violations
+        pendingViolations.put(uuid, new ConcurrentHashMap<>());
         
-        // Get player's violation tracking map
-        Map<String, Boolean> violations = playerViolations.get(uuid);
-        if (violations == null) {
-            violations = new ConcurrentHashMap<>();
-            playerViolations.put(uuid, violations);
-        }
-        
-        // Find new violations (not already alerted)
-        Map<String, String> newViolations = new HashMap<>();
-        for (Map.Entry<String, String> entry : detectedViolations.entrySet()) {
-            String violationType = entry.getKey();
-            if (!violations.getOrDefault(violationType, false)) {
-                newViolations.put(violationType, entry.getValue());
-                violations.put(violationType, true); // Mark as alerted
+        if (allViolations.isEmpty()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] No violations to process for " + player.getName());
             }
+            return;
         }
         
-        // Skip if no new violations
-        if (newViolations.isEmpty()) return;
+        PlayerData data = plugin.getPlayerDataMap().get(uuid);
+        if (data == null || data.isAlreadyPunished()) return;
+        
+        // Get player's brand
+        String brand = plugin.getClientBrand(player);
+        if (brand == null) brand = "unknown";
         
         // Get violated channel for blacklist mode
         String violatedChannel = null;
-        if (newViolations.containsKey("BLOCKED_CHANNEL")) {
+        if (allViolations.containsKey("BLOCKED_CHANNEL")) {
             violatedChannel = findBlockedChannel(data.getChannels());
         }
         
-        // Send alert(s)
-        if (newViolations.size() > 1) {
-            // For multiple violations, send a combined alert
-            List<String> reasons = new ArrayList<>(newViolations.values());
-            plugin.getAlertManager().sendMultipleViolationsAlert(player, reasons, brand);
-        } else {
-            // For a single violation, send specific alert
-            Map.Entry<String, String> entry = newViolations.entrySet().iterator().next();
-            plugin.getAlertManager().sendViolationAlert(
-                player, entry.getValue(), brand, violatedChannel, entry.getKey());
-        }
+        // Get list of all violation reasons
+        List<String> reasons = new ArrayList<>(allViolations.values());
         
-        // Execute punishment if needed - get the first violation for punishment
-        String primaryViolationType = newViolations.keySet().iterator().next();
-        String primaryReason = newViolations.get(primaryViolationType);
+        // Get most severe violation for punishment
+        String primaryViolationType = getPrimaryViolationType(allViolations.keySet());
+        String primaryReason = allViolations.get(primaryViolationType);
         
+        // Check if we need to punish
         boolean shouldPunish = shouldPunishViolation(primaryViolationType);
         
+        // Send the alert with all violations
+        plugin.getAlertManager().sendMultipleViolationsAlert(player, reasons, brand);
+        
+        // Also send in-game alerts for each individual violation if multiple
+        if (reasons.size() > 1) {
+            for (Map.Entry<String, String> entry : allViolations.entrySet()) {
+                plugin.getAlertManager().sendViolationAlert(player, entry.getValue(), brand, 
+                    entry.getKey().equals("BLOCKED_CHANNEL") ? violatedChannel : null, entry.getKey());
+            }
+        }
+        
+        // Execute punishment if needed
         if (shouldPunish) {
             plugin.getAlertManager().executePunishment(
                 player, primaryReason, brand, primaryViolationType, violatedChannel);
             data.setAlreadyPunished(true);
         }
+        
+        // Update violation history
+        Map<String, Boolean> violations = playerViolations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+        for (String type : allViolations.keySet()) {
+            violations.put(type, true);
+        }
+    }
+    
+    /**
+     * Determines the primary (most severe) violation type for punishment
+     * @param violationTypes Set of violation types
+     * @return The primary violation type
+     */
+    private String getPrimaryViolationType(Set<String> violationTypes) {
+        // Order of severity
+        List<String> severityOrder = Arrays.asList(
+            "VANILLA_WITH_CHANNELS",  // Most severe
+            "GEYSER_SPOOF",
+            "BLOCKED_CHANNEL",
+            "CHANNEL_WHITELIST",
+            "BLOCKED_BRAND",
+            "NON_VANILLA_WITH_CHANNELS"  // Least severe
+        );
+        
+        // Find the most severe violation
+        for (String type : severityOrder) {
+            if (violationTypes.contains(type)) {
+                return type;
+            }
+        }
+        
+        // If none found, return the first one
+        return violationTypes.iterator().next();
     }
     
     /**
@@ -502,6 +567,8 @@ public class DetectionManager {
         plugin.getPlayerDataMap().remove(playerUUID);
         plugin.getPlayerBrands().remove(playerUUID);
         playerViolations.remove(playerUUID);
+        pendingViolations.remove(playerUUID);
+        checkScheduled.remove(playerUUID);
         recentlyCheckedPlayers.remove(playerUUID);
     }
 }
