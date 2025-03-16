@@ -206,7 +206,7 @@ discord:
   embed-color: "#2AB7CA"
   violation-content:
     - "**Player**: %player%"
-    - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
+    - "**Violations**:%violations%"
     - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
     - "**Brand**: %brand%"
     - "**Channels**:"
