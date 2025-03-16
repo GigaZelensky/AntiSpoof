@@ -599,7 +599,24 @@ public class DiscordWebhookHandler {
                 // Handle %violations% placeholder (this is a custom placeholder we're adding)
                 if (processedLine.contains("%violations%") && violations != null && !violations.isEmpty()) {
                     sb.append(processedLine.replace("%violations%", "")).append("\\n");
-                    for (String violation : violations) {
+                    
+                    // Remove the "Multiple Violations" entry if it exists
+                    List<String> cleanViolations = new ArrayList<>(violations);
+                    cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
+                    
+                    // Clean up any "(Client: X)" text since we already show the brand separately
+                    List<String> formattedViolations = new ArrayList<>();
+                    for (String violation : cleanViolations) {
+                        int clientIndex = violation.indexOf(" (Client: ");
+                        if (clientIndex > 0) {
+                            formattedViolations.add(violation.substring(0, clientIndex));
+                        } else {
+                            formattedViolations.add(violation);
+                        }
+                    }
+                    
+                    // Add each violation as a bullet point
+                    for (String violation : formattedViolations) {
                         sb.append("• ").append(escapeJson(violation)).append("\\n");
                     }
                     continue; // Skip regular appending for this line
@@ -642,14 +659,23 @@ public class DiscordWebhookHandler {
         } else {
             // Fallback if no content lines configured
             sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-            sb.append("**Console Alert**: ").append(escapeJson(consoleAlert)).append("\\n");
             sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
             
             // Show all violations in a section
             if (violations != null && !violations.isEmpty()) {
+                // Remove the "Multiple Violations" entry if it exists
+                List<String> cleanViolations = new ArrayList<>(violations);
+                cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
+                
                 sb.append("**Violations**:\\n");
-                for (String violation : violations) {
-                    sb.append("• ").append(escapeJson(violation)).append("\\n");
+                for (String violation : cleanViolations) {
+                    // Clean up any "(Client: X)" text
+                    int clientIndex = violation.indexOf(" (Client: ");
+                    if (clientIndex > 0) {
+                        sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
+                    } else {
+                        sb.append("• ").append(escapeJson(violation)).append("\\n");
+                    }
                 }
             } else {
                 sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
