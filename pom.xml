@@ -6,7 +6,7 @@
 
     <groupId>com.gigazelensky</groupId>
     <artifactId>antispoof</artifactId>
-    <version>1.1.2</version>
+    <version>1.2.0</version>
     <packaging>jar</packaging>
 
     <name>AntiSpoof</name>
@@ -16,7 +16,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
-        <packetevents.version>2.7.0</packetevents.version>
+        <packetevents.version>2.7.1-SNAPSHOT</packetevents.version>
         <spigot.version>1.20.4-R0.1-SNAPSHOT</spigot.version>
         <placeholderapi.version>2.11.6</placeholderapi.version>
     </properties>
@@ -44,13 +44,87 @@
         </repository>
     </repositories>
 
+    <!-- Profiles for full and lite versions -->
+    <profiles>
+        <!-- Default profile: Full version with shaded PacketEvents -->
+        <profile>
+            <id>full</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.retrooper</groupId>
+                    <artifactId>packetevents-spigot</artifactId>
+                    <version>${packetevents.version}</version>
+                    <scope>compile</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <finalName>antispoof-${project.version}</finalName>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <relocations>
+                                        <relocation>
+                                            <pattern>com.github.retrooper.packetevents</pattern>
+                                            <shadedPattern>com.gigazelensky.libs.packetevents</shadedPattern>
+                                        </relocation>
+                                        <relocation>
+                                            <pattern>io.github.retrooper.packetevents</pattern>
+                                            <shadedPattern>com.gigazelensky.libs.packetevents.internal</shadedPattern>
+                                        </relocation>
+                                    </relocations>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Lite version without PacketEvents (requires external installation) -->
+        <profile>
+            <id>lite</id>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.retrooper</groupId>
+                    <artifactId>packetevents-spigot</artifactId>
+                    <version>${packetevents.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <finalName>antispoof-lite-${project.version}</finalName>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <version>3.3.0</version>
+                        <configuration>
+                            <archive>
+                                <manifestEntries>
+                                    <Built-By>GigaZelensky</Built-By>
+                                </manifestEntries>
+                            </archive>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <dependencies>
-        <dependency>
-            <groupId>com.github.retrooper</groupId>
-            <artifactId>packetevents-spigot</artifactId>
-            <version>${packetevents.version}</version>
-            <scope>compile</scope>
-        </dependency>
+        <!-- Dependencies common to both profiles -->
         <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
@@ -75,28 +149,12 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.0</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <relocations>
-                                <relocation>
-                                    <pattern>com.github.retrooper.packetevents</pattern>
-                                    <shadedPattern>com.gigazelensky.libs.packetevents</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>io.github.retrooper.packetevents</pattern>
-                                    <shadedPattern>com.gigazelensky.libs.packetevents.internal</shadedPattern>
-                                </relocation>
-                            </relocations>
-                        </configuration>
-                    </execution>
-                </executions>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
             </plugin>
         </plugins>
     </build>

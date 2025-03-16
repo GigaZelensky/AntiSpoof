@@ -1,8 +1,10 @@
 name: AntiSpoof
-version: 1.1.2
+version: 1.2.0
 main: com.gigazelensky.antispoof.AntiSpoofPlugin
 api-version: 1.20
 softdepend: [ProtocolLib, ProtocolSupport, ViaVersion, ViaBackwards, ViaRewind, Geyser-Spigot, PlaceholderAPI, GrimAC, floodgate]
+# Add PacketEvents as an optional dependency for the lite version
+loadbefore: [PacketEvents]
 commands:
   antispoof:
     description: View client channel information and manage the plugin

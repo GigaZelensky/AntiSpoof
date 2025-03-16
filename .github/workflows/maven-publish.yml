@@ -26,14 +26,23 @@ jobs:
         distribution: 'temurin'
         cache: maven
         
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
+    - name: Build Full Version with Maven
+      run: mvn -B package --file pom.xml -P full
       
-    - name: Upload Build Artifact
+    - name: Build Lite Version with Maven
+      run: mvn -B package --file pom.xml -P lite
+      
+    - name: Upload Full Version Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AntiSpoof
+        name: AntiSpoof-Full
         path: target/antispoof-*.jar
+        
+    - name: Upload Lite Version Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AntiSpoof-Lite
+        path: target/antispoof-lite-*.jar
         
     # Only publish to GitHub Packages when a release is created
     - name: Publish to GitHub Packages
