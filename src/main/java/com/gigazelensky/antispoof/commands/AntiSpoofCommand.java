@@ -203,6 +203,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         
         PlayerData data = plugin.getPlayerDataMap().get(target.getUniqueId());
         boolean hasChannels = data != null && !data.getChannels().isEmpty();
+        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Display channels first regardless of spoof status
         if (hasChannels) {
@@ -212,8 +213,20 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         
         // Determine reason for flagging
         if (isSpoofing) {
-            // Check brand first
-            if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
+            // Start with vanilla client check - high priority
+            if (claimsVanilla && hasChannels && plugin.getConfigManager().isVanillaCheckEnabled()) {
+                flagReason = "Vanilla client with plugin channels";
+            }
+            // Then check Geyser spoofing
+            else if (plugin.isSpoofingGeyser(target)) {
+                flagReason = "Spoofing Geyser client";
+            }
+            // Then check non-vanilla with channels
+            else if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
+                flagReason = "Non-vanilla client with channels";
+            }
+            // Then check for brand blocking
+            else if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 
                 if (brandBlocked && plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
@@ -225,60 +238,53 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 }
             }
             
-            // Check channels if no brand reason was found
+            // Check channel whitelist/blacklist if no reason has been found yet
             if (flagReason == null && hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
                 String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
                 if (!whitelistMode.equals("FALSE")) {
-                    // Whitelist mode - check for missing required channels
-                    if (whitelistMode.equals("STRICT")) {
-                        List<String> missingChannels = new ArrayList<>();
-                        
-                        for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
-                            boolean found = false;
-                            for (String playerChannel : data.getChannels()) {
-                                boolean matches = plugin.getConfigManager().matchesChannelPattern(playerChannel);
+                    // Whitelist mode
+                    boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(data.getChannels());
+                    if (!passesWhitelist) {
+                        if (whitelistMode.equals("STRICT")) {
+                            // Get missing channels for strict mode
+                            List<String> missingChannels = new ArrayList<>();
+                            for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
+                                boolean found = false;
+                                for (String playerChannel : data.getChannels()) {
+                                    try {
+                                        if (playerChannel.matches(whitelistedChannel)) {
+                                            found = true;
+                                            break;
+                                        }
+                                    } catch (Exception e) {
+                                        // If regex fails, try direct match
+                                        if (playerChannel.equals(whitelistedChannel)) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
                                 
-                                if (matches) {
-                                    found = true;
-                                    break;
+                                if (!found) {
+                                    missingChannels.add(whitelistedChannel);
                                 }
                             }
                             
-                            if (!found) {
-                                missingChannels.add(whitelistedChannel);
+                            if (!missingChannels.isEmpty()) {
+                                flagReason = "Missing required channels: " + String.join(", ", missingChannels);
+                            } else {
+                                flagReason = "Channels don't match whitelist requirements";
                             }
-                        }
-                        
-                        if (!missingChannels.isEmpty()) {
-                            flagReason = "Missing required channels: " + String.join(", ", missingChannels);
-                        }
-                    } else {
-                        // Simple whitelist - check if all channels are outside whitelist
-                        boolean hasWhitelistedChannel = false;
-                        
-                        for (String channel : data.getChannels()) {
-                            boolean matches = plugin.getConfigManager().matchesChannelPattern(channel);
-                            
-                            if (matches) {
-                                hasWhitelistedChannel = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!hasWhitelistedChannel) {
+                        } else {
                             flagReason = "No whitelisted channels detected";
                         }
                     }
                 } else {
                     // Blacklist mode - check for blocked channels
-                    for (String channel : data.getChannels()) {
-                        boolean blocked = plugin.getConfigManager().matchesChannelPattern(channel);
-                        
-                        if (blocked) {
-                            flagReason = "Using blocked channel: " + channel;
-                            break;
-                        }
+                    String blockedChannel = plugin.getDetectionManager().findBlockedChannel(data.getChannels());
+                    if (blockedChannel != null) {
+                        flagReason = "Using blocked channel: " + blockedChannel;
                     }
                 }
             }
@@ -338,11 +344,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                         for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
                             boolean found = false;
                             for (String playerChannel : data.getChannels()) {
-                                boolean matches = plugin.getConfigManager().matchesChannelPattern(playerChannel);
-                                
-                                if (matches) {
-                                    found = true;
-                                    break;
+                                try {
+                                    if (playerChannel.matches(whitelistedChannel)) {
+                                        found = true;
+                                        break;
+                                    }
+                                } catch (Exception e) {
+                                    // If regex fails, try direct match
+                                    if (playerChannel.equals(whitelistedChannel)) {
+                                        found = true;
+                                        break;
+                                    }
                                 }
                             }
                             

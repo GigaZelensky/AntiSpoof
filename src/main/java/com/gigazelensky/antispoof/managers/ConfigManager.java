@@ -168,6 +168,17 @@ public class ConfigManager {
         return config.getString("blocked-channels.console-alert-message", getConsoleAlertMessage());
     }
     
+    // Added whitelist message methods
+    public String getChannelWhitelistAlertMessage() {
+        return config.getString("blocked-channels.whitelist-alert-message", 
+            "&8[&cAntiSpoof&8] &e%player% flagged! &cChannels don't match whitelist requirements");
+    }
+    
+    public String getChannelWhitelistConsoleAlertMessage() {
+        return config.getString("blocked-channels.whitelist-console-alert-message", 
+            "%player% flagged! Channels don't match whitelist requirements");
+    }
+    
     public boolean shouldPunishBlockedChannels() {
         return config.getBoolean("blocked-channels.punish", true);
     }
@@ -197,11 +208,18 @@ public class ConfigManager {
     
     // Channel regex matching
     public boolean matchesChannelPattern(String channel) {
-        boolean isWhitelist = isChannelWhitelistEnabled();
+        if (channel == null) return false;
         
         for (Map.Entry<String, Pattern> entry : channelPatterns.entrySet()) {
-            if (entry.getValue().matcher(channel).matches()) {
-                return true; // Channel matches a pattern
+            try {
+                if (entry.getValue().matcher(channel).matches()) {
+                    return true; // Channel matches a pattern
+                }
+            } catch (Exception e) {
+                // If there's any error with the pattern, try direct comparison as fallback
+                if (channel.equals(entry.getKey())) {
+                    return true;
+                }
             }
         }
         
@@ -249,8 +267,15 @@ public class ConfigManager {
     public boolean matchesBrandPattern(String brand) {
         // Check if brand matches any pattern in the list
         for (Map.Entry<String, Pattern> entry : brandPatterns.entrySet()) {
-            if (entry.getValue().matcher(brand).matches()) {
-                return true; // Brand matches a pattern
+            try {
+                if (entry.getValue().matcher(brand).matches()) {
+                    return true; // Brand matches a pattern
+                }
+            } catch (Exception e) {
+                // If there's any error with the pattern, try direct comparison as fallback
+                if (brand.equals(entry.getKey())) {
+                    return true;
+                }
             }
         }
         return false; // No patterns matched

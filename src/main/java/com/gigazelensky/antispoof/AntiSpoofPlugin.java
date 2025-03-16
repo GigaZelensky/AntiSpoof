@@ -185,7 +185,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     }
 
     /**
-     * Backward compatibility method to check if a player is spoofing
+     * Comprehensive method to check if a player is spoofing
      * @param player The player to check
      * @return True if the player is found to be spoofing, false otherwise
      */
@@ -210,8 +210,14 @@ public class AntiSpoofPlugin extends JavaPlugin {
         boolean hasChannels = !data.getChannels().isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
-        // Handle potential Geyser spoofing
+        // Check for Geyser spoofing first
         if (configManager.isPunishSpoofingGeyser() && isSpoofingGeyser(player)) {
+            return true;
+        }
+        
+        // Vanilla client check - this takes precedence over whitelist checks
+        // A vanilla client should have no plugin channels
+        if (configManager.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
             return true;
         }
         
@@ -225,18 +231,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
-        // Vanilla with channels check
-        if (configManager.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
-            return true;
-        }
-        
         // Non-vanilla with channels check
         if (configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
             return true;
         }
         
-        // Channel whitelist/blacklist check
-        if (configManager.isBlockedChannelsEnabled()) {
+        // Channel whitelist/blacklist check - only if not already flagged by vanilla check
+        if (configManager.isBlockedChannelsEnabled() && hasChannels) {
             if (configManager.isChannelWhitelistEnabled()) {
                 // Whitelist mode
                 if (!detectionManager.checkChannelWhitelist(data.getChannels())) {
@@ -260,7 +261,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     }
 
     /**
-     * Backward compatibility method to check if a player is spoofing Geyser
+     * Checks if a player is spoofing Geyser
      * @param player The player to check
      * @return True if the player is spoofing Geyser, false otherwise
      */

@@ -202,9 +202,15 @@ public class AlertManager {
                 break;
                 
             case "BLOCKED_CHANNEL":
-            case "CHANNEL_WHITELIST":
                 alertTemplate = config.getBlockedChannelsAlertMessage();
                 consoleAlertTemplate = config.getBlockedChannelsConsoleAlertMessage();
+                sendDiscordAlert = config.isBlockedChannelsDiscordAlertEnabled();
+                break;
+                
+            case "CHANNEL_WHITELIST":
+                // Use whitelist-specific messages
+                alertTemplate = config.getChannelWhitelistAlertMessage();
+                consoleAlertTemplate = config.getChannelWhitelistConsoleAlertMessage();
                 sendDiscordAlert = config.isBlockedChannelsDiscordAlertEnabled();
                 break;
                 
@@ -239,7 +245,7 @@ public class AlertManager {
                 .replace("%brand%", brand != null ? brand : "unknown")
                 .replace("%reason%", reason);
         
-        if (violatedChannel != null) {
+        if (violatedChannel != null && violationType.equals("BLOCKED_CHANNEL")) {
             playerAlert = playerAlert.replace("%channel%", violatedChannel);
             consoleAlert = consoleAlert.replace("%channel%", violatedChannel);
         }
@@ -312,7 +318,7 @@ public class AlertManager {
                                      .replace("%reason%", reason)
                                      .replace("%brand%", brand != null ? brand : "unknown");
             
-            if (violatedChannel != null) {
+            if (violatedChannel != null && violationType.equals("BLOCKED_CHANNEL")) {
                 formatted = formatted.replace("%channel%", violatedChannel);
             }
             

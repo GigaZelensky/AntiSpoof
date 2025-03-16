@@ -193,7 +193,7 @@ public class DetectionManager {
         boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
-        // Vanilla client check
+        // Vanilla client check - this takes precedence
         if (config.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
             detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
         }
@@ -204,18 +204,19 @@ public class DetectionManager {
         }
         
         // Channel whitelist/blacklist check
-        if (config.isBlockedChannelsEnabled() && hasChannels) {
+        else if (config.isBlockedChannelsEnabled() && hasChannels) {
             if (config.isChannelWhitelistEnabled()) {
                 // Whitelist mode
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
-                    detectedViolations.put("CHANNEL_WHITELIST", "Client channels don't match whitelist");
+                    // Use the proper violation type for whitelist
+                    detectedViolations.put("CHANNEL_WHITELIST", "Client channels don't match whitelist requirements");
                 }
             } else {
                 // Blacklist mode
                 String blockedChannel = findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
-                    detectedViolations.put("BLOCKED_CHANNEL", "Blocked channel: " + blockedChannel);
+                    detectedViolations.put("BLOCKED_CHANNEL", "Using blocked channel: " + blockedChannel);
                 }
             }
         }
@@ -280,7 +281,7 @@ public class DetectionManager {
         // Find out if we should punish for this violation
         boolean shouldPunish = shouldPunishViolation(primaryViolationType);
         
-        // Get blocked channel if applicable
+        // Get violated channel for blacklist mode
         String violatedChannel = null;
         if (primaryViolationType.equals("BLOCKED_CHANNEL")) {
             violatedChannel = findBlockedChannel(data.getChannels());
@@ -355,11 +356,6 @@ public class DetectionManager {
     }
     
     /**
-     * Checks if a player's channels pass the whitelist check
-     * @param playerChannels The player's channels
-     * @return True if the channels pass the whitelist check, false otherwise
-     */
-    /**
      * Checks if player channels pass the whitelist check
      * @param playerChannels The player's channels
      * @return True if the channels pass the whitelist check, false otherwise
@@ -430,13 +426,13 @@ public class DetectionManager {
      * @param playerChannels The player's channels
      * @return The blocked channel, or null if none are blocked
      */
-    /**
-     * Finds a blocked channel in a player's channels
-     * @param playerChannels The player's channels
-     * @return The blocked channel, or null if none are blocked
-     */
     public String findBlockedChannel(Set<String> playerChannels) {
         if (playerChannels == null || playerChannels.isEmpty()) {
+            return null;
+        }
+        
+        // Only for blacklist mode
+        if (config.isChannelWhitelistEnabled()) {
             return null;
         }
         
