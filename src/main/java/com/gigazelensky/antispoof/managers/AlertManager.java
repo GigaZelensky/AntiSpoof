@@ -233,6 +233,11 @@ public class AlertManager {
                 sendDiscordAlert = true; // Default to true for unknown types
         }
         
+        // Always include brand information in the reason if not already present
+        if (brand != null && !reason.contains(brand)) {
+            reason += " (Client: " + brand + ")";
+        }
+        
         // Format the player alert message with placeholders
         String playerAlert = alertTemplate
                 .replace("%player%", player.getName())

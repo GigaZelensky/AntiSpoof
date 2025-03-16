@@ -186,7 +186,11 @@ public class DetectionManager {
         if (config.isBlockedBrandsEnabled() && config.shouldCountNonWhitelistedBrandsAsFlag()) {
             boolean brandBlocked = isBrandBlocked(brand);
             if (brandBlocked) {
-                detectedViolations.put("BLOCKED_BRAND", "Blocked client brand: " + brand);
+                if (config.isBrandWhitelistEnabled()) {
+                    detectedViolations.put("BLOCKED_BRAND", "Client brand not in whitelist: " + brand);
+                } else {
+                    detectedViolations.put("BLOCKED_BRAND", "Blocked client brand: " + brand);
+                }
             }
         }
         
@@ -204,13 +208,25 @@ public class DetectionManager {
         }
         
         // Channel whitelist/blacklist check
-        else if (config.isBlockedChannelsEnabled() && hasChannels) {
+        if (config.isBlockedChannelsEnabled() && hasChannels) {
             if (config.isChannelWhitelistEnabled()) {
                 // Whitelist mode
                 boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
                 if (!passesWhitelist) {
                     // Use the proper violation type for whitelist
-                    detectedViolations.put("CHANNEL_WHITELIST", "Client channels don't match whitelist requirements");
+                    if (config.isChannelWhitelistStrict()) {
+                        // Get missing channels for detailed message
+                        List<String> missingChannels = findMissingRequiredChannels(data.getChannels());
+                        if (!missingChannels.isEmpty()) {
+                            detectedViolations.put("CHANNEL_WHITELIST", 
+                                "Missing required channels: " + String.join(", ", missingChannels));
+                        } else {
+                            detectedViolations.put("CHANNEL_WHITELIST", 
+                                "Client channels don't match whitelist requirements");
+                        }
+                    } else {
+                        detectedViolations.put("CHANNEL_WHITELIST", "No whitelisted channels detected");
+                    }
                 }
             } else {
                 // Blacklist mode
@@ -274,16 +290,9 @@ public class DetectionManager {
         // Skip if no new violations
         if (newViolations.isEmpty()) return;
         
-        // Get primary violation for punishment decision
-        String primaryViolationType = newViolations.keySet().iterator().next();
-        String primaryReason = newViolations.get(primaryViolationType);
-        
-        // Find out if we should punish for this violation
-        boolean shouldPunish = shouldPunishViolation(primaryViolationType);
-        
         // Get violated channel for blacklist mode
         String violatedChannel = null;
-        if (primaryViolationType.equals("BLOCKED_CHANNEL")) {
+        if (newViolations.containsKey("BLOCKED_CHANNEL")) {
             violatedChannel = findBlockedChannel(data.getChannels());
         }
         
@@ -294,16 +303,56 @@ public class DetectionManager {
             plugin.getAlertManager().sendMultipleViolationsAlert(player, reasons, brand);
         } else {
             // For a single violation, send specific alert
+            Map.Entry<String, String> entry = newViolations.entrySet().iterator().next();
             plugin.getAlertManager().sendViolationAlert(
-                player, primaryReason, brand, violatedChannel, primaryViolationType);
+                player, entry.getValue(), brand, violatedChannel, entry.getKey());
         }
         
-        // Execute punishment if needed
+        // Execute punishment if needed - get the first violation for punishment
+        String primaryViolationType = newViolations.keySet().iterator().next();
+        String primaryReason = newViolations.get(primaryViolationType);
+        
+        boolean shouldPunish = shouldPunishViolation(primaryViolationType);
+        
         if (shouldPunish) {
             plugin.getAlertManager().executePunishment(
                 player, primaryReason, brand, primaryViolationType, violatedChannel);
             data.setAlreadyPunished(true);
         }
+    }
+    
+    /**
+     * Finds missing required channels for strict whitelist mode
+     * @param playerChannels The player's channels
+     * @return List of missing required channels
+     */
+    private List<String> findMissingRequiredChannels(Set<String> playerChannels) {
+        List<String> missingChannels = new ArrayList<>();
+        List<String> requiredChannels = config.getBlockedChannels();
+        
+        for (String requiredChannel : requiredChannels) {
+            boolean found = false;
+            for (String playerChannel : playerChannels) {
+                try {
+                    if (playerChannel.matches(requiredChannel)) {
+                        found = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    // If regex fails, try direct comparison
+                    if (playerChannel.equals(requiredChannel)) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!found) {
+                missingChannels.add(requiredChannel);
+            }
+        }
+        
+        return missingChannels;
     }
     
     /**

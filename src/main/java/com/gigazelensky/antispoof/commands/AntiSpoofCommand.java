@@ -194,7 +194,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private void checkPlayer(CommandSender sender, Player target) {
         boolean isSpoofing = plugin.isPlayerSpoofing(target);
         String brand = plugin.getClientBrand(target);
-        String flagReason = null;
+        List<String> flagReasons = new ArrayList<>();
         
         if (brand == null) {
             sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.YELLOW + " has no client brand information yet.");
@@ -211,35 +211,38 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
         }
         
-        // Determine reason for flagging
+        // Determine all reasons for flagging
         if (isSpoofing) {
-            // Start with vanilla client check - high priority
+            // Check for vanilla client with channels
             if (claimsVanilla && hasChannels && plugin.getConfigManager().isVanillaCheckEnabled()) {
-                flagReason = "Vanilla client with plugin channels";
+                flagReasons.add("Vanilla client with plugin channels");
             }
-            // Then check Geyser spoofing
-            else if (plugin.isSpoofingGeyser(target)) {
-                flagReason = "Spoofing Geyser client";
+            
+            // Check for Geyser spoofing
+            if (plugin.isSpoofingGeyser(target)) {
+                flagReasons.add("Spoofing Geyser client");
             }
-            // Then check non-vanilla with channels
-            else if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
-                flagReason = "Non-vanilla client with channels";
+            
+            // Check for non-vanilla with channels
+            if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
+                flagReasons.add("Non-vanilla client with channels");
             }
-            // Then check for brand blocking
-            else if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
+            
+            // Check for blocked brand
+            if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 
                 if (brandBlocked && plugin.getConfigManager().shouldCountNonWhitelistedBrandsAsFlag()) {
                     if (plugin.getConfigManager().isBrandWhitelistEnabled()) {
-                        flagReason = "Client brand is not in whitelist";
+                        flagReasons.add("Client brand is not in whitelist");
                     } else {
-                        flagReason = "Using blocked client brand";
+                        flagReasons.add("Using blocked client brand");
                     }
                 }
             }
             
-            // Check channel whitelist/blacklist if no reason has been found yet
-            if (flagReason == null && hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
+            // Check channel whitelist/blacklist
+            if (hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
                 String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
                 if (!whitelistMode.equals("FALSE")) {
@@ -272,45 +275,51 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                             }
                             
                             if (!missingChannels.isEmpty()) {
-                                flagReason = "Missing required channels: " + String.join(", ", missingChannels);
+                                flagReasons.add("Missing required channels: " + String.join(", ", missingChannels));
                             } else {
-                                flagReason = "Channels don't match whitelist requirements";
+                                flagReasons.add("Channels don't match whitelist requirements");
                             }
                         } else {
-                            flagReason = "No whitelisted channels detected";
+                            flagReasons.add("No whitelisted channels detected");
                         }
                     }
                 } else {
                     // Blacklist mode - check for blocked channels
                     String blockedChannel = plugin.getDetectionManager().findBlockedChannel(data.getChannels());
                     if (blockedChannel != null) {
-                        flagReason = "Using blocked channel: " + blockedChannel;
+                        flagReasons.add("Using blocked channel: " + blockedChannel);
                     }
                 }
             }
             
-            // Default reason if none found
-            if (flagReason == null) {
-                flagReason = "Unknown reason (check configuration)";
+            // Add default reason if none found
+            if (flagReasons.isEmpty()) {
+                flagReasons.add("Unknown reason (check configuration)");
             }
         }
         
         // Display player status and brand information after channels
         if (isSpoofing) {
             sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.RED + " has been flagged!");
-            sender.sendMessage(ChatColor.RED + "Reason: " + flagReason);
+            
+            // Show client brand first
+            sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
+            
+            // Show all violations
+            sender.sendMessage(ChatColor.RED + "Violations detected (" + flagReasons.size() + "):");
+            for (String reason : flagReasons) {
+                sender.sendMessage(ChatColor.RED + "• " + reason);
+            }
             
             // Check if the brand is blocked/not whitelisted and display with appropriate color
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 
                 if (brandBlocked) {
-                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.RED + brand + ChatColor.GRAY + " (Blocked)");
+                    sender.sendMessage(ChatColor.GRAY + "Brand status: " + ChatColor.RED + "Blocked");
                 } else {
-                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.GREEN + brand);
+                    sender.sendMessage(ChatColor.GRAY + "Brand status: " + ChatColor.GREEN + "Allowed");
                 }
-            } else {
-                sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
             }
             
             sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
@@ -324,7 +333,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.GRAY + "Channel whitelist mode: " + 
                         ChatColor.WHITE + (whitelistMode.equals("STRICT") ? "Strict" : "Simple"));
                     
-                    sender.sendMessage(ChatColor.GRAY + "Channel is whitelisted:");
+                    sender.sendMessage(ChatColor.GRAY + "Channel whitelist status:");
                     
                     // First, list all player channels and if they're whitelisted
                     for (String channel : data.getChannels()) {
@@ -394,17 +403,19 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         } else {
             sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.GREEN + " does not appear to be spoofing.");
             
+            // Show client brand
+            sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
+            
             // Check if the brand is blocked/not whitelisted and display with appropriate color
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
                 boolean brandBlocked = plugin.getConfigManager().isBrandBlocked(brand);
                 
                 if (brandBlocked) {
-                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.RED + brand + ChatColor.GRAY + " (Blocked)");
+                    sender.sendMessage(ChatColor.GRAY + "Brand status: " + ChatColor.RED + "Blocked" + 
+                        ChatColor.GRAY + " (but not counting as flag)");
                 } else {
-                    sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.GREEN + brand);
+                    sender.sendMessage(ChatColor.GRAY + "Brand status: " + ChatColor.GREEN + "Allowed");
                 }
-            } else {
-                sender.sendMessage(ChatColor.GRAY + "Client brand: " + ChatColor.WHITE + brand);
             }
             
             sender.sendMessage(ChatColor.GRAY + "Has channels: " + (hasChannels ? ChatColor.GREEN + "Yes" : ChatColor.RED + "No"));
