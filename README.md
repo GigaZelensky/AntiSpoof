@@ -14,20 +14,20 @@
 
 ## 📋 Table of Contents
 
-- [Key Features](#-key-features)
-- [Download Options](#-download-options)
-- [What AntiSpoof Can Do](#-what-antispoof-can-do)
-- [What AntiSpoof Cannot Do](#-what-antispoof-cannot-do)
-- [Why AntiSpoof is the Best Solution](#-why-antispoof-is-the-best-solution)
-- [Installation](#-installation)
-- [Commands & Permissions](#-commands--permissions)
-- [PlaceholderAPI Integration](#-placeholderapi-integration)
-- [Configuration](#-configuration)
-- [How It Works](#-how-it-works)
-- [Troubleshooting](#-troubleshooting)
-- [FAQ](#-frequently-asked-questions)
-- [Support & Development](#-support--development)
-- [License](#-license)
+- [Key Features](#key-features)
+- [Download Options](#download-options)
+- [What AntiSpoof Can Do](#what-antispoof-can-do)
+- [What AntiSpoof Cannot Do](#what-antispoof-cannot-do)
+- [Why AntiSpoof is the Best Solution](#why-antispoof-is-the-best-solution)
+- [Installation](#installation)
+- [Commands & Permissions](#commands--permissions)
+- [PlaceholderAPI Integration](#placeholderapi-integration)
+- [Configuration](#configuration)
+- [How It Works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#frequently-asked-questions)
+- [Support & Development](#support--development)
+- [License](#license)
 
 ---
 
@@ -112,7 +112,7 @@ The flexible configuration system allows you to tailor the plugin to your specif
 
 ---
 
-## ⚠️ What AntiSpoof *Cannot* Do
+## ⚠️ What AntiSpoof Cannot Do
 
 Due to Minecraft's inherent limitations, there are some things that AntiSpoof cannot detect:
 
@@ -134,7 +134,7 @@ No anti-cheat solution can provide absolute protection. AntiSpoof is a powerful 
 
 Despite the limitations, AntiSpoof remains one of the most effective tools for detecting modified clients:
 
-### 1. Catches 95% of Cheaters
+### 1. Catches 95% of Spoofing Cheaters
 The vast majority of cheaters don't use sophisticated spoofing techniques. AntiSpoof catches these players easily, blocking most hacked clients with minimal false positives.
 
 ### 2. Highly Customizable
@@ -223,16 +223,6 @@ AntiSpoof integrates with PlaceholderAPI to provide useful placeholders for othe
 ### Usage Examples
 
 Here are some examples of how you can use these placeholders:
-
-#### Server List (with a MOTD plugin)
-```
-&cWarning: &e%antispoof_is_spoofing_percent%%&c of players are using modified clients!
-```
-
-#### Tab List Display (with a tab list plugin)
-```
-%player_name% &7| Client: &e%antispoof_brand% &7| Mods: &e%antispoof_channels_count%
-```
 
 #### Chat Format (with a chat plugin)
 ```
