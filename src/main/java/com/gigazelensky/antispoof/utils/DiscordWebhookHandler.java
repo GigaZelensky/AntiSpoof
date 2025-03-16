@@ -31,9 +31,37 @@ public class DiscordWebhookHandler {
     // Map to track players who have already been alerted for spoofing in the current session
     private final Map<UUID, Boolean> alertedPlayers = new ConcurrentHashMap<>();
     
+    // Map to track when players registered their initial channels (join time)
+    private final Map<UUID, Long> playerRegistrationTimes = new ConcurrentHashMap<>();
+    
+    // Grace period before channels are considered "modified" after join (in milliseconds)
+    private static final long CHANNEL_GRACE_PERIOD = 5000; // 5 seconds
+    
+    // Cooldown between channel modification alerts to prevent spam (in milliseconds)
+    private static final long CHANNEL_MOD_COOLDOWN = 3000; // 3 seconds
+    
+    // Map to track last time a modification alert was sent for a player
+    private final Map<UUID, Long> lastModificationAlertTimes = new ConcurrentHashMap<>();
+    
+    // Map to track pending modified channels during cooldown
+    private final Map<UUID, Set<String>> pendingModifiedChannels = new ConcurrentHashMap<>();
+    
     public DiscordWebhookHandler(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
+    }
+    
+    /**
+     * Registers a player's initial connection time for channel grace period
+     * @param playerUuid The UUID of the player
+     */
+    public void registerPlayerJoin(UUID playerUuid) {
+        playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+        pendingModifiedChannels.put(playerUuid, new HashSet<>());
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Discord] Registered join time for player with UUID: " + playerUuid);
+        }
     }
     
     /**
@@ -114,6 +142,9 @@ public class DiscordWebhookHandler {
                                                    player.getName() + " with " + updatedChannels.size() + " channels");
                         }
                         
+                        // Mark the player's initial registration time
+                        playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                        
                         // Send the full webhook with updated channel information
                         sendFullWebhook(player, reason, brand, channel, violations);
                     }
@@ -125,23 +156,62 @@ public class DiscordWebhookHandler {
                                            player.getName());
                 }
                 
+                // Mark the player's initial registration time
+                playerRegistrationTimes.put(playerUuid, System.currentTimeMillis());
+                
                 // Send the full webhook
                 sendFullWebhook(player, reason, brand, channel, violations);
             }
         }
         // It's a modified channel alert
         else {
-            // Only send if modified channel discord alerts are enabled
-            if (config.isModifiedChannelsDiscordEnabled()) {
-                // Get the modified channel from the reason
-                String modifiedChannel = channel; // The channel should be passed by the caller
+            // Only process if modified channel discord alerts are enabled
+            if (config.isModifiedChannelsEnabled() && config.isModifiedChannelsDiscordEnabled()) {
+                // Check if we're still in the grace period after initial channel registration
+                boolean isInGracePeriod = isInChannelGracePeriod(playerUuid);
                 
-                // Send a compact update webhook for the modified channel
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Sending modified channel alert for: " + modifiedChannel);
+                if (isInGracePeriod) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Skipping modified channel alert during grace period for: " + 
+                                               player.getName() + ", channel: " + channel);
+                    }
+                    
+                    // Just update the last alert channels silently during grace period
+                    lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+                    return;
                 }
                 
-                sendModifiedChannelWebhook(player, modifiedChannel);
+                // Check if we're in cooldown and should batch alerts
+                long now = System.currentTimeMillis();
+                Long lastModTime = lastModificationAlertTimes.get(playerUuid);
+                
+                if (lastModTime != null && now - lastModTime < CHANNEL_MOD_COOLDOWN) {
+                    // We're in cooldown - add this channel to pending set
+                    Set<String> pending = pendingModifiedChannels.computeIfAbsent(playerUuid, k -> new HashSet<>());
+                    pending.add(channel);
+                    
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Added channel to pending for: " + player.getName() + 
+                                              ", channel: " + channel + ", total pending: " + pending.size());
+                    }
+                } else {
+                    // Get any pending channels and add this one
+                    Set<String> pending = pendingModifiedChannels.getOrDefault(playerUuid, new HashSet<>());
+                    pending.add(channel);
+                    
+                    // Send alert with all channels in the pending set
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Discord] Sending modified channel alert for: " + player.getName() + 
+                                              ", channels: " + pending.size());
+                    }
+                    
+                    // Send a compact update webhook with all modified channels
+                    sendModifiedChannelWebhook(player, pending);
+                    
+                    // Clear pending and update last alert time
+                    pending.clear();
+                    lastModificationAlertTimes.put(playerUuid, now);
+                }
                 
                 // Update last alert channels
                 lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
@@ -150,15 +220,31 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Checks if a player is still in the channel registration grace period
+     * @param playerUuid The player's UUID
+     * @return True if still in the grace period, false otherwise
+     */
+    private boolean isInChannelGracePeriod(UUID playerUuid) {
+        Long registrationTime = playerRegistrationTimes.get(playerUuid);
+        if (registrationTime == null) return false;
+        
+        long now = System.currentTimeMillis();
+        long timeSinceRegistration = now - registrationTime;
+        
+        return timeSinceRegistration < CHANNEL_GRACE_PERIOD;
+    }
+    
+    /**
      * Handle player logout - reset their alert status to enable new alerts when they log back in
      * @param uuid The player's UUID
      */
     public void handlePlayerQuit(UUID uuid) {
-        // Remove from the alerted players set to ensure they get alerts on next login
+        // Remove from all trackers to ensure they get alerts on next login
         alertedPlayers.remove(uuid);
-        
-        // Optionally, clean up the last alert channels data too
         lastAlertChannels.remove(uuid);
+        playerRegistrationTimes.remove(uuid);
+        lastModificationAlertTimes.remove(uuid);
+        pendingModifiedChannels.remove(uuid);
         
         if (config.isDebugMode()) {
             plugin.getLogger().info("[Discord] Reset alert status for player with UUID: " + uuid);
@@ -172,27 +258,49 @@ public class DiscordWebhookHandler {
         UUID playerUuid = player.getUniqueId();
         Set<String> previousChannels = lastAlertChannels.get(playerUuid);
         
+        // Skip if in grace period
+        if (isInChannelGracePeriod(playerUuid)) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Skipping modified channel check during grace period for: " + player.getName());
+            }
+            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+            return;
+        }
+        
         // Find channels that are in current but not in previous
         Set<String> newChannels = new HashSet<>(currentChannels);
-        newChannels.removeAll(previousChannels);
+        if (previousChannels != null) {
+            newChannels.removeAll(previousChannels);
+        }
         
-        // If there are new channels, send alerts
+        // If there are new channels, queue them for alerts
         if (!newChannels.isEmpty() && config.isModifiedChannelsEnabled()) {
-            // Only process one channel at a time - usually only one is added at once
-            for (String newChannel : newChannels) {
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Detected modified channel: " + newChannel);
+            // Check if we're in cooldown
+            long now = System.currentTimeMillis();
+            Long lastModTime = lastModificationAlertTimes.get(playerUuid);
+            
+            // Get or create pending set
+            Set<String> pending = pendingModifiedChannels.computeIfAbsent(playerUuid, k -> new HashSet<>());
+            pending.addAll(newChannels);
+            
+            if (lastModTime == null || now - lastModTime >= CHANNEL_MOD_COOLDOWN) {
+                // Not in cooldown, send alert now
+                if (!pending.isEmpty() && config.isModifiedChannelsDiscordEnabled()) {
+                    sendModifiedChannelWebhook(player, pending);
+                    lastModificationAlertTimes.put(playerUuid, now);
+                    pending.clear();
                 }
-                
-                // Send a discord webhook if enabled
-                if (config.isModifiedChannelsDiscordEnabled()) {
-                    sendModifiedChannelWebhook(player, newChannel);
+            } else {
+                // In cooldown, channels stay in pending
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Added " + newChannels.size() + " channels to pending for: " + 
+                                           player.getName() + ", total pending: " + pending.size());
                 }
             }
-            
-            // Update last alert channels
-            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
         }
+        
+        // Update last alert channels
+        lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
     }
     
     /**
@@ -207,15 +315,13 @@ public class DiscordWebhookHandler {
     }
     
     /**
-     * Sends a compact webhook for a modified channel
+     * Sends a compact webhook for modified channels
      */
-    private void sendModifiedChannelWebhook(Player player, String modifiedChannel) {
-        String reason = "Modified channel";
-        Set<String> modifiedChannels = new HashSet<>();
-        modifiedChannels.add(modifiedChannel);
+    private void sendModifiedChannelWebhook(Player player, Set<String> modifiedChannels) {
+        String reason = "Modified channel" + (modifiedChannels.size() > 1 ? "s" : "");
         
         // Send a compact webhook
-        sendWebhookDirectly(player, reason, null, modifiedChannel, null, null, true, modifiedChannels);
+        sendWebhookDirectly(player, reason, null, null, null, null, true, modifiedChannels);
     }
     
     /**
@@ -257,7 +363,7 @@ public class DiscordWebhookHandler {
                 }
                 
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Webhook payload: " + json);
+                    plugin.getLogger().info("[Discord] Webhook payload length: " + json.length());
                 }
                 
                 try (OutputStream os = connection.getOutputStream()) {

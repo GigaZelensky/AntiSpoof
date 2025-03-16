@@ -101,6 +101,13 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         UUID uuid = player.getUniqueId();
         plugin.getPlayerDataMap().computeIfAbsent(uuid, k -> new PlayerData());
         
+        // Register the player's join time for the channel grace period
+        plugin.getDiscordWebhookHandler().registerPlayerJoin(uuid);
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Player joined: " + player.getName() + ", registered for channel grace period");
+        }
+        
         // Schedule the first check based on configured delay
         int delay = config.getCheckDelay();
         
