@@ -21,8 +21,8 @@
 # ──────────────────────────────────────────────────────────
 
 # ⏳ Delay (in seconds) before checking for client spoofing.
-# Set to 0 for an immediate check upon player login. (Default: 0)
-delay-in-seconds: 0
+# Set to 0 for an immediate check upon player login (unrealiable). (Default: 1)
+delay-in-seconds: 1
 
 # ️ Debug Mode
 # If enabled, logs client channels and brand details in the console when a player logs in.
@@ -142,7 +142,7 @@ blocked-brands:
   alert-message: "&8[&eAntiSpoof&8] &7%player% joined using client brand: &f%brand%"
   console-alert-message: "%player% joined using client brand: %brand%"
 
-  # Choose whether a player not matching the brand list should count as a flag.
+  # Choose whether a player not matching the brand list should be flagged.
   count-as-flag: true
   
   # Whether to punish the player if detection is positive

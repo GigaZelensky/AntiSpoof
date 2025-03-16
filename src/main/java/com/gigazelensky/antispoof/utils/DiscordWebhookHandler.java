@@ -28,8 +28,8 @@ public class DiscordWebhookHandler {
     // Map to track the channels a player has at the time of their last alert
     private final Map<UUID, Set<String>> lastAlertChannels = new ConcurrentHashMap<>();
     
-    // Set to track players who have already been alerted for spoofing
-    private final Set<UUID> alertedPlayers = new HashSet<>();
+    // Map to track players who have already been alerted for spoofing in the current session
+    private final Map<UUID, Boolean> alertedPlayers = new ConcurrentHashMap<>();
     
     public DiscordWebhookHandler(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -70,10 +70,10 @@ public class DiscordWebhookHandler {
         
         // If it's a normal spoofing alert (not a modified channel alert)
         if (!isModifiedChannelAlert) {
-            // Skip if player has already been alerted for spoofing
-            if (alertedPlayers.contains(playerUuid)) {
+            // Skip if player has already been alerted for spoofing in this session
+            if (alertedPlayers.getOrDefault(playerUuid, false)) {
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Discord] Player " + player.getName() + " already alerted for spoofing, skipping");
+                    plugin.getLogger().info("[Discord] Player " + player.getName() + " already alerted for spoofing in this session, skipping");
                 }
                 
                 // Even though we're skipping the spoofing alert, we should still check for modified channels
@@ -85,19 +85,49 @@ public class DiscordWebhookHandler {
                 return;
             }
             
-            // Mark player as alerted
-            alertedPlayers.add(playerUuid);
+            // Mark player as alerted for this session
+            alertedPlayers.put(playerUuid, true);
             
             // Store the current channels for future comparison
             lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
             
-            // Send the full webhook for the spoofing alert
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Discord] Sending first spoofing alert for player: " + player.getName());
-            }
+            // Get the configured delay before sending discord alerts (in seconds)
+            int delaySeconds = config.getCheckDelay();
             
-            // Send the full webhook
-            sendFullWebhook(player, reason, brand, channel, violations);
+            // If there's a delay configured, schedule the webhook after the delay
+            if (delaySeconds > 0) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Scheduling alert for player: " + player.getName() + 
+                                           " after " + delaySeconds + " seconds");
+                }
+                
+                // Schedule the webhook after the configured delay
+                Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                    // Re-fetch the player data to get the most up-to-date channels
+                    PlayerData updatedData = plugin.getPlayerDataMap().get(playerUuid);
+                    if (updatedData != null && player.isOnline()) {
+                        Set<String> updatedChannels = updatedData.getChannels();
+                        lastAlertChannels.put(playerUuid, new HashSet<>(updatedChannels));
+                        
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Discord] Sending delayed spoofing alert for player: " + 
+                                                   player.getName() + " with " + updatedChannels.size() + " channels");
+                        }
+                        
+                        // Send the full webhook with updated channel information
+                        sendFullWebhook(player, reason, brand, channel, violations);
+                    }
+                }, delaySeconds * 20L); // Convert seconds to ticks (20 ticks = 1 second)
+            } else {
+                // No delay, send immediate webhook
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Discord] Sending immediate spoofing alert for player: " + 
+                                           player.getName());
+                }
+                
+                // Send the full webhook
+                sendFullWebhook(player, reason, brand, channel, violations);
+            }
         }
         // It's a modified channel alert
         else {
@@ -116,6 +146,22 @@ public class DiscordWebhookHandler {
                 // Update last alert channels
                 lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
             }
+        }
+    }
+    
+    /**
+     * Handle player logout - reset their alert status to enable new alerts when they log back in
+     * @param uuid The player's UUID
+     */
+    public void handlePlayerQuit(UUID uuid) {
+        // Remove from the alerted players set to ensure they get alerts on next login
+        alertedPlayers.remove(uuid);
+        
+        // Optionally, clean up the last alert channels data too
+        lastAlertChannels.remove(uuid);
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Discord] Reset alert status for player with UUID: " + uuid);
         }
     }
     

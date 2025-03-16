@@ -282,6 +282,23 @@ public class AntiSpoofPlugin extends JavaPlugin {
         // If player claims to be using Geyser but isn't detected as a Bedrock player
         return claimsGeyser && !isBedrockPlayer(player);
     }
+    
+    /**
+     * Handles player quit - clean up all resources and alert states
+     * @param uuid The player's UUID
+     */
+    public void handlePlayerQuit(UUID uuid) {
+        // Clean up all tracked data for this player
+        getDetectionManager().handlePlayerQuit(uuid);
+        getAlertManager().handlePlayerQuit(uuid);
+        getDiscordWebhookHandler().handlePlayerQuit(uuid);
+        playerBrands.remove(uuid);
+        playerDataMap.remove(uuid);
+        
+        if (configManager.isDebugMode()) {
+            getLogger().info("Cleaned up all data for player with UUID: " + uuid);
+        }
+    }
 
     @Override
     public void onDisable() {

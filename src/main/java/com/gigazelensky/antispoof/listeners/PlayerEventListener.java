@@ -120,8 +120,7 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
     public void onPlayerQuit(PlayerQuitEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
         
-        // Clean up all player data
-        plugin.getDetectionManager().handlePlayerQuit(uuid);
-        plugin.getAlertManager().handlePlayerQuit(uuid);
+        // Use the centralized quit handler in plugin to clean up everything
+        plugin.handlePlayerQuit(uuid);
     }
 }
