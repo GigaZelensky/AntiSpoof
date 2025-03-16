@@ -170,8 +170,8 @@ A: Yes! Compatibility with older versions is still being tested.
 # ──────────────────────────────────────────────────────────
 
 # ⏳ Delay (in seconds) before checking for client spoofing.
-# Set to 0 for an immediate check upon player login. (Default: 0)
-delay-in-seconds: 0
+# Set to 0 for an immediate check upon player login (unrealiable). (Default: 1)
+delay-in-seconds: 1
 
 # ️ Debug Mode
 # If enabled, logs client channels and brand details in the console when a player logs in.
@@ -186,6 +186,8 @@ debug: false
 vanillaspoof-check:
   # Whether to check if a player claiming "vanilla" client has plugin channels
   enabled: true
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: true
   # Custom alert messages for this specific violation
   alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cVanilla client with plugin channels"
   console-alert-message: "%player% flagged! Vanilla client with plugin channels"
@@ -205,6 +207,8 @@ vanillaspoof-check:
 non-vanilla-check:
   # Whether to enable this strict check
   enabled: false
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: false
   # Custom alert messages for this specific violation
   alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cClient modifications detected"
   console-alert-message: "%player% flagged! Client modifications detected"
@@ -222,6 +226,8 @@ non-vanilla-check:
 blocked-channels:
   # Enable channel-based detection
   enabled: false
+  # Whether to send alerts to Discord for blocked channel violations
+  discord-alert: false
   
   # ⚪ Whitelist Mode
   # - FALSE: Block listed channels.
@@ -244,9 +250,10 @@ blocked-channels:
   # Alert when a player's plugin channel is modified
   modifiedchannels:
     enabled: true
+    # Whether to send Discord alerts for modified channels
+    discord-alert: false
     alert-message: "&8[&cAntiSpoof&8] &e%player% modified channel: &f%channel%"
     console-alert-message: "%player% modified channel: %channel%"
-    discord-alert: false
 
   # Whether to punish the player if detection is positive
   punish: false
@@ -262,6 +269,8 @@ blocked-channels:
 blocked-brands:
   # Enable brand-based detection
   enabled: true
+  # Whether to send alerts to Discord for blocked brand violations
+  discord-alert: false
   
   # ⚪ Whitelist Mode
   # - FALSE: Block listed brands.
@@ -282,7 +291,7 @@ blocked-brands:
   alert-message: "&8[&eAntiSpoof&8] &7%player% joined using client brand: &f%brand%"
   console-alert-message: "%player% joined using client brand: %brand%"
 
-  # Choose whether a player not matching the brand list should count as a flag.
+  # Choose whether a player not matching the brand list should be flagged.
   count-as-flag: true
   
   # Whether to punish the player if detection is positive
@@ -312,6 +321,8 @@ bedrock-handling:
   geyser-spoof:
     # Whether to enable geyser spoofing detection
     enabled: true
+    # Whether to send alerts to Discord for Geyser spoofing violations
+    discord-alert: true
     # Custom alert messages for this specific violation
     alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cGeyser client spoofing"
     console-alert-message: "%player% flagged! Geyser client spoofing with brand: %brand%"
@@ -344,11 +355,20 @@ discord:
   embed-color: "#2AB7CA"
   violation-content:
     - "**Player**: %player%"
-    - "**Reason**: %console_alert%" # Gets the console alert of the specific flagged check
+    - "**Violations**:%violations%"
     - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
     - "**Brand**: %brand%"
     - "**Channels**:"
     - "%channel%" # Vertical channel list
+
+# Global settings for all alerts (used as fallback)
+# These options control whether to send join messages for players to Discord
+# even when they don't trigger any violations
+global-alerts:
+  # Whether to send alerts to Discord when players join with a brand
+  join-brand-alerts: false
+  # Whether to send alerts to Discord when players register initial channels
+  initial-channels-alerts: false
 
 # ──────────────────────────────────────────────────────────
 #                Legacy Punishment Settings
