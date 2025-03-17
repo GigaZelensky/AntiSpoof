@@ -349,6 +349,50 @@ public class DetectionManager {
     }
     
     /**
+     * Process a single violation for a player
+     * @param player The player
+     * @param violationType The type of violation
+     * @param reason The reason for the violation
+     */
+    public void processViolation(Player player, String violationType, String reason) {
+        if (!player.isOnline()) return;
+        
+        UUID uuid = player.getUniqueId();
+        PlayerData data = plugin.getPlayerDataMap().get(uuid);
+        
+        if (data == null || data.isAlreadyPunished()) return;
+        
+        // Get player's violation tracking map
+        Map<String, Boolean> violations = playerViolations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+        
+        // Skip if already alerted for this violation
+        if (violations.getOrDefault(violationType, false)) {
+            return;
+        }
+        
+        // Mark as alerted
+        violations.put(violationType, true);
+        
+        // Send alert
+        plugin.getAlertManager().sendViolationAlert(
+            player, reason, "unknown", null, violationType);
+        
+        // Execute punishment if needed
+        boolean shouldPunish = shouldPunishViolation(violationType);
+        
+        if (shouldPunish) {
+            plugin.getAlertManager().executePunishment(
+                player, reason, "unknown", violationType, null);
+            data.setAlreadyPunished(true);
+        }
+        
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
+                                  ": " + violationType + " - " + reason);
+        }
+    }
+    
+    /**
      * Finds missing required channels for strict whitelist mode
      * @param playerChannels The player's channels
      * @return List of missing required channels

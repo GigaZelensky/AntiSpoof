@@ -16,6 +16,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class PlayerEventListener extends PacketListenerAbstract implements Listener {
@@ -101,7 +103,29 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         UUID uuid = player.getUniqueId();
         plugin.getPlayerDataMap().computeIfAbsent(uuid, k -> new PlayerData());
         
-        // Schedule the first check based on configured delay
+        // NEW: Special handling for no-brand detection
+        // Schedule an immediate check specifically for no-brand players
+        if (config.isNoBrandCheckEnabled()) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                // Only process if still null after 1 second (allows time for brand packet)
+                if (player.isOnline() && plugin.getClientBrand(player) == null) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Processing no-brand alert for " + player.getName());
+                    }
+                    
+                    // Manually trigger alert for NO_BRAND violation
+                    Map<String, String> noBrandViolation = new HashMap<>();
+                    noBrandViolation.put("NO_BRAND", "No client brand detected");
+                    
+                    // Process on main thread
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        plugin.getDetectionManager().processViolation(player, "NO_BRAND", "No client brand detected");
+                    });
+                }
+            }, 20L); // 1 second delay to allow brand packet to arrive
+        }
+        
+        // Schedule the standard check based on configured delay
         int delay = config.getCheckDelay();
         
         // If delay is greater than 0, schedule the check
