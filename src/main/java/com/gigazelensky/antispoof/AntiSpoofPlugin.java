@@ -8,6 +8,7 @@ import com.gigazelensky.antispoof.managers.AlertManager;
 import com.gigazelensky.antispoof.managers.ConfigManager;
 import com.gigazelensky.antispoof.managers.DetectionManager;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
+import com.gigazelensky.antispoof.utils.VersionChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.entity.Player;
@@ -25,6 +26,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private AlertManager alertManager;
     private DetectionManager detectionManager;
     private PlayerEventListener playerEventListener;
+    private VersionChecker versionChecker;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
@@ -39,6 +41,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.alertManager = new AlertManager(this);
         this.detectionManager = new DetectionManager(this);
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
+        
+        // Initialize version checker
+        this.versionChecker = new VersionChecker(this);
         
         // Initialize PacketEvents
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));

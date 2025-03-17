@@ -396,4 +396,20 @@ public class ConfigManager {
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
     }
+    
+    /**
+     * Checks if update checking is enabled
+     * @return True if update checking is enabled, false otherwise
+     */
+    public boolean isUpdateCheckerEnabled() {
+        return config.getBoolean("update-checker.enabled", true);
+    }
+
+    /**
+     * Checks if join notifications for updates are enabled
+     * @return True if join notifications are enabled, false otherwise
+     */
+    public boolean isUpdateNotifyOnJoinEnabled() {
+        return config.getBoolean("update-checker.notify-on-join", true);
+    }
 }

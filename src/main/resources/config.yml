@@ -243,6 +243,16 @@ global-alerts:
   initial-channels-alerts: false
 
 # ──────────────────────────────────────────────────────────
+#                  Update Checker Settings
+# ──────────────────────────────────────────────────────────
+# Checks for updates from GitHub when the server starts
+update-checker:
+  # Whether to check for updates on startup
+  enabled: true
+  # Whether to notify admins when they join
+  notify-on-join: true
+
+# ──────────────────────────────────────────────────────────
 #                Legacy Punishment Settings
 # ──────────────────────────────────────────────────────────
 # Legacy global punishment system (for backward compatibility)
