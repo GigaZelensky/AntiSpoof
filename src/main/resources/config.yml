@@ -147,6 +147,7 @@ client-brands:
   
   # Default settings for brands not explicitly configured
   default:
+    flag: true
     alert: true
     discord-alert: false
     punish: false
@@ -177,6 +178,10 @@ client-brands:
       # Channels that must be present for this brand to be legitimate
       required-channels:
         - "lunar.*"  # Must have at least one lunar channel
+      # Punish players if they do not have the channel(s)? Set to false to simply alert.
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cLunar Client spoofing detected"
 
     # Badlion Client Configuration
     badlion:
@@ -192,6 +197,9 @@ client-brands:
       punish: false
       punishments: []
       required-channels: []
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cLunar Client spoofing detected"
 
     # Forge Configuration
     forge:
@@ -206,7 +214,11 @@ client-brands:
       console-alert-message: "%player% is using Forge: %brand%"
       punish: false
       punishments: []
-      required-channels: []
+      required-channels:
+        - "(?i).*forge.*"
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannel spoofing detected"
       
     # Fabric Configuration
     fabric:
@@ -221,7 +233,10 @@ client-brands:
       punish: false
       punishments: []
       required-channels:
-        - "(?i).*fabric.*"
+        - "(?i).*fabric.*" # Matches any channel containing "fabric" (case insensitive)
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannel spoofing detected"
 
     # LabyMod Configuration
     labymod:
@@ -236,6 +251,9 @@ client-brands:
       punish: false
       punishments: []
       required-channels: []
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannels spoofing detected"
 
     # Hacked Clients Configuration
     hacked:
@@ -257,17 +275,17 @@ client-brands:
       punish: true
       punishments:
         - "kick %player% &cHacked client detected: %brand%"
-        - "ban %player% &cUse of hacked client detected"
+        # - "ban %player% &cUse of hacked client detected"
 
     # Vanilla Configuration
     vanilla:
       enabled: true
       values:
-        - "(?i).*vanilla.*"
+        - "^vanilla$"
       flag: false # Only flags if the player is caught spoofing
       alert: false  # Don't alert for vanilla clients by default
       discord-alert: false
-      alert-message: "&8[&cAntiSpoof&8] &7%player% is using &d%brand"
+      alert-message: "&8[&cAntiSpoof&8] &7%player% is using &d%brand%"
       console-alert-message: "%player% is using %brand%"
       punish: false
       punishments: []
@@ -275,6 +293,19 @@ client-brands:
       # "strict-check" flags if the client has ANY plugin channels (Must be enabled to detect VanillaSpoof)
       # You can add this "strict-check" to any client brand and only then will it be processed by the earlier "vanillaspoof-check"
       strict-check: true  # Enable strict checking for vanilla (must have NO channels)
+
+    vanilla-variation: #when a client shows "Vanilla" or "vAnilla2" but not "vanilla"
+      enabled: true
+      values:
+        - "(?i)^(?!vanilla$).*vanilla.*"
+      flag: true
+      alert: true
+      discord-alert: true
+      alert-message: "&8[&cAntiSpoof&8] &e%player% using fake Vanilla: &c%brand%"
+      console-alert-message: "%player% is using fake Vanilla: %brand%"
+      punish: false
+      punishments: []
+      strict-check: true
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

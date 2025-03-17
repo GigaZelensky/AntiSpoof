@@ -342,6 +342,12 @@ public class AlertManager {
                 sendDiscordAlert = true;
                 break;
                 
+            case "UNKNOWN_BRAND":
+                alertTemplate = config.getClientBrandConfig(null).getAlertMessage();
+                consoleAlertTemplate = config.getClientBrandConfig(null).getConsoleAlertMessage();
+                sendDiscordAlert = config.getClientBrandConfig(null).shouldDiscordAlert();
+                break;
+                
             default:
                 // Fallback to global messages
                 alertTemplate = config.getAlertMessage();
@@ -454,8 +460,26 @@ public class AlertManager {
                 break;
                 
             case "MISSING_REQUIRED_CHANNELS":
-                // Default to global punishments for missing required channels
+                // Check for brand-specific punishments first
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                    List<String> brandPunishments = brandConfig.getPunishments();
+                    if (!brandPunishments.isEmpty()) {
+                        punishments = brandPunishments;
+                        break;
+                    }
+                }
+                // If no brand-specific punishments, fall back to global
                 punishments = config.getPunishments();
+                break;
+                
+            case "UNKNOWN_BRAND":
+                // Use default brand config punishments
+                punishments = config.getClientBrandConfig(null).getPunishments();
+                if (punishments.isEmpty()) {
+                    punishments = config.getPunishments();
+                }
                 break;
                 
             default:

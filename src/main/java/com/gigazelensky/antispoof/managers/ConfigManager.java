@@ -97,7 +97,7 @@ public class ConfigManager {
         
         if (defaultSection != null) {
             defaultBrandConfig.enabled = true;
-            defaultBrandConfig.flag = false;
+            defaultBrandConfig.flag = defaultSection.getBoolean("flag", true); // Changed from false to true
             defaultBrandConfig.alert = defaultSection.getBoolean("alert", true);
             defaultBrandConfig.discordAlert = defaultSection.getBoolean("discord-alert", false);
             defaultBrandConfig.alertMessage = defaultSection.getString("alert-message", 
@@ -105,11 +105,11 @@ public class ConfigManager {
             defaultBrandConfig.consoleAlertMessage = defaultSection.getString("console-alert-message", 
                 "%player% using unknown client: %brand%");
             defaultBrandConfig.punish = defaultSection.getBoolean("punish", false);
-            defaultBrandConfig.punishments = new ArrayList<>();
+            defaultBrandConfig.punishments = defaultSection.getStringList("punishments");
         } else {
             // Set up default values if section is missing
             defaultBrandConfig.enabled = true;
-            defaultBrandConfig.flag = false;
+            defaultBrandConfig.flag = true; // Changed from false to true
             defaultBrandConfig.alert = true;
             defaultBrandConfig.discordAlert = false;
             defaultBrandConfig.alertMessage = "&8[&cAntiSpoof&8] &7%player% using unknown client: &e%brand%";
@@ -298,8 +298,8 @@ public class ConfigManager {
             return brandConfig.shouldFlag();
         }
         
-        // Default - no matching brand config means it's not blocked
-        return false;
+        // If no brand pattern matched, use the default config for unknown brands
+        return defaultBrandConfig.shouldFlag();
     }
     
     /**

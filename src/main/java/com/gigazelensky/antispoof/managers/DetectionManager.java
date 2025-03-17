@@ -242,20 +242,70 @@ public class DetectionManager {
                         "Client claiming '" + matchedBrandKey + "' detected with plugin channels");
                 }
                 
-                // Check required channels for this brand
+                // Check required channels for this brand - IMPROVED LOGIC
                 if (!brandConfig.getRequiredChannels().isEmpty() && hasChannels) {
                     boolean hasRequiredChannel = false;
+                    List<String> requiredChannelPatterns = brandConfig.getRequiredChannelStrings();
+                    List<String> missingPatterns = new ArrayList<>();
                     
-                    for (String channel : data.getChannels()) {
-                        if (config.matchesRequiredChannel(matchedBrandKey, channel)) {
+                    // Log debugging info if enabled
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Checking required channels for brand " + matchedBrandKey);
+                        plugin.getLogger().info("[Debug] Required patterns: " + String.join(", ", requiredChannelPatterns));
+                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
+                    }
+                    
+                    for (String requiredPattern : requiredChannelPatterns) {
+                        boolean patternMatched = false;
+                        
+                        for (String channel : data.getChannels()) {
+                            try {
+                                // Try with case-insensitive match if pattern includes (?i)
+                                if (requiredPattern.toLowerCase().contains("(?i)")) {
+                                    String cleanPattern = requiredPattern.replace("(?i)", "");
+                                    if (channel.toLowerCase().matches("(?i)" + cleanPattern)) {
+                                        patternMatched = true;
+                                        break;
+                                    }
+                                } else if (channel.matches(requiredPattern)) {
+                                    patternMatched = true;
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                // If regex fails, try direct string contains
+                                String simplePattern = requiredPattern
+                                    .replace("(?i)", "")
+                                    .replace(".*", "")
+                                    .replace("^", "")
+                                    .replace("$", "");
+                                    
+                                if (requiredPattern.toLowerCase().contains("(?i)")) {
+                                    if (channel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                                        patternMatched = true;
+                                        break;
+                                    }
+                                } else if (channel.contains(simplePattern)) {
+                                    patternMatched = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (patternMatched) {
                             hasRequiredChannel = true;
-                            break;
+                        } else {
+                            missingPatterns.add(requiredPattern);
                         }
                     }
                     
                     if (!hasRequiredChannel) {
                         detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
-                            "Client missing required channels for brand: " + matchedBrandKey);
+                            "Client missing required channels for brand: " + matchedBrandKey + 
+                            " (missing patterns: " + String.join(", ", missingPatterns) + ")");
+                            
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Missing required channels for " + player.getName());
+                        }
                     }
                 }
                 
@@ -288,7 +338,17 @@ public class DetectionManager {
                 // No matching brand found - use default brand config
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Debug] No matching brand config for " + player.getName() + 
-                                          ": " + brand);
+                                          ": " + brand + " - using default config");
+                }
+                
+                // Check if the default config should flag unknown brands
+                if (config.getClientBrandConfig(null).shouldFlag()) {
+                    detectedViolations.put("UNKNOWN_BRAND", "Using unknown client brand: " + brand);
+                    
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Flagging unknown brand for " + player.getName() + 
+                                              ": " + brand);
+                    }
                 }
                 
                 // Vanilla check still takes precedence
@@ -478,6 +538,28 @@ public class DetectionManager {
             }
         }
         
+        // Special handling for unknown brand violations
+        if (newViolations.containsKey("UNKNOWN_BRAND")) {
+            String reason = newViolations.get("UNKNOWN_BRAND");
+            
+            // Use the default brand config for alerts and punishments
+            ConfigManager.ClientBrandConfig defaultConfig = config.getClientBrandConfig(null);
+            
+            // Send alert
+            plugin.getAlertManager().sendBrandViolationAlert(
+                player, reason, brand, null, "UNKNOWN_BRAND", defaultConfig);
+            
+            // Execute punishment if needed
+            if (defaultConfig.shouldPunish()) {
+                plugin.getAlertManager().executeBrandPunishment(
+                    player, reason, brand, "UNKNOWN_BRAND", null, defaultConfig);
+                data.setAlreadyPunished(true);
+            }
+            
+            // Remove the unknown brand violation since we've handled it specially
+            newViolations.remove("UNKNOWN_BRAND");
+        }
+        
         // Send a separate alert for each remaining violation
         for (Map.Entry<String, String> entry : newViolations.entrySet()) {
             // Only pass the channel parameter for BLOCKED_CHANNEL violations
@@ -560,13 +642,37 @@ public class DetectionManager {
             boolean found = false;
             for (String playerChannel : playerChannels) {
                 try {
-                    if (playerChannel.matches(requiredChannel)) {
+                    // Special handling for case-insensitive patterns
+                    if (requiredChannel.contains("(?i)")) {
+                        String normalizedPattern = requiredChannel.replace("(?i)", "");
+                        if (playerChannel.toLowerCase().matches("(?i)" + normalizedPattern)) {
+                            found = true;
+                            break;
+                        }
+                    } else if (playerChannel.matches(requiredChannel)) {
                         found = true;
                         break;
                     }
                 } catch (Exception e) {
-                    // If regex fails, try direct comparison
+                    // If regex fails, try direct comparison or contains
                     if (playerChannel.equals(requiredChannel)) {
+                        found = true;
+                        break;
+                    }
+                    
+                    // Try a simpler contains check as fallback
+                    String simplePattern = requiredChannel
+                        .replace("(?i)", "")
+                        .replace(".*", "")
+                        .replace("^", "")
+                        .replace("$", "");
+                        
+                    if (requiredChannel.contains("(?i)")) {
+                        if (playerChannel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                            found = true;
+                            break;
+                        }
+                    } else if (playerChannel.contains(simplePattern)) {
                         found = true;
                         break;
                     }
@@ -597,6 +703,8 @@ public class DetectionManager {
                 return config.shouldPunishBlockedChannels();
             case "CLIENT_BRAND":
                 return false; // Handled separately for each brand
+            case "UNKNOWN_BRAND":
+                return config.getClientBrandConfig(null).shouldPunish();
             case "MISSING_REQUIRED_CHANNELS":
                 return true; // By default, missing required channels is a violation
             case "GEYSER_SPOOF":
@@ -646,8 +754,38 @@ public class DetectionManager {
         // SIMPLE mode: Player must have at least one of the whitelisted channels
         if (!strictMode) {
             for (String playerChannel : playerChannels) {
-                if (config.matchesChannelPattern(playerChannel)) {
-                    return true; // Pass if player has at least one whitelisted channel
+                for (String whitelistedChannel : whitelistedChannels) {
+                    try {
+                        // Special handling for case-insensitive patterns
+                        if (whitelistedChannel.contains("(?i)")) {
+                            String normalizedPattern = whitelistedChannel.replace("(?i)", "");
+                            if (playerChannel.toLowerCase().matches("(?i)" + normalizedPattern)) {
+                                return true; // Pass if player has at least one whitelisted channel
+                            }
+                        } else if (playerChannel.matches(whitelistedChannel)) {
+                            return true; // Pass if player has at least one whitelisted channel
+                        }
+                    } catch (Exception e) {
+                        // If regex fails, try direct comparison or contains
+                        if (playerChannel.equals(whitelistedChannel)) {
+                            return true;
+                        }
+                        
+                        // Try a simpler contains check as fallback
+                        String simplePattern = whitelistedChannel
+                            .replace("(?i)", "")
+                            .replace(".*", "")
+                            .replace("^", "")
+                            .replace("$", "");
+                            
+                        if (whitelistedChannel.contains("(?i)")) {
+                            if (playerChannel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                                return true;
+                            }
+                        } else if (playerChannel.contains(simplePattern)) {
+                            return true;
+                        }
+                    }
                 }
             }
             return false; // Fail if player has no whitelisted channels
@@ -656,7 +794,47 @@ public class DetectionManager {
         else {
             // 1. Check if every player channel is whitelisted
             for (String playerChannel : playerChannels) {
-                if (!config.matchesChannelPattern(playerChannel)) {
+                boolean isWhitelisted = false;
+                for (String whitelistedChannel : whitelistedChannels) {
+                    try {
+                        // Special handling for case-insensitive patterns
+                        if (whitelistedChannel.contains("(?i)")) {
+                            String normalizedPattern = whitelistedChannel.replace("(?i)", "");
+                            if (playerChannel.toLowerCase().matches("(?i)" + normalizedPattern)) {
+                                isWhitelisted = true;
+                                break;
+                            }
+                        } else if (playerChannel.matches(whitelistedChannel)) {
+                            isWhitelisted = true;
+                            break;
+                        }
+                    } catch (Exception e) {
+                        // If regex fails, try direct comparison
+                        if (playerChannel.equals(whitelistedChannel)) {
+                            isWhitelisted = true;
+                            break;
+                        }
+                        
+                        // Try a simpler contains check as fallback
+                        String simplePattern = whitelistedChannel
+                            .replace("(?i)", "")
+                            .replace(".*", "")
+                            .replace("^", "")
+                            .replace("$", "");
+                            
+                        if (whitelistedChannel.contains("(?i)")) {
+                            if (playerChannel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                                isWhitelisted = true;
+                                break;
+                            }
+                        } else if (playerChannel.contains(simplePattern)) {
+                            isWhitelisted = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!isWhitelisted) {
                     return false; // Fail if any player channel is not whitelisted
                 }
             }
@@ -667,13 +845,37 @@ public class DetectionManager {
                 
                 for (String playerChannel : playerChannels) {
                     try {
-                        if (playerChannel.matches(whitelistedChannel)) {
+                        // Special handling for case-insensitive patterns
+                        if (whitelistedChannel.contains("(?i)")) {
+                            String normalizedPattern = whitelistedChannel.replace("(?i)", "");
+                            if (playerChannel.toLowerCase().matches("(?i)" + normalizedPattern)) {
+                                playerHasChannel = true;
+                                break;
+                            }
+                        } else if (playerChannel.matches(whitelistedChannel)) {
                             playerHasChannel = true;
                             break;
                         }
                     } catch (Exception e) {
-                        // If regex is invalid, just do direct match as fallback
+                        // If regex fails, try direct comparison or contains
                         if (playerChannel.equals(whitelistedChannel)) {
+                            playerHasChannel = true;
+                            break;
+                        }
+                        
+                        // Try a simpler contains check as fallback
+                        String simplePattern = whitelistedChannel
+                            .replace("(?i)", "")
+                            .replace(".*", "")
+                            .replace("^", "")
+                            .replace("$", "");
+                            
+                        if (whitelistedChannel.contains("(?i)")) {
+                            if (playerChannel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                                playerHasChannel = true;
+                                break;
+                            }
+                        } else if (playerChannel.contains(simplePattern)) {
                             playerHasChannel = true;
                             break;
                         }
