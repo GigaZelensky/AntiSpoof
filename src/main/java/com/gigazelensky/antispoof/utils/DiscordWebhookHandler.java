@@ -311,8 +311,17 @@ public class DiscordWebhookHandler {
             newChannels.removeAll(previousChannels);
         }
         
+        // If there are no new channels, just update tracking and return
+        if (newChannels.isEmpty()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] No new channels to report for: " + player.getName());
+            }
+            lastAlertChannels.put(playerUuid, new HashSet<>(currentChannels));
+            return;
+        }
+        
         // If there are new channels, queue them for alerts
-        if (!newChannels.isEmpty() && config.isModifiedChannelsEnabled()) {
+        if (config.isModifiedChannelsEnabled()) {
             // Check if we're in cooldown
             long now = System.currentTimeMillis();
             Long lastModTime = lastModificationAlertTimes.get(playerUuid);
@@ -356,7 +365,7 @@ public class DiscordWebhookHandler {
      * Sends a compact webhook for modified channels
      */
     private void sendModifiedChannelWebhook(Player player, Set<String> modifiedChannels) {
-        // FIX: Skip sending if there are no modified channels
+        // Skip if there are no modified channels to report
         if (modifiedChannels == null || modifiedChannels.isEmpty()) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Discord] Skipped sending empty modified channel webhook for: " + player.getName());
@@ -527,7 +536,7 @@ public class DiscordWebhookHandler {
             }
             return alert;
         }
-        else if (reason.contains("Blocked client brand:")) {
+        else if (reason.contains("Blocked client brand:") || reason.contains("Client brand not in whitelist:")) {
             return config.getBlockedBrandsConsoleAlertMessage()
                     .replace("%player%", player.getName())
                     .replace("%brand%", brand != null ? brand : "unknown")
@@ -593,118 +602,119 @@ public class DiscordWebhookHandler {
         
         // Description - Use violation content from config
         sb.append("\"description\":\"");
-        List<String> contentLines = config.getDiscordViolationContent();
         
-        if (contentLines != null && !contentLines.isEmpty()) {
-            for (String line : contentLines) {
-                // Handle special placeholders
-                String processedLine = line;
-                
-                // Handle %player% placeholder
-                processedLine = processedLine.replace("%player%", player.getName());
-                
-                // Handle %console_alert% placeholder
-                processedLine = processedLine.replace("%console_alert%", consoleAlert);
-                
-                // Handle %brand% placeholder
-                processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
-                
-                // FIX: Always use "Violations" header consistently
-                // Handle %violations% placeholder
-                if (processedLine.contains("%violations%") && violations != null && !violations.isEmpty()) {
-                    sb.append(processedLine.replace("%violations%", "")).append("\\n");
-                    
-                    // Remove the "Multiple Violations" entry if it exists
-                    List<String> cleanViolations = new ArrayList<>(violations);
-                    cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
-                    
-                    // Clean up any "(Client: X)" text since we already show the brand separately
-                    List<String> formattedViolations = new ArrayList<>();
-                    for (String violation : cleanViolations) {
-                        int clientIndex = violation.indexOf(" (Client: ");
-                        if (clientIndex > 0) {
-                            formattedViolations.add(violation.substring(0, clientIndex));
-                        } else {
-                            formattedViolations.add(violation);
-                        }
-                    }
-                    
-                    // Add each violation as a bullet point
-                    for (String violation : formattedViolations) {
-                        sb.append("• ").append(escapeJson(violation)).append("\\n");
-                    }
-                    continue; // Skip regular appending for this line
-                }
-                
-                // Handle %viaversion_version% placeholder if ViaVersion is installed
-                if (processedLine.contains("%viaversion_version%")) {
-                    String version = "Unknown";
-                    // Check if ViaVersion and PlaceholderAPI are installed
-                    if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion") && 
-                        Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-                        try {
-                            // If so, try to get the version through PlaceholderAPI
-                            version = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
-                                player, "%viaversion_player_protocol_version%");
-                        } catch (Exception e) {
-                            if (config.isDebugMode()) {
-                                plugin.getLogger().warning("[Discord] Error getting ViaVersion: " + e.getMessage());
-                            }
-                        }
-                    }
-                    processedLine = processedLine.replace("%viaversion_version%", version);
-                }
-                
-                // Handle %channel% placeholder for listing all channels
-                if (line.contains("%channel%")) {
-                    PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-                    if (data != null && !data.getChannels().isEmpty()) {
-                        Set<String> channels = data.getChannels();
-                        for (String ch : channels) {
-                            sb.append("• ").append(escapeJson(ch)).append("\\n");
-                        }
-                    } else {
-                        sb.append("• None detected\\n");
-                    }
-                } else {
-                    sb.append(escapeJson(processedLine)).append("\\n");
-                }
-            }
-        } else {
-            // Fallback if no content lines configured
+        // CRITICAL FIX: Always check if we have multiple violations first
+        // and use a consistent format with "Violations" header
+        if (violations != null && violations.size() > 1) {
+            // Custom format for multiple violations
             sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
+            sb.append("**Violations**:\\n");
+            
+            // Clean up violations list
+            List<String> cleanViolations = new ArrayList<>(violations);
+            cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
+            
+            // Add each violation as a bullet point
+            for (String violation : cleanViolations) {
+                sb.append("• ").append(escapeJson(violation)).append("\\n");
+            }
+            
+            // Add other standard information
+            sb.append("**Client Version**: ").append(getClientVersionFromPlaceholders(player)).append("\\n");
             sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
             
-            // FIX: Always use "Violations" header
-            // Show all violations in a section
-            if (violations != null && !violations.isEmpty()) {
-                // Remove the "Multiple Violations" entry if it exists
-                List<String> cleanViolations = new ArrayList<>(violations);
-                cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
-                
-                sb.append("**Violations**:\\n");
-                for (String violation : cleanViolations) {
-                    // Clean up any "(Client: X)" text
-                    int clientIndex = violation.indexOf(" (Client: ");
-                    if (clientIndex > 0) {
-                        sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
+            // Add channels
+            sb.append("**Channels**:\\n");
+            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+            if (data != null && !data.getChannels().isEmpty()) {
+                Set<String> channels = data.getChannels();
+                for (String ch : channels) {
+                    sb.append("• ").append(escapeJson(ch)).append("\\n");
+                }
+            } else {
+                sb.append("• None detected\\n");
+            }
+        }
+        // Standard template handling
+        else {
+            List<String> contentLines = config.getDiscordViolationContent();
+            if (contentLines != null && !contentLines.isEmpty()) {
+                for (String line : contentLines) {
+                    // Handle special placeholders
+                    String processedLine = line;
+                    
+                    // Handle %player% placeholder
+                    processedLine = processedLine.replace("%player%", player.getName());
+                    
+                    // Handle %console_alert% placeholder
+                    processedLine = processedLine.replace("%console_alert%", consoleAlert);
+                    
+                    // Handle %brand% placeholder
+                    processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
+                    
+                    // Handle %violations% placeholder
+                    if (processedLine.contains("%violations%") && violations != null && !violations.isEmpty()) {
+                        sb.append(processedLine.replace("%violations%", "")).append("\\n");
+                        
+                        // Handle single violation as bullet point
+                        for (String violation : violations) {
+                            sb.append("• ").append(escapeJson(violation)).append("\\n");
+                        }
+                        continue; // Skip regular appending for this line
+                    }
+                    
+                    // Handle %viaversion_version% placeholder
+                    if (processedLine.contains("%viaversion_version%")) {
+                        processedLine = processedLine.replace("%viaversion_version%", 
+                                                             getClientVersionFromPlaceholders(player));
+                    }
+                    
+                    // Handle %channel% placeholder for listing all channels
+                    if (line.contains("%channel%")) {
+                        PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                        if (data != null && !data.getChannels().isEmpty()) {
+                            Set<String> channels = data.getChannels();
+                            for (String ch : channels) {
+                                sb.append("• ").append(escapeJson(ch)).append("\\n");
+                            }
+                        } else {
+                            sb.append("• None detected\\n");
+                        }
                     } else {
-                        sb.append("• ").append(escapeJson(violation)).append("\\n");
+                        sb.append(escapeJson(processedLine)).append("\\n");
                     }
                 }
             } else {
-                sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
-            }
-            
-            if (channel != null) {
-                sb.append("**Channel**: ").append(escapeJson(channel)).append("\\n");
-            }
-            
-            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-            if (data != null && !data.getChannels().isEmpty()) {
-                sb.append("**All Channels**:\\n");
-                for (String ch : data.getChannels()) {
-                    sb.append("• ").append(escapeJson(ch)).append("\\n");
+                // Fallback if no content lines configured
+                sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
+                sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
+                
+                // Show all violations in a section
+                if (violations != null && !violations.isEmpty()) {
+                    sb.append("**Violations**:\\n");
+                    for (String violation : violations) {
+                        // Clean up any "(Client: X)" text
+                        int clientIndex = violation.indexOf(" (Client: ");
+                        if (clientIndex > 0) {
+                            sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
+                        } else {
+                            sb.append("• ").append(escapeJson(violation)).append("\\n");
+                        }
+                    }
+                } else {
+                    sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
+                }
+                
+                if (channel != null) {
+                    sb.append("**Channel**: ").append(escapeJson(channel)).append("\\n");
+                }
+                
+                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                if (data != null && !data.getChannels().isEmpty()) {
+                    sb.append("**All Channels**:\\n");
+                    for (String ch : data.getChannels()) {
+                        sb.append("• ").append(escapeJson(ch)).append("\\n");
+                    }
                 }
             }
         }
@@ -717,6 +727,27 @@ public class DiscordWebhookHandler {
         
         sb.append("}]}");
         return sb.toString();
+    }
+    
+    /**
+     * Helper method to get client version from PlaceholderAPI
+     */
+    private String getClientVersionFromPlaceholders(Player player) {
+        String version = "Unknown";
+        // Check if ViaVersion and PlaceholderAPI are installed
+        if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion") && 
+            Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            try {
+                // If so, try to get the version through PlaceholderAPI
+                version = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                    player, "%viaversion_player_protocol_version%");
+            } catch (Exception e) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().warning("[Discord] Error getting ViaVersion: " + e.getMessage());
+                }
+            }
+        }
+        return version;
     }
     
     /**
