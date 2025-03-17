@@ -562,7 +562,7 @@ public class DetectionManager {
             String primaryViolationType = newViolations.keySet().iterator().next();
             String primaryReason = newViolations.get(primaryViolationType);
             
-            boolean shouldPunish = shouldPunishViolation(primaryViolationType);
+            boolean shouldPunish = shouldPunishViolation(primaryViolationType, brand);
             
             if (shouldPunish) {
                 plugin.getAlertManager().executePunishment(
@@ -601,8 +601,8 @@ public class DetectionManager {
         plugin.getAlertManager().sendViolationAlert(
             player, reason, "unknown", null, violationType);
         
-        // Execute punishment if needed
-        boolean shouldPunish = shouldPunishViolation(violationType);
+        // Execute punishment if needed - using "unknown" as brand since we don't know it
+        boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
         
         if (shouldPunish) {
             plugin.getAlertManager().executePunishment(
@@ -653,9 +653,10 @@ public class DetectionManager {
     /**
      * Determines if a violation should result in punishment
      * @param violationType The type of violation
+     * @param brand The player's client brand
      * @return True if this violation should be punished, false otherwise
      */
-    private boolean shouldPunishViolation(String violationType) {
+    private boolean shouldPunishViolation(String violationType, String brand) {
         switch (violationType) {
             case "VANILLA_WITH_CHANNELS":
                 return config.shouldPunishVanillaCheck();
@@ -669,7 +670,17 @@ public class DetectionManager {
             case "UNKNOWN_BRAND":
                 return config.getClientBrandConfig(null).shouldPunish();
             case "MISSING_REQUIRED_CHANNELS":
-                return true; // By default, missing required channels is a violation
+                // Check the brand's required-channels-punish setting
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Checking if should punish missing channels for brand: " + 
+                                             brandKey + ", punishment setting: " + 
+                                             config.getClientBrandConfig(brandKey).shouldPunishRequiredChannels());
+                    }
+                    return config.getClientBrandConfig(brandKey).shouldPunishRequiredChannels();
+                }
+                return false; // Default to not punishing if brand not found or setting not specified
             case "GEYSER_SPOOF":
                 return config.shouldPunishGeyserSpoof();
             case "NO_BRAND":

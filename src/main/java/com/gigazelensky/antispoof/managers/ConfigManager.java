@@ -38,6 +38,9 @@ public class ConfigManager {
         private List<Pattern> requiredChannels = new ArrayList<>();
         private List<String> requiredChannelStrings = new ArrayList<>();
         private boolean strictCheck;
+        // Added fields for required channels punishment
+        private boolean requiredChannelsPunish;
+        private List<String> requiredChannelsPunishments = new ArrayList<>();
         
         public boolean isEnabled() { return enabled; }
         public List<Pattern> getPatterns() { return patterns; }
@@ -52,6 +55,9 @@ public class ConfigManager {
         public List<Pattern> getRequiredChannels() { return requiredChannels; }
         public List<String> getRequiredChannelStrings() { return requiredChannelStrings; }
         public boolean hasStrictCheck() { return strictCheck; }
+        // Added getters for required channels punishment
+        public boolean shouldPunishRequiredChannels() { return requiredChannelsPunish; }
+        public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
     }
 
     public ConfigManager(JavaPlugin plugin) {
@@ -97,7 +103,7 @@ public class ConfigManager {
         
         if (defaultSection != null) {
             defaultBrandConfig.enabled = true;
-            defaultBrandConfig.flag = defaultSection.getBoolean("flag", true); // Changed from false to true
+            defaultBrandConfig.flag = defaultSection.getBoolean("flag", true);
             defaultBrandConfig.alert = defaultSection.getBoolean("alert", true);
             defaultBrandConfig.discordAlert = defaultSection.getBoolean("discord-alert", false);
             defaultBrandConfig.alertMessage = defaultSection.getString("alert-message", 
@@ -109,7 +115,7 @@ public class ConfigManager {
         } else {
             // Set up default values if section is missing
             defaultBrandConfig.enabled = true;
-            defaultBrandConfig.flag = true; // Changed from false to true
+            defaultBrandConfig.flag = true;
             defaultBrandConfig.alert = true;
             defaultBrandConfig.discordAlert = false;
             defaultBrandConfig.alertMessage = "&8[&cAntiSpoof&8] &7%player% using unknown client: &e%brand%";
@@ -150,6 +156,10 @@ public class ConfigManager {
         brandConfig.punish = section.getBoolean("punish", false);
         brandConfig.punishments = section.getStringList("punishments");
         brandConfig.strictCheck = section.getBoolean("strict-check", false);
+        
+        // Added loading for required channels punishment fields
+        brandConfig.requiredChannelsPunish = section.getBoolean("required-channels-punish", false);
+        brandConfig.requiredChannelsPunishments = section.getStringList("required-channels-punishments");
         
         // Load and compile pattern strings
         List<String> patterns = section.getStringList("values");

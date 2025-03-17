@@ -460,17 +460,35 @@ public class AlertManager {
                 break;
                 
             case "MISSING_REQUIRED_CHANNELS":
-                // Check for brand-specific punishments first
+                // Check for brand-specific required-channels punishments first
                 String brandKey = config.getMatchingClientBrand(brand);
                 if (brandKey != null) {
                     ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                    
+                    // Get the required-channels-punishments first
+                    List<String> requiredChannelsPunishments = brandConfig.getRequiredChannelsPunishments();
+                    if (!requiredChannelsPunishments.isEmpty()) {
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Using brand's required-channels-punishments for " + player.getName());
+                        }
+                        punishments = requiredChannelsPunishments;
+                        break;
+                    }
+                    
+                    // Fall back to regular brand punishments if required-channel-punishments is empty
                     List<String> brandPunishments = brandConfig.getPunishments();
                     if (!brandPunishments.isEmpty()) {
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Falling back to brand's regular punishments for " + player.getName());
+                        }
                         punishments = brandPunishments;
                         break;
                     }
                 }
-                // If no brand-specific punishments, fall back to global
+                // If no brand-specific punishments found, fall back to global
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Falling back to global punishments for " + player.getName());
+                }
                 punishments = config.getPunishments();
                 break;
                 
