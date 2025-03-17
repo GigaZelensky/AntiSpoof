@@ -356,9 +356,17 @@ public class DiscordWebhookHandler {
      * Sends a compact webhook for modified channels
      */
     private void sendModifiedChannelWebhook(Player player, Set<String> modifiedChannels) {
+        // FIX: Skip sending if there are no modified channels
+        if (modifiedChannels == null || modifiedChannels.isEmpty()) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Discord] Skipped sending empty modified channel webhook for: " + player.getName());
+            }
+            return;
+        }
+        
         String reason = "Modified channel" + (modifiedChannels.size() > 1 ? "s" : "");
         
-        // Send a compact webhook
+        // Send a compact webhook with non-empty channel data
         sendWebhookDirectly(player, reason, null, null, null, null, true, modifiedChannels);
     }
     
@@ -541,6 +549,11 @@ public class DiscordWebhookHandler {
                     .replace("%player%", player.getName())
                     .replace("%channel%", channel != null ? channel : "unknown");
         }
+        else if (reason.contains("No client brand detected")) {
+            return config.getNoBrandConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%reason%", reason);
+        }
         
         // Default to the general console alert if no specific type is found
         String alert = config.getConsoleAlertMessage()
@@ -596,7 +609,8 @@ public class DiscordWebhookHandler {
                 // Handle %brand% placeholder
                 processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
                 
-                // Handle %violations% placeholder (this is a custom placeholder we're adding)
+                // FIX: Always use "Violations" header consistently
+                // Handle %violations% placeholder
                 if (processedLine.contains("%violations%") && violations != null && !violations.isEmpty()) {
                     sb.append(processedLine.replace("%violations%", "")).append("\\n");
                     
@@ -661,6 +675,7 @@ public class DiscordWebhookHandler {
             sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
             sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
             
+            // FIX: Always use "Violations" header
             // Show all violations in a section
             if (violations != null && !violations.isEmpty()) {
                 // Remove the "Multiple Violations" entry if it exists

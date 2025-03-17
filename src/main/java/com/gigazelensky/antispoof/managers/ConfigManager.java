@@ -84,6 +84,33 @@ public class ConfigManager {
         return config.getStringList("punishments");
     }
     
+    // No Brand Check
+    public boolean isNoBrandCheckEnabled() {
+        return config.getBoolean("no-brand-check.enabled", true);
+    }
+    
+    public boolean isNoBrandDiscordAlertEnabled() {
+        return config.getBoolean("no-brand-check.discord-alert", true);
+    }
+    
+    public boolean shouldPunishNoBrand() {
+        return config.getBoolean("no-brand-check.punish", false);
+    }
+    
+    public String getNoBrandAlertMessage() {
+        return config.getString("no-brand-check.alert-message", 
+                               "&8[&cAntiSpoof&8] &e%player% flagged! &cNo client brand detected");
+    }
+    
+    public String getNoBrandConsoleAlertMessage() {
+        return config.getString("no-brand-check.console-alert-message", 
+                               "%player% flagged! No client brand detected");
+    }
+    
+    public List<String> getNoBrandPunishments() {
+        return config.getStringList("no-brand-check.punishments");
+    }
+    
     // Vanilla Spoof Check (claims vanilla but has channels)
     public boolean isVanillaCheckEnabled() {
         return config.getBoolean("vanillaspoof-check.enabled", true);

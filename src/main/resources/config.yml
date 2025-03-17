@@ -72,6 +72,27 @@ non-vanilla-check:
     # - "tempban %player% 1h &cUsing a modified client"
 
 # ──────────────────────────────────────────────────────────
+#               No Brand Detection Settings
+# ──────────────────────────────────────────────────────────
+# Some hacked clients avoid detection by not sending a client brand at all
+# This check flags players who connect without providing any brand information
+no-brand-check:
+  # Whether to flag players who don't send a client brand
+  enabled: true
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: true
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cNo client brand detected"
+  console-alert-message: "%player% flagged! No client brand detected"
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%
+  punishments:
+    - "kick %player% &cNo client brand detected"
+    # - "ban %player% &cSuspicious client detected (no brand)"
+
+# ──────────────────────────────────────────────────────────
 #                 Channel Detection Settings
 # ──────────────────────────────────────────────────────────
 blocked-channels:

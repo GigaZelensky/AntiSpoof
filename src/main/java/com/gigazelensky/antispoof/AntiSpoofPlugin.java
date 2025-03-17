@@ -193,6 +193,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (player == null) return false;
         
         String brand = getClientBrand(player);
+        
+        // Check for missing brand first
+        if (brand == null && configManager.isNoBrandCheckEnabled()) {
+            return true;
+        }
+        
+        // Skip other checks if brand is null
         if (brand == null) return false;
         
         // Check if player is a Bedrock player

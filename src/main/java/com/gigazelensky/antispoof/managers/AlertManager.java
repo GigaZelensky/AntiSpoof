@@ -226,6 +226,12 @@ public class AlertManager {
                 sendDiscordAlert = config.isGeyserSpoofDiscordAlertEnabled();
                 break;
                 
+            case "NO_BRAND":
+                alertTemplate = config.getNoBrandAlertMessage();
+                consoleAlertTemplate = config.getNoBrandConsoleAlertMessage();
+                sendDiscordAlert = config.isNoBrandDiscordAlertEnabled();
+                break;
+                
             default:
                 // Fallback to global messages
                 alertTemplate = config.getAlertMessage();
@@ -300,6 +306,10 @@ public class AlertManager {
                 
             case "GEYSER_SPOOF":
                 punishments = config.getGeyserSpoofPunishments();
+                break;
+                
+            case "NO_BRAND":
+                punishments = config.getNoBrandPunishments();
                 break;
                 
             default:
