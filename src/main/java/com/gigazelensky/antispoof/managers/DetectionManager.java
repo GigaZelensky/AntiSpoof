@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 public class DetectionManager {
     private final AntiSpoofPlugin plugin;
