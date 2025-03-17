@@ -2,7 +2,6 @@ package com.gigazelensky.antispoof.managers;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
@@ -16,12 +15,65 @@ public class AlertManager {
     // Track alert cooldowns by player UUID and alert type
     private final Map<UUID, Map<String, Long>> lastAlerts = new ConcurrentHashMap<>();
     
+    // Track players with alert permission
+    private final Set<UUID> playersWithAlertPermission = ConcurrentHashMap.newKeySet();
+    
     // Alert cooldown in milliseconds (3 seconds by default)
     private static final long ALERT_COOLDOWN = 3000;
     
     public AlertManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
+    }
+    
+    /**
+     * Adds a player to the alert recipients list if they have permission
+     * @param player The player to check and possibly add
+     */
+    public void registerPlayer(Player player) {
+        if (player.hasPermission("antispoof.alerts")) {
+            playersWithAlertPermission.add(player.getUniqueId());
+            
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Added player " + player.getName() + " to alert recipients");
+            }
+        }
+    }
+    
+    /**
+     * Removes a player from the alert recipients list
+     * @param uuid The UUID of the player to remove
+     */
+    public void unregisterPlayer(UUID uuid) {
+        playersWithAlertPermission.remove(uuid);
+    }
+    
+    /**
+     * Updates a player's alert status based on current permissions
+     * @param player The player to update
+     */
+    public void updatePlayerAlertStatus(Player player) {
+        UUID uuid = player.getUniqueId();
+        if (player.hasPermission("antispoof.alerts")) {
+            playersWithAlertPermission.add(uuid);
+        } else {
+            playersWithAlertPermission.remove(uuid);
+        }
+    }
+    
+    /**
+     * Sends a message to all players with alert permission
+     * @param message The message to send
+     */
+    private void sendAlertToRecipients(String message) {
+        String coloredMessage = ChatColor.translateAlternateColorCodes('&', message);
+        
+        for (UUID uuid : playersWithAlertPermission) {
+            Player player = plugin.getServer().getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(coloredMessage);
+            }
+        }
     }
     
     /**
@@ -68,11 +120,8 @@ public class AlertManager {
         // Log to console
         plugin.getLogger().info(consoleAlert);
         
-        // Notify players with permission
-        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        // Notify players with permission using our optimized list
+        sendAlertToRecipients(playerAlert);
         
         // Send to Discord if brand join alerts are enabled
         if (config.isDiscordWebhookEnabled() && 
@@ -112,11 +161,8 @@ public class AlertManager {
         // Log to console
         plugin.getLogger().info(consoleAlertMessage);
         
-        // Notify players with permission
-        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', alertMessage);
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        // Notify players with permission using our optimized list
+        sendAlertToRecipients(alertMessage);
         
         // Send to Discord webhook if enabled
         if (config.isModifiedChannelsDiscordEnabled()) {
@@ -159,11 +205,8 @@ public class AlertManager {
         // Log to console
         plugin.getLogger().info(consoleAlert);
         
-        // Notify players with permission
-        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        // Notify players with permission using our optimized list
+        sendAlertToRecipients(playerAlert);
         
         // Send to Discord if enabled
         plugin.getDiscordWebhookHandler().sendAlert(player, "Multiple Violations", brand, null, violations);
@@ -259,11 +302,8 @@ public class AlertManager {
         // Log to console
         plugin.getLogger().info(consoleAlert);
         
-        // Notify players with permission
-        String coloredPlayerAlert = ChatColor.translateAlternateColorCodes('&', playerAlert);
-        Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.hasPermission("antispoof.alerts"))
-                .forEach(p -> p.sendMessage(coloredPlayerAlert));
+        // Notify players with permission using our optimized list
+        sendAlertToRecipients(playerAlert);
         
         // Send to Discord if enabled and this type should send alerts
         if (config.isDiscordWebhookEnabled() && sendDiscordAlert) {
@@ -334,8 +374,8 @@ public class AlertManager {
             
             // Execute command on the main thread
             final String finalCommand = formatted;
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCommand);
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), finalCommand);
             });
         }
     }
@@ -346,5 +386,6 @@ public class AlertManager {
      */
     public void handlePlayerQuit(UUID playerUUID) {
         lastAlerts.remove(playerUUID);
+        playersWithAlertPermission.remove(playerUUID);
     }
 }

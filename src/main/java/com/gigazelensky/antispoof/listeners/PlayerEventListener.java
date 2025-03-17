@@ -96,6 +96,9 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         
+        // Register player for alerts if they have permission
+        plugin.getAlertManager().registerPlayer(player);
+        
         // Skip if player has bypass permission
         if (player.hasPermission("antispoof.bypass")) return;
         
@@ -103,8 +106,7 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         UUID uuid = player.getUniqueId();
         plugin.getPlayerDataMap().computeIfAbsent(uuid, k -> new PlayerData());
         
-        // NEW: Special handling for no-brand detection
-        // Schedule an immediate check specifically for no-brand players
+        // Special handling for no-brand detection
         if (config.isNoBrandCheckEnabled()) {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 // Only process if still null after 1 second (allows time for brand packet)

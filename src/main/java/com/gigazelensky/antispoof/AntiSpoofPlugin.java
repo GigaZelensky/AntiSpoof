@@ -3,6 +3,7 @@ package com.gigazelensky.antispoof;
 import com.gigazelensky.antispoof.commands.AntiSpoofCommand;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
+import com.gigazelensky.antispoof.listeners.PermissionChangeListener;
 import com.gigazelensky.antispoof.listeners.PlayerEventListener;
 import com.gigazelensky.antispoof.managers.AlertManager;
 import com.gigazelensky.antispoof.managers.ConfigManager;
@@ -11,6 +12,7 @@ import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.gigazelensky.antispoof.utils.VersionChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.geysermc.floodgate.api.FloodgateApi;
@@ -75,6 +77,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.playerEventListener = new PlayerEventListener(this);
         this.playerEventListener.register();
         
+        // Register permission change listener
+        PermissionChangeListener permissionListener = new PermissionChangeListener(this);
+        getServer().getPluginManager().registerEvents(permissionListener, this);
+        
         // Register command with tab completion
         AntiSpoofCommand commandExecutor = new AntiSpoofCommand(this);
         getCommand("antispoof").setExecutor(commandExecutor);
@@ -95,6 +101,16 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 getLogger().info("Discord webhook integration is disabled.");
             }
         }
+        
+        // After server startup, initialize the alert recipients list
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                alertManager.registerPlayer(player);
+            }
+            if (configManager.isDebugMode()) {
+                getLogger().info("[Debug] Initialized alert recipients list");
+            }
+        }, 40L); // 2 seconds after server fully starts
         
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
