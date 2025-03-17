@@ -255,49 +255,85 @@ public class DetectionManager {
                         plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
                     }
                     
-                    // For each player channel, check against each required channel pattern
-                    for (String channel : data.getChannels()) {
-                        for (Pattern pattern : brandConfig.getRequiredChannels()) {
+                    // FIXED CHANNEL MATCHING LOGIC
+                    // For each required pattern
+                    for (Pattern pattern : brandConfig.getRequiredChannels()) {
+                        // For each player channel
+                        for (String channel : data.getChannels()) {
                             try {
-                                if (pattern.matcher(channel).matches()) {
+                                String patternStr = pattern.toString();
+                                // Handle case insensitive patterns
+                                if (patternStr.contains("(?i)")) {
+                                    // Create a case-insensitive version for matching
+                                    String lcChannel = channel.toLowerCase();
+                                    String lcPattern = patternStr.toLowerCase().replace("(?i)", "");
+                                    
+                                    // Try a simple contains check first
+                                    if (lcChannel.contains(lcPattern.replace(".*", "").replace("^", "").replace("$", ""))) {
+                                        hasRequiredChannel = true;
+                                        
+                                        if (config.isDebugMode()) {
+                                            plugin.getLogger().info("[Debug] Found case-insensitive matching channel: " + channel + 
+                                                                  " contains " + lcPattern.replace(".*", "").replace("^", "").replace("$", ""));
+                                        }
+                                        break;
+                                    }
+                                    
+                                    // Try pattern matching if contains check failed
+                                    try {
+                                        if (lcChannel.matches(lcPattern)) {
+                                            hasRequiredChannel = true;
+                                            
+                                            if (config.isDebugMode()) {
+                                                plugin.getLogger().info("[Debug] Found case-insensitive regex match: " + channel);
+                                            }
+                                            break;
+                                        }
+                                    } catch (Exception e) {
+                                        if (config.isDebugMode()) {
+                                            plugin.getLogger().info("[Debug] Regex error for case-insensitive pattern: " + e.getMessage());
+                                        }
+                                    }
+                                }
+                                // Normal case-sensitive pattern
+                                else if (pattern.matcher(channel).matches()) {
                                     hasRequiredChannel = true;
                                     
                                     if (config.isDebugMode()) {
                                         plugin.getLogger().info("[Debug] Found matching channel: " + channel);
                                     }
-                                    
                                     break;
                                 }
                             } catch (Exception e) {
                                 // If regex fails, fallback to simple contains check
                                 String patternStr = pattern.toString();
-                                if (channel.toLowerCase().contains(patternStr.toLowerCase()
-                                    .replace("(?i)", "")
-                                    .replace(".*", "")
-                                    .replace("^", "")
-                                    .replace("$", ""))) {
-                                    
+                                if (channel.contains(patternStr.replace(".*", "").replace("^", "").replace("$", ""))) {
                                     hasRequiredChannel = true;
                                     
                                     if (config.isDebugMode()) {
                                         plugin.getLogger().info("[Debug] Found matching channel using fallback: " + channel);
                                     }
-                                    
                                     break;
                                 }
                             }
                         }
                         
-                        if (hasRequiredChannel) break;
+                        if (hasRequiredChannel) {
+                            // Found a match, no need to check more patterns
+                            break;
+                        }
                     }
                     
                     if (!hasRequiredChannel) {
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Required channel check failed for " + player.getName() + 
+                                                  " with brand " + matchedBrandKey);
+                        }
                         detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
                             "Client missing required channels for brand: " + matchedBrandKey);
-                        
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Debug] No matching channels found for " + player.getName());
-                        }
+                    } else if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Required channel check PASSED for " + player.getName() + 
+                                              " with brand " + matchedBrandKey);
                     }
                 }
                 
