@@ -603,120 +603,51 @@ public class DiscordWebhookHandler {
         // Description - Use violation content from config
         sb.append("\"description\":\"");
         
-        // CRITICAL FIX: Always check if we have multiple violations first
-        // and use a consistent format with "Violations" header
-        if (violations != null && violations.size() > 1) {
-            // Custom format for multiple violations
-            sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-            sb.append("**Violations**:\\n");
-            
-            // Clean up violations list
-            List<String> cleanViolations = new ArrayList<>(violations);
+        // ALWAYS use a consistent format with "Violations" header for all alerts
+        // Start with player info
+        sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
+        
+        // Create a clean list of violations
+        List<String> cleanViolations = new ArrayList<>();
+        
+        // If we have explicit violations list, use it
+        if (violations != null && !violations.isEmpty()) {
+            cleanViolations = new ArrayList<>(violations);
             cleanViolations.removeIf(v -> v.contains("Multiple Violations"));
-            
-            // Add each violation as a bullet point
-            for (String violation : cleanViolations) {
+        } 
+        // Otherwise use the reason as a single violation
+        else if (reason != null && !reason.isEmpty()) {
+            cleanViolations.add(reason);
+        }
+        
+        // Always show "Violations:" header with bullet points
+        sb.append("**Violations**:\\n");
+        
+        // Add each violation as a bullet point
+        for (String violation : cleanViolations) {
+            // Clean up any "(Client: X)" text
+            int clientIndex = violation.indexOf(" (Client: ");
+            if (clientIndex > 0) {
+                sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
+            } else {
                 sb.append("• ").append(escapeJson(violation)).append("\\n");
             }
-            
-            // Add other standard information
-            sb.append("**Client Version**: ").append(getClientVersionFromPlaceholders(player)).append("\\n");
-            sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
-            
-            // Add channels
-            sb.append("**Channels**:\\n");
-            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-            if (data != null && !data.getChannels().isEmpty()) {
-                Set<String> channels = data.getChannels();
-                for (String ch : channels) {
-                    sb.append("• ").append(escapeJson(ch)).append("\\n");
-                }
-            } else {
-                sb.append("• None detected\\n");
-            }
         }
-        // Standard template handling
-        else {
-            List<String> contentLines = config.getDiscordViolationContent();
-            if (contentLines != null && !contentLines.isEmpty()) {
-                for (String line : contentLines) {
-                    // Handle special placeholders
-                    String processedLine = line;
-                    
-                    // Handle %player% placeholder
-                    processedLine = processedLine.replace("%player%", player.getName());
-                    
-                    // Handle %console_alert% placeholder
-                    processedLine = processedLine.replace("%console_alert%", consoleAlert);
-                    
-                    // Handle %brand% placeholder
-                    processedLine = processedLine.replace("%brand%", brand != null ? brand : "unknown");
-                    
-                    // Handle %violations% placeholder
-                    if (processedLine.contains("%violations%") && violations != null && !violations.isEmpty()) {
-                        sb.append(processedLine.replace("%violations%", "")).append("\\n");
-                        
-                        // Handle single violation as bullet point
-                        for (String violation : violations) {
-                            sb.append("• ").append(escapeJson(violation)).append("\\n");
-                        }
-                        continue; // Skip regular appending for this line
-                    }
-                    
-                    // Handle %viaversion_version% placeholder
-                    if (processedLine.contains("%viaversion_version%")) {
-                        processedLine = processedLine.replace("%viaversion_version%", 
-                                                             getClientVersionFromPlaceholders(player));
-                    }
-                    
-                    // Handle %channel% placeholder for listing all channels
-                    if (line.contains("%channel%")) {
-                        PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-                        if (data != null && !data.getChannels().isEmpty()) {
-                            Set<String> channels = data.getChannels();
-                            for (String ch : channels) {
-                                sb.append("• ").append(escapeJson(ch)).append("\\n");
-                            }
-                        } else {
-                            sb.append("• None detected\\n");
-                        }
-                    } else {
-                        sb.append(escapeJson(processedLine)).append("\\n");
-                    }
-                }
-            } else {
-                // Fallback if no content lines configured
-                sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
-                sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
-                
-                // Show all violations in a section
-                if (violations != null && !violations.isEmpty()) {
-                    sb.append("**Violations**:\\n");
-                    for (String violation : violations) {
-                        // Clean up any "(Client: X)" text
-                        int clientIndex = violation.indexOf(" (Client: ");
-                        if (clientIndex > 0) {
-                            sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
-                        } else {
-                            sb.append("• ").append(escapeJson(violation)).append("\\n");
-                        }
-                    }
-                } else {
-                    sb.append("**Reason**: ").append(escapeJson(reason)).append("\\n");
-                }
-                
-                if (channel != null) {
-                    sb.append("**Channel**: ").append(escapeJson(channel)).append("\\n");
-                }
-                
-                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-                if (data != null && !data.getChannels().isEmpty()) {
-                    sb.append("**All Channels**:\\n");
-                    for (String ch : data.getChannels()) {
-                        sb.append("• ").append(escapeJson(ch)).append("\\n");
-                    }
-                }
+        
+        // Add other standard information
+        sb.append("**Client Version**: ").append(getClientVersionFromPlaceholders(player)).append("\\n");
+        sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
+        
+        // Add channels
+        sb.append("**Channels**:\\n");
+        PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+        if (data != null && !data.getChannels().isEmpty()) {
+            Set<String> channels = data.getChannels();
+            for (String ch : channels) {
+                sb.append("• ").append(escapeJson(ch)).append("\\n");
             }
+        } else {
+            sb.append("• None detected\\n");
         }
         
         // Close the description
