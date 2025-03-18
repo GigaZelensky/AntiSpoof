@@ -20,8 +20,14 @@ public class DetectionManager {
     // Track player violation states to prevent duplicate alerts
     private final Map<UUID, Map<String, Boolean>> playerViolations = new ConcurrentHashMap<>();
     
+    // Track players who have already had their required channels check done
+    private final Set<UUID> requiredChannelCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    
     // Player check cooldown in milliseconds (500ms by default)
     private static final long CHECK_COOLDOWN = 500;
+    
+    // Grace period for channel registrations (milliseconds)
+    private static final long CHANNEL_GRACE_PERIOD = 5000;
     
     public DetectionManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -56,13 +62,38 @@ public class DetectionManager {
         
         // Mark initial channels as registered after a short delay from first join
         if (!data.isInitialChannelsRegistered() && 
-            System.currentTimeMillis() - data.getJoinTime() > 5000) {
+            System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD) {
             data.setInitialChannelsRegistered(true);
         }
         
-        // Trigger a check if requested and cooldown passed
+        // Check if we need to clear any previous "missing required channels" flag
+        // If we add a fabric channel after a previous check, this ensures the flag is removed
+        if (channel.contains("fabric") && playerViolations.containsKey(playerUUID)) {
+            Map<String, Boolean> violations = playerViolations.get(playerUUID);
+            if (violations.getOrDefault("MISSING_REQUIRED_CHANNELS", false)) {
+                // Only log this once when we clear the flag
+                if (plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Clearing 'MISSING_REQUIRED_CHANNELS' flag for " + player.getName() + 
+                                           " because a fabric channel was registered: " + channel);
+                }
+                violations.put("MISSING_REQUIRED_CHANNELS", false);
+            }
+        }
+        
+        // Only trigger checks if:
+        // 1. A check was requested AND
+        // 2. We're not in cooldown AND
+        // 3. We're past the grace period OR this isn't a required channels check
+        boolean isPastGracePeriod = System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD;
+        boolean hasHadRequiredChannelsCheck = requiredChannelCheckedPlayers.contains(playerUUID);
+        
+        // Only do regular checks on channel register, NOT required channel checks
+        // Wait for the scheduled required channel check after grace period
         if (triggerCheck && canCheckPlayer(playerUUID)) {
-            checkPlayerAsync(player, false, true);
+            // Only do basic checks during grace period (no required channel checks)
+            if (!isPastGracePeriod || hasHadRequiredChannelsCheck) {
+                checkPlayerAsync(player, false, false);
+            }
         }
         
         return channelAdded;
@@ -112,6 +143,15 @@ public class DetectionManager {
     public void checkPlayerAsync(Player player, boolean isJoinCheck, boolean checkRequiredChannels) {
         if (!player.isOnline() || player.hasPermission("antispoof.bypass")) {
             return;
+        }
+        
+        // If this is a required channels check, mark the player as having had this check
+        if (checkRequiredChannels) {
+            requiredChannelCheckedPlayers.add(player.getUniqueId());
+            
+            if (plugin.getConfigManager().isDebugMode()) {
+                plugin.getLogger().info("[Debug] Running FULL check with required channels for " + player.getName());
+            }
         }
         
         // Run check asynchronously to avoid lag
@@ -298,11 +338,22 @@ public class DetectionManager {
                     }
                     
                     if (!hasRequiredChannel) {
-                        detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
-                            "Client missing required channels for brand: " + matchedBrandKey);
+                        // Check if this is the final required channel check (past grace period)
+                        // or if it's a preliminary check
+                        boolean isPastGracePeriod = System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD;
                         
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Debug] No matching channels found for " + player.getName());
+                        if (isPastGracePeriod) {
+                            detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
+                                "Client missing required channels for brand: " + matchedBrandKey);
+                            
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().info("[Debug] No matching channels found for " + player.getName() + 
+                                                      " (FINAL CHECK - PAST GRACE PERIOD)");
+                            }
+                        } else if (config.isDebugMode()) {
+                            // Only log during grace period, don't flag yet
+                            plugin.getLogger().info("[Debug] No matching channels found for " + player.getName() + 
+                                                  " (still in grace period, will check again later)");
                         }
                     }
                 }
@@ -709,7 +760,7 @@ public class DetectionManager {
      * Checks if a player is spoofing Geyser client
      * @param player The player to check
      * @param brand The player's client brand
-     * @return True if the player is spoofing Geyser client, false otherwise
+     * @return True if the player is spoofing Geyser, false otherwise
      */
     private boolean isSpoofingGeyser(Player player, String brand) {
         if (brand == null) return false;
@@ -820,5 +871,6 @@ public class DetectionManager {
         plugin.getPlayerBrands().remove(playerUUID);
         playerViolations.remove(playerUUID);
         recentlyCheckedPlayers.remove(playerUUID);
+        requiredChannelCheckedPlayers.remove(playerUUID);
     }
 }
