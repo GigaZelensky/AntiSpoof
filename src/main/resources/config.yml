@@ -297,7 +297,7 @@ client-brands:
     vanilla-variation: # When a client shows "Vanilla" or "vAnilla2" but not "vanilla"
       enabled: true
       values:
-        - "(?i)^(?!vanilla$).*vanilla.*"
+        - "^(?!vanilla$).*?(?i)vanilla.*"
       flag: true
       alert: true
       discord-alert: true

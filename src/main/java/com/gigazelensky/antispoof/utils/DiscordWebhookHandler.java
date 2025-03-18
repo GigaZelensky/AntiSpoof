@@ -656,10 +656,53 @@ public class DiscordWebhookHandler {
         for (String violation : cleanViolations) {
             // Clean up any "(Client: X)" text
             int clientIndex = violation.indexOf(" (Client: ");
-            if (clientIndex > 0) {
-                sb.append("• ").append(escapeJson(violation.substring(0, clientIndex))).append("\\n");
-            } else {
-                sb.append("• ").append(escapeJson(violation)).append("\\n");
+            String cleanViolation = clientIndex > 0 ? violation.substring(0, clientIndex) : violation;
+            
+            // Look for patterns like "Client missing required channels for brand X: pattern"
+            if (cleanViolation.contains("Client missing required channels for brand")) {
+                int patternStartIndex = cleanViolation.lastIndexOf(": ");
+                if (patternStartIndex > 0) {
+                    // Split into prefix and pattern parts
+                    String prefix = cleanViolation.substring(0, patternStartIndex + 2); // Include the ": " part
+                    String pattern = cleanViolation.substring(patternStartIndex + 2);
+                    
+                    // Output with backticks around the pattern
+                    sb.append("• ").append(escapeJson(prefix)).append("`").append(escapeJson(pattern)).append("`\\n");
+                } else {
+                    sb.append("• ").append(escapeJson(cleanViolation)).append("\\n");
+                }
+            } 
+            // Also look for "Using blocked channel: X" pattern
+            else if (cleanViolation.contains("Using blocked channel:")) {
+                int patternStartIndex = cleanViolation.lastIndexOf(": ");
+                if (patternStartIndex > 0) {
+                    // Split into prefix and pattern parts
+                    String prefix = cleanViolation.substring(0, patternStartIndex + 2); // Include the ": " part
+                    String pattern = cleanViolation.substring(patternStartIndex + 2);
+                    
+                    // Output with backticks around the pattern
+                    sb.append("• ").append(escapeJson(prefix)).append("`").append(escapeJson(pattern)).append("`\\n");
+                } else {
+                    sb.append("• ").append(escapeJson(cleanViolation)).append("\\n");
+                }
+            }
+            // For any other violations that contain regex patterns
+            else if (cleanViolation.contains(": (?i)") || cleanViolation.contains(": ^") || cleanViolation.contains(".*")) {
+                int patternStartIndex = cleanViolation.lastIndexOf(": ");
+                if (patternStartIndex > 0) {
+                    // Split into prefix and pattern parts
+                    String prefix = cleanViolation.substring(0, patternStartIndex + 2); // Include the ": " part
+                    String pattern = cleanViolation.substring(patternStartIndex + 2);
+                    
+                    // Output with backticks around the pattern
+                    sb.append("• ").append(escapeJson(prefix)).append("`").append(escapeJson(pattern)).append("`\\n");
+                } else {
+                    sb.append("• ").append(escapeJson(cleanViolation)).append("\\n");
+                }
+            }
+            // Default case for other violations
+            else {
+                sb.append("• ").append(escapeJson(cleanViolation)).append("\\n");
             }
         }
         
