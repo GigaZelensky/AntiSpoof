@@ -17,6 +17,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.geysermc.floodgate.api.FloodgateApi;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -194,6 +196,73 @@ public class AntiSpoofPlugin extends JavaPlugin {
      */
     public void markPlayerBrandAlerted(Player player) {
         brandAlertedPlayers.add(player.getUniqueId());
+    }
+    
+    /**
+     * Centralized method to handle sending brand alerts.
+     * This ensures we don't get duplicate messages.
+     * 
+     * @param player The player
+     * @param brand The client brand
+     * @param brandKey The configuration key for the brand (can be null for unknown brands)
+     * @return true if the alert was sent, false if it was suppressed (already sent)
+     */
+    public boolean sendBrandAlert(Player player, String brand, String brandKey) {
+        UUID uuid = player.getUniqueId();
+        
+        // Skip if this player has already had a brand alert
+        if (hasPlayerBeenBrandAlerted(player)) {
+            if (configManager.isDebugMode()) {
+                getLogger().info("[Debug] Suppressing duplicate brand alert for " + player.getName());
+            }
+            return false;
+        }
+        
+        // Mark the player as having received a brand alert
+        markPlayerBrandAlerted(player);
+        
+        // If the brand key is null, use the join alert method
+        if (brandKey == null) {
+            alertManager.sendSimpleBrandAlert(player, brand);
+            return true;
+        }
+        
+        // Otherwise use the config-based alert
+        ConfigManager.ClientBrandConfig brandConfig = configManager.getClientBrandConfig(brandKey);
+        
+        // Skip if alerts are disabled for this brand
+        if (!brandConfig.shouldAlert()) {
+            return false;
+        }
+        
+        // Format the alert messages
+        String alertMessage = brandConfig.getAlertMessage()
+            .replace("%player%", player.getName())
+            .replace("%brand%", brand);
+        
+        String consoleMessage = brandConfig.getConsoleAlertMessage()
+            .replace("%player%", player.getName())
+            .replace("%brand%", brand);
+        
+        // Send the alert - to console and to players with permission
+        getLogger().info(consoleMessage);
+        alertManager.sendAlertToRecipients(alertMessage);
+        
+        // Send to Discord if enabled for this brand
+        if (configManager.isDiscordWebhookEnabled() && brandConfig.shouldDiscordAlert()) {
+            List<String> brandInfo = new ArrayList<>();
+            brandInfo.add("Client brand: " + brand);
+            
+            discordWebhookHandler.sendAlert(
+                player,
+                "Using client: " + brandKey,
+                brand,
+                null,
+                brandInfo
+            );
+        }
+        
+        return true;
     }
     
     public boolean isBedrockPlayer(Player player) {

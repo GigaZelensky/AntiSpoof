@@ -66,7 +66,7 @@ public class AlertManager {
      * Sends a message to all players with alert permission
      * @param message The message to send
      */
-    private void sendAlertToRecipients(String message) {
+    public void sendAlertToRecipients(String message) {
         String coloredMessage = ChatColor.translateAlternateColorCodes('&', message);
         
         for (UUID uuid : playersWithAlertPermission) {
@@ -118,26 +118,11 @@ public class AlertManager {
     }
     
     /**
-     * Sends a brand join alert for a player
-     * @param player The player who joined
-     * @param brand The player's client brand
+     * Sends a simple brand alert for a player (used when no specific brand config exists)
+     * @param player The player
+     * @param brand The client brand
      */
-    public void sendBrandJoinAlert(Player player, String brand) {
-        if (!config.isJoinBrandAlertsEnabled() || !canSendAlert(player.getUniqueId(), "JOIN_BRAND")) {
-            return;
-        }
-        
-        // Check if we've already sent a brand alert for this player
-        if (plugin.hasPlayerBeenBrandAlerted(player)) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName());
-            }
-            return;
-        }
-        
-        // Mark the player as alerted to prevent duplicate messages
-        plugin.markPlayerBrandAlerted(player);
-        
+    public void sendSimpleBrandAlert(Player player, String brand) {
         // Format the player alert message with placeholders
         String playerAlert = config.getBlockedBrandsAlertMessage()
                 .replace("%player%", player.getName())
@@ -156,8 +141,7 @@ public class AlertManager {
         
         // Send to Discord if brand join alerts are enabled
         if (config.isDiscordWebhookEnabled() && 
-            config.isBlockedBrandsDiscordAlertEnabled() && 
-            config.isJoinBrandAlertsEnabled()) {
+            config.isBlockedBrandsDiscordAlertEnabled()) {
             
             plugin.getDiscordWebhookHandler().sendAlert(
                 player, 
@@ -167,6 +151,20 @@ public class AlertManager {
                 null
             );
         }
+    }
+    
+    /**
+     * Sends a brand join alert for a player
+     * @param player The player who joined
+     * @param brand The player's client brand
+     */
+    public void sendBrandJoinAlert(Player player, String brand) {
+        if (!config.isJoinBrandAlertsEnabled() || !canSendAlert(player.getUniqueId(), "JOIN_BRAND")) {
+            return;
+        }
+        
+        // Use the centralized method to ensure no duplicates
+        plugin.sendBrandAlert(player, brand, null);
     }
     
     /**

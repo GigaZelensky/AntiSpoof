@@ -499,51 +499,8 @@ public class DetectionManager {
      * @param brandKey The configuration key for the brand
      */
     private void sendBrandAlert(Player player, String brand, String brandKey) {
-        // Skip if player has already been alerted about their brand
-        if (plugin.hasPlayerBeenBrandAlerted(player)) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName());
-            }
-            return;
-        }
-        
-        // Mark player as alerted to prevent future duplicate alerts
-        plugin.markPlayerBrandAlerted(player);
-        
-        ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
-        
-        // Skip if alerts are disabled for this brand
-        if (!brandConfig.shouldAlert()) return;
-        
-        // Get alert message for this brand
-        String alertMessage = brandConfig.getAlertMessage()
-            .replace("%player%", player.getName())
-            .replace("%brand%", brand);
-        
-        // Get console alert message for this brand
-        String consoleAlertMessage = brandConfig.getConsoleAlertMessage()
-            .replace("%player%", player.getName())
-            .replace("%brand%", brand);
-        
-        // Log to console
-        plugin.getLogger().info(consoleAlertMessage);
-        
-        // Send alert to players with permission
-        plugin.getAlertManager().sendCustomAlert(player, alertMessage, consoleAlertMessage, "BRAND_ALERT");
-        
-        // Send to Discord if enabled for this brand
-        if (config.isDiscordWebhookEnabled() && brandConfig.shouldDiscordAlert()) {
-            List<String> brandInfo = new ArrayList<>();
-            brandInfo.add("Client brand: " + brand);
-            
-            plugin.getDiscordWebhookHandler().sendAlert(
-                player, 
-                "Using client: " + brandKey, 
-                brand, 
-                null, 
-                brandInfo
-            );
-        }
+        // Use the centralized method to ensure no duplicates
+        plugin.sendBrandAlert(player, brand, brandKey);
     }
     
     /**
