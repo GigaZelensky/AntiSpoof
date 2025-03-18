@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 public class AntiSpoofPlugin extends JavaPlugin {
     
@@ -208,8 +209,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
      * @return true if the alert was sent, false if it was suppressed (already sent)
      */
     public boolean sendBrandAlert(Player player, String brand, String brandKey) {
-        UUID uuid = player.getUniqueId();
-        
         // Skip if this player has already had a brand alert
         if (hasPlayerBeenBrandAlerted(player)) {
             if (configManager.isDebugMode()) {
@@ -371,6 +370,57 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 // Blacklist mode
                 String blockedChannel = detectionManager.findBlockedChannel(data.getChannels());
                 if (blockedChannel != null) {
+                    return true;
+                }
+            }
+        }
+        
+        // NEW: Check for missing required channels for their brand
+        String matchedBrand = configManager.getMatchingClientBrand(brand);
+        if (matchedBrand != null && hasChannels) {
+            ConfigManager.ClientBrandConfig brandConfig = configManager.getClientBrandConfig(matchedBrand);
+            
+            // Only check if this brand has required channels configured
+            if (!brandConfig.getRequiredChannels().isEmpty()) {
+                boolean missingRequiredChannels = false;
+                
+                // For each required channel pattern, check if any player channel matches it
+                for (int i = 0; i < brandConfig.getRequiredChannels().size(); i++) {
+                    Pattern pattern = brandConfig.getRequiredChannels().get(i);
+                    String patternStr = brandConfig.getRequiredChannelStrings().get(i);
+                    boolean patternMatched = false;
+                    
+                    // Check each player channel against this pattern
+                    for (String channel : data.getChannels()) {
+                        try {
+                            if (pattern.matcher(channel).matches()) {
+                                patternMatched = true;
+                                break;
+                            }
+                        } catch (Exception e) {
+                            // If regex fails, fallback to simple contains check
+                            String simplePatternStr = pattern.toString()
+                                .replace("(?i)", "")
+                                .replace(".*", "")
+                                .replace("^", "")
+                                .replace("$", "");
+                                
+                            if (channel.toLowerCase().contains(simplePatternStr.toLowerCase())) {
+                                patternMatched = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If no match was found for this pattern, mark as missing required channels
+                    if (!patternMatched) {
+                        missingRequiredChannels = true;
+                        break;
+                    }
+                }
+                
+                // If any required channel pattern is missing, player is spoofing
+                if (missingRequiredChannels) {
                     return true;
                 }
             }
