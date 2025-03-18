@@ -96,7 +96,7 @@ Both versions provide identical functionality - the only difference is whether P
 AntiSpoof is designed to catch the vast majority of cheaters who don't properly spoof their client brand or channels:
 
 ### 1. Detect Obvious Spoofers
-Most hacked clients (like Wurst, Meteor, Impact, etc.) don't properly spoof their brand or channel information. Their modifications often leave telltale signs that AntiSpoof can easily detect.
+Most hacked clients (like Wurst, Meteor, Impact, LiquidBounce, etc.) don't properly spoof their brand or channel information. Their modifications often leave telltale signs that AntiSpoof can easily detect.
 
 ### 2. Enforce Vanilla-Only Policies
 Identify players who claim to be using "vanilla" but have registered plugin channels (which is technically impossible with a true vanilla client).
@@ -577,10 +577,10 @@ client-brands:
       # You can add this "strict-check" to any client brand and only then will it be processed by the earlier "vanillaspoof-check"
       strict-check: true  # Enable strict checking for vanilla (must have NO channels)
 
-    vanilla-variation: #when a client shows "Vanilla" or "vAnilla2" but not "vanilla"
+    vanilla-variation: # When a client shows "Vanilla" or "vAnilla2" but not "vanilla"
       enabled: true
       values:
-        - "(?i)^(?!vanilla$).*vanilla.*"
+        - "^(?!vanilla$).*?(?i)vanilla.*"
       flag: true
       alert: true
       discord-alert: true
