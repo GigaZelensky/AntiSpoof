@@ -294,7 +294,7 @@ client-brands:
       # You can add this "strict-check" to any client brand and only then will it be processed by the earlier "vanillaspoof-check"
       strict-check: true  # Enable strict checking for vanilla (must have NO channels)
 
-    vanilla-variation: #when a client shows "Vanilla" or "vAnilla2" but not "vanilla"
+    vanilla-variation: # When a client shows "Vanilla" or "vAnilla2" but not "vanilla"
       enabled: true
       values:
         - "(?i)^(?!vanilla$).*vanilla.*"
