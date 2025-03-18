@@ -3,10 +3,12 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 public class DetectionManager {
     private final AntiSpoofPlugin plugin;
@@ -18,8 +20,14 @@ public class DetectionManager {
     // Track player violation states to prevent duplicate alerts
     private final Map<UUID, Map<String, Boolean>> playerViolations = new ConcurrentHashMap<>();
     
+    // Track players who have already had their required channels check done
+    private final Set<UUID> requiredChannelCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    
     // Player check cooldown in milliseconds (500ms by default)
     private static final long CHECK_COOLDOWN = 500;
+    
+    // Grace period for channel registrations (milliseconds)
+    private static final long CHANNEL_GRACE_PERIOD = 5000;
     
     public DetectionManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -54,13 +62,38 @@ public class DetectionManager {
         
         // Mark initial channels as registered after a short delay from first join
         if (!data.isInitialChannelsRegistered() && 
-            System.currentTimeMillis() - data.getJoinTime() > 5000) {
+            System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD) {
             data.setInitialChannelsRegistered(true);
         }
         
-        // Trigger a check if requested and cooldown passed
+        // Check if we need to clear any previous "missing required channels" flag
+        // If we add a fabric channel after a previous check, this ensures the flag is removed
+        if (channel.contains("fabric") && playerViolations.containsKey(playerUUID)) {
+            Map<String, Boolean> violations = playerViolations.get(playerUUID);
+            if (violations.getOrDefault("MISSING_REQUIRED_CHANNELS", false)) {
+                // Only log this once when we clear the flag
+                if (plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Clearing 'MISSING_REQUIRED_CHANNELS' flag for " + player.getName() + 
+                                           " because a fabric channel was registered: " + channel);
+                }
+                violations.put("MISSING_REQUIRED_CHANNELS", false);
+            }
+        }
+        
+        // Only trigger checks if:
+        // 1. A check was requested AND
+        // 2. We're not in cooldown AND
+        // 3. We're past the grace period OR this isn't a required channels check
+        boolean isPastGracePeriod = System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD;
+        boolean hasHadRequiredChannelsCheck = requiredChannelCheckedPlayers.contains(playerUUID);
+        
+        // Only do regular checks on channel register, NOT required channel checks
+        // Wait for the scheduled required channel check after grace period
         if (triggerCheck && canCheckPlayer(playerUUID)) {
-            checkPlayerAsync(player, false);
+            // Only do basic checks during grace period (no required channel checks)
+            if (!isPastGracePeriod || hasHadRequiredChannelsCheck) {
+                checkPlayerAsync(player, false, false);
+            }
         }
         
         return channelAdded;
@@ -107,23 +140,38 @@ public class DetectionManager {
      * @param player The player to check
      * @param isJoinCheck Whether this is an initial join check
      */
-    public void checkPlayerAsync(Player player, boolean isJoinCheck) {
+    public void checkPlayerAsync(Player player, boolean isJoinCheck, boolean checkRequiredChannels) {
         if (!player.isOnline() || player.hasPermission("antispoof.bypass")) {
             return;
         }
         
+        // If this is a required channels check, mark the player as having had this check
+        if (checkRequiredChannels) {
+            requiredChannelCheckedPlayers.add(player.getUniqueId());
+            
+            if (plugin.getConfigManager().isDebugMode()) {
+                plugin.getLogger().info("[Debug] Running FULL check with required channels for " + player.getName());
+            }
+        }
+        
         // Run check asynchronously to avoid lag
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            checkPlayer(player, isJoinCheck);
+            checkPlayer(player, isJoinCheck, checkRequiredChannels);
         });
+    }
+
+    // Overload for backward compatibility
+    public void checkPlayerAsync(Player player, boolean isJoinCheck) {
+        checkPlayerAsync(player, isJoinCheck, true);
     }
     
     /**
      * Performs a comprehensive check on a player
      * @param player The player to check
      * @param isJoinCheck Whether this is an initial join check
+     * @param checkRequiredChannels Whether to check for required channels
      */
-    private void checkPlayer(Player player, boolean isJoinCheck) {
+    private void checkPlayer(Player player, boolean isJoinCheck, boolean checkRequiredChannels) {
         UUID uuid = player.getUniqueId();
         
         // Skip if player is offline or has been punished
@@ -212,29 +260,177 @@ public class DetectionManager {
             detectedViolations.put("GEYSER_SPOOF", "Spoofing Geyser client");
         }
         
-        // Check for brand blocking
-        if (config.isBlockedBrandsEnabled() && config.shouldCountNonWhitelistedBrandsAsFlag()) {
-            boolean brandBlocked = isBrandBlocked(brand);
-            if (brandBlocked) {
-                if (config.isBrandWhitelistEnabled()) {
-                    detectedViolations.put("BLOCKED_BRAND", "Client brand not in whitelist: " + brand);
-                } else {
-                    detectedViolations.put("BLOCKED_BRAND", "Blocked client brand: " + brand);
-                }
-            }
-        }
-        
         boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
-        // Vanilla client check - this takes precedence
-        if (config.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
-            detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
-        }
-        
-        // Non-vanilla with channels check
-        else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-            detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+        // Check if client brands system is enabled
+        if (config.isClientBrandsEnabled()) {
+            // Try to match the brand to a configured client brand
+            String matchedBrandKey = config.getMatchingClientBrand(brand);
+            
+            if (matchedBrandKey != null) {
+                // We found a matching brand configuration
+                ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(matchedBrandKey);
+                
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Matched brand for " + player.getName() + 
+                                           ": " + matchedBrandKey);
+                }
+                
+                // Check if this brand should be flagged
+                if (brandConfig.shouldFlag()) {
+                    detectedViolations.put("CLIENT_BRAND", 
+                        "Using flagged client brand: " + brand + " (" + matchedBrandKey + ")");
+                }
+                
+                // Check for strict-check (vanilla spoof detection)
+                if (brandConfig.hasStrictCheck() && hasChannels) {
+                    detectedViolations.put("VANILLA_WITH_CHANNELS", 
+                        "Client claiming '" + matchedBrandKey + "' detected with plugin channels");
+                }
+                
+                // Check required channels for this brand - ONLY IF ENABLED BY PARAMETER
+                if (checkRequiredChannels && !brandConfig.getRequiredChannels().isEmpty() && hasChannels) {
+                    // We now check that the player has ALL required channels, not just one
+                    List<String> missingChannelPatterns = new ArrayList<>();
+                    
+                    // Log channels in debug mode to help diagnose issues
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Checking required channels for " + player.getName());
+                        plugin.getLogger().info("[Debug] Required patterns for " + matchedBrandKey + ": " + 
+                                              String.join(", ", brandConfig.getRequiredChannelStrings()));
+                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
+                    }
+                    
+                    // For each required channel pattern, check if any player channel matches it
+                    for (int i = 0; i < brandConfig.getRequiredChannels().size(); i++) {
+                        Pattern pattern = brandConfig.getRequiredChannels().get(i);
+                        String patternStr = brandConfig.getRequiredChannelStrings().get(i);
+                        boolean patternMatched = false;
+                        
+                        // Check each player channel against this pattern
+                        for (String channel : data.getChannels()) {
+                            try {
+                                if (pattern.matcher(channel).matches()) {
+                                    patternMatched = true;
+                                    
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().info("[Debug] Found matching channel for pattern " + 
+                                                   patternStr + ": " + channel);
+                                    }
+                                    
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                // If regex fails, fallback to simple contains check
+                                String simplePatternStr = pattern.toString()
+                                    .replace("(?i)", "")
+                                    .replace(".*", "")
+                                    .replace("^", "")
+                                    .replace("$", "");
+                                    
+                                if (channel.toLowerCase().contains(simplePatternStr.toLowerCase())) {
+                                    patternMatched = true;
+                                    
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().info("[Debug] Found matching channel using fallback for pattern " + 
+                                                   patternStr + ": " + channel);
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // If no match was found for this pattern, add it to missing patterns
+                        if (!patternMatched) {
+                            missingChannelPatterns.add(patternStr);
+                        }
+                    }
+                    
+                    // Only pass if ALL required patterns were matched (no missing patterns)
+                    if (!missingChannelPatterns.isEmpty()) {
+                        // Check if this is the final required channel check (past grace period)
+                        // or if it's a preliminary check
+                        boolean isPastGracePeriod = System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD;
+                        
+                        if (isPastGracePeriod) {
+                            String missingChannelsStr = String.join(", ", missingChannelPatterns);
+                            detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
+                                "Client missing required channels for brand " + matchedBrandKey + ": " + missingChannelsStr);
+                            
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().info("[Debug] Missing required channels for " + player.getName() + 
+                                                      ": " + missingChannelsStr + " (FINAL CHECK - PAST GRACE PERIOD)");
+                            }
+                        } else if (config.isDebugMode()) {
+                            // Only log during grace period, don't flag yet
+                            plugin.getLogger().info("[Debug] Missing required channels for " + player.getName() + 
+                                                  ": " + String.join(", ", missingChannelPatterns) + 
+                                                  " (still in grace period, will check again later)");
+                        }
+                    }
+                }
+                
+                // Always alert if this brand should alert on join and this is a join check
+                if (isJoinCheck && brandConfig.shouldAlert() && 
+                    !violations.getOrDefault("BRAND_" + matchedBrandKey.toUpperCase(), false)) {
+                    
+                    violations.put("BRAND_" + matchedBrandKey.toUpperCase(), true);
+                    
+                    if (config.isDebugMode() && !brandConfig.shouldFlag()) {
+                        plugin.getLogger().info("[Debug] Sending brand alert for " + player.getName() + 
+                                              " using " + matchedBrandKey);
+                    }
+                    
+                    // Send alert on main thread if this is just an alert, not a violation
+                    if (!brandConfig.shouldFlag()) {
+                        final String finalBrand = brand;
+                        final String finalMatchedBrandKey = matchedBrandKey;
+                        final PlayerData finalData = data;  // Create a final reference to data
+                        
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            // Only send the alert if not already punished
+                            if (!finalData.isAlreadyPunished()) {
+                                sendBrandAlert(player, finalBrand, finalMatchedBrandKey);
+                            }
+                        });
+                    }
+                }
+            } else {
+                // No matching brand found - use default brand config
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] No matching brand config for " + player.getName() + 
+                                          ": " + brand);
+                }
+                
+                // Check if default config should flag unknown brands
+                if (config.getClientBrandConfig(null).shouldFlag()) {
+                    detectedViolations.put("UNKNOWN_BRAND", "Using unknown client brand: " + brand);
+                }
+                
+                // Vanilla check still takes precedence
+                if (config.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
+                    detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
+                }
+                
+                // Non-vanilla check if enabled
+                else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+                }
+            }
+        } else {
+            // Client brands system disabled - fall back to old checks
+            
+            // Vanilla client check - this takes precedence
+            if (config.isVanillaCheckEnabled() && claimsVanilla && hasChannels) {
+                detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
+            }
+            
+            // Non-vanilla with channels check
+            else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+            }
         }
         
         // Channel whitelist/blacklist check
@@ -279,11 +475,32 @@ public class DetectionManager {
         // Process detected violations on the main thread
         if (!detectedViolations.isEmpty()) {
             final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
+            final String finalBrand = brand;  // Make brand effectively final
             
             Bukkit.getScheduler().runTask(plugin, () -> {
-                processViolations(player, finalViolations, brand);
+                processViolations(player, finalViolations, finalBrand);
             });
         }
+    }
+    
+    /**
+     * Alias for checking player with checkRequiredChannels parameter
+     * @param player The player to check
+     * @param isJoinCheck Whether this is an initial join check
+     */
+    private void checkPlayer(Player player, boolean isJoinCheck) {
+        checkPlayer(player, isJoinCheck, true);
+    }
+    
+    /**
+     * Sends a client brand alert for a non-violating player
+     * @param player The player
+     * @param brand The client brand
+     * @param brandKey The configuration key for the brand
+     */
+    private void sendBrandAlert(Player player, String brand, String brandKey) {
+        // Use the centralized method to ensure no duplicates
+        plugin.sendBrandAlert(player, brand, brandKey);
     }
     
     /**
@@ -292,7 +509,7 @@ public class DetectionManager {
      * @param detectedViolations Map of violation types to reasons
      * @param brand The player's client brand
      */
-    private void processViolations(Player player, Map<String, String> detectedViolations, String brand) {
+    public void processViolations(Player player, Map<String, String> detectedViolations, String brand) {
         if (!player.isOnline()) return;
         
         UUID uuid = player.getUniqueId();
@@ -326,7 +543,59 @@ public class DetectionManager {
             violatedChannel = findBlockedChannel(data.getChannels());
         }
         
-        // Send a separate alert for each violation instead of a combined one
+        // Special handling for client brand violations
+        if (newViolations.containsKey("CLIENT_BRAND")) {
+            String reason = newViolations.get("CLIENT_BRAND");
+            // Extract the brand key from the reason format "Using flagged client brand: X (brandKey)"
+            String brandKey = null;
+            int startIndex = reason.lastIndexOf("(");
+            int endIndex = reason.lastIndexOf(")");
+            if (startIndex > 0 && endIndex > startIndex) {
+                brandKey = reason.substring(startIndex + 1, endIndex);
+            }
+            
+            if (brandKey != null) {
+                ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                
+                // Use the brand-specific alert and punishment settings
+                plugin.getAlertManager().sendBrandViolationAlert(
+                    player, reason, brand, violatedChannel, "CLIENT_BRAND", brandConfig);
+                
+                // Execute punishment if needed
+                if (brandConfig.shouldPunish()) {
+                    plugin.getAlertManager().executeBrandPunishment(
+                        player, reason, brand, "CLIENT_BRAND", violatedChannel, brandConfig);
+                    data.setAlreadyPunished(true);
+                }
+                
+                // Remove the client brand violation since we've handled it specially
+                newViolations.remove("CLIENT_BRAND");
+            }
+        }
+        
+        // Special handling for unknown brand violations
+        if (newViolations.containsKey("UNKNOWN_BRAND")) {
+            String reason = newViolations.get("UNKNOWN_BRAND");
+            
+            // Use the default brand config for alerts and punishments
+            ConfigManager.ClientBrandConfig defaultConfig = config.getClientBrandConfig(null);
+            
+            // Send alert
+            plugin.getAlertManager().sendBrandViolationAlert(
+                player, reason, brand, null, "UNKNOWN_BRAND", defaultConfig);
+            
+            // Execute punishment if needed
+            if (defaultConfig.shouldPunish()) {
+                plugin.getAlertManager().executeBrandPunishment(
+                    player, reason, brand, "UNKNOWN_BRAND", null, defaultConfig);
+                data.setAlreadyPunished(true);
+            }
+            
+            // Remove the unknown brand violation since we've handled it specially
+            newViolations.remove("UNKNOWN_BRAND");
+        }
+        
+        // Send a separate alert for each remaining violation
         for (Map.Entry<String, String> entry : newViolations.entrySet()) {
             // Only pass the channel parameter for BLOCKED_CHANNEL violations
             String channelParam = entry.getKey().equals("BLOCKED_CHANNEL") ? violatedChannel : null;
@@ -335,16 +604,19 @@ public class DetectionManager {
                 player, entry.getValue(), brand, channelParam, entry.getKey());
         }
         
-        // Execute punishment if needed - use the first violation for punishment
-        String primaryViolationType = newViolations.keySet().iterator().next();
-        String primaryReason = newViolations.get(primaryViolationType);
-        
-        boolean shouldPunish = shouldPunishViolation(primaryViolationType);
-        
-        if (shouldPunish) {
-            plugin.getAlertManager().executePunishment(
-                player, primaryReason, brand, primaryViolationType, violatedChannel);
-            data.setAlreadyPunished(true);
+        // If we still have violations to process, handle punishment
+        if (!newViolations.isEmpty() && !data.isAlreadyPunished()) {
+            // Execute punishment if needed - use the first violation for punishment
+            String primaryViolationType = newViolations.keySet().iterator().next();
+            String primaryReason = newViolations.get(primaryViolationType);
+            
+            boolean shouldPunish = shouldPunishViolation(primaryViolationType, brand);
+            
+            if (shouldPunish) {
+                plugin.getAlertManager().executePunishment(
+                    player, primaryReason, brand, primaryViolationType, violatedChannel);
+                data.setAlreadyPunished(true);
+            }
         }
     }
     
@@ -377,8 +649,8 @@ public class DetectionManager {
         plugin.getAlertManager().sendViolationAlert(
             player, reason, "unknown", null, violationType);
         
-        // Execute punishment if needed
-        boolean shouldPunish = shouldPunishViolation(violationType);
+        // Execute punishment if needed - using "unknown" as brand since we don't know it
+        boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
         
         if (shouldPunish) {
             plugin.getAlertManager().executePunishment(
@@ -429,9 +701,10 @@ public class DetectionManager {
     /**
      * Determines if a violation should result in punishment
      * @param violationType The type of violation
+     * @param brand The player's client brand
      * @return True if this violation should be punished, false otherwise
      */
-    private boolean shouldPunishViolation(String violationType) {
+    private boolean shouldPunishViolation(String violationType, String brand) {
         switch (violationType) {
             case "VANILLA_WITH_CHANNELS":
                 return config.shouldPunishVanillaCheck();
@@ -440,8 +713,22 @@ public class DetectionManager {
             case "BLOCKED_CHANNEL":
             case "CHANNEL_WHITELIST":
                 return config.shouldPunishBlockedChannels();
-            case "BLOCKED_BRAND":
-                return config.shouldPunishBlockedBrands();
+            case "CLIENT_BRAND":
+                return false; // Handled separately for each brand
+            case "UNKNOWN_BRAND":
+                return config.getClientBrandConfig(null).shouldPunish();
+            case "MISSING_REQUIRED_CHANNELS":
+                // Check the brand's required-channels-punish setting
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Checking if should punish missing channels for brand: " + 
+                                             brandKey + ", punishment setting: " + 
+                                             config.getClientBrandConfig(brandKey).shouldPunishRequiredChannels());
+                    }
+                    return config.getClientBrandConfig(brandKey).shouldPunishRequiredChannels();
+                }
+                return false; // Default to not punishing if brand not found or setting not specified
             case "GEYSER_SPOOF":
                 return config.shouldPunishGeyserSpoof();
             case "NO_BRAND":
@@ -452,10 +739,10 @@ public class DetectionManager {
     }
     
     /**
-     * Checks if a player is spoofing a Geyser client
+     * Checks if a player is spoofing Geyser client
      * @param player The player to check
      * @param brand The player's client brand
-     * @return True if the player is spoofing a Geyser client, false otherwise
+     * @return True if the player is spoofing Geyser, false otherwise
      */
     private boolean isSpoofingGeyser(Player player, String brand) {
         if (brand == null) return false;
@@ -465,16 +752,6 @@ public class DetectionManager {
         
         // If player claims to be using Geyser but isn't detected as a Bedrock player
         return claimsGeyser && !plugin.isBedrockPlayer(player);
-    }
-    
-    /**
-     * Checks if a brand is blocked based on the configuration
-     * @param brand The brand to check
-     * @return True if the brand is blocked, false otherwise
-     */
-    private boolean isBrandBlocked(String brand) {
-        if (brand == null) return false;
-        return config.isBrandBlocked(brand);
     }
     
     /**
@@ -525,7 +802,7 @@ public class DetectionManager {
                             break;
                         }
                     } catch (Exception e) {
-                        // If regex is invalid, just do direct match as fallback
+                        // If regex fails, try direct match as fallback
                         if (playerChannel.equals(whitelistedChannel)) {
                             playerHasChannel = true;
                             break;
@@ -576,5 +853,6 @@ public class DetectionManager {
         plugin.getPlayerBrands().remove(playerUUID);
         playerViolations.remove(playerUUID);
         recentlyCheckedPlayers.remove(playerUUID);
+        requiredChannelCheckedPlayers.remove(playerUUID);
     }
 }

@@ -2,6 +2,7 @@ package com.gigazelensky.antispoof.managers;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
@@ -65,7 +66,7 @@ public class AlertManager {
      * Sends a message to all players with alert permission
      * @param message The message to send
      */
-    private void sendAlertToRecipients(String message) {
+    public void sendAlertToRecipients(String message) {
         String coloredMessage = ChatColor.translateAlternateColorCodes('&', message);
         
         for (UUID uuid : playersWithAlertPermission) {
@@ -98,15 +99,30 @@ public class AlertManager {
     }
     
     /**
-     * Sends a brand join alert for a player
-     * @param player The player who joined
-     * @param brand The player's client brand
+     * Sends a custom alert message
+     * @param player The player related to the alert
+     * @param alertMessage The alert message
+     * @param consoleMessage The console message
+     * @param alertType The type of alert for cooldown
      */
-    public void sendBrandJoinAlert(Player player, String brand) {
-        if (!config.isJoinBrandAlertsEnabled() || !canSendAlert(player.getUniqueId(), "JOIN_BRAND")) {
+    public void sendCustomAlert(Player player, String alertMessage, String consoleMessage, String alertType) {
+        if (!canSendAlert(player.getUniqueId(), alertType)) {
             return;
         }
         
+        // Log to console
+        plugin.getLogger().info(consoleMessage);
+        
+        // Send to players with permission
+        sendAlertToRecipients(alertMessage);
+    }
+    
+    /**
+     * Sends a simple brand alert for a player (used when no specific brand config exists)
+     * @param player The player
+     * @param brand The client brand
+     */
+    public void sendSimpleBrandAlert(Player player, String brand) {
         // Format the player alert message with placeholders
         String playerAlert = config.getBlockedBrandsAlertMessage()
                 .replace("%player%", player.getName())
@@ -125,8 +141,7 @@ public class AlertManager {
         
         // Send to Discord if brand join alerts are enabled
         if (config.isDiscordWebhookEnabled() && 
-            config.isBlockedBrandsDiscordAlertEnabled() && 
-            config.isJoinBrandAlertsEnabled()) {
+            config.isBlockedBrandsDiscordAlertEnabled()) {
             
             plugin.getDiscordWebhookHandler().sendAlert(
                 player, 
@@ -136,6 +151,20 @@ public class AlertManager {
                 null
             );
         }
+    }
+    
+    /**
+     * Sends a brand join alert for a player
+     * @param player The player who joined
+     * @param brand The player's client brand
+     */
+    public void sendBrandJoinAlert(Player player, String brand) {
+        if (!config.isJoinBrandAlertsEnabled() || !canSendAlert(player.getUniqueId(), "JOIN_BRAND")) {
+            return;
+        }
+        
+        // Use the centralized method to ensure no duplicates
+        plugin.sendBrandAlert(player, brand, null);
     }
     
     /**
@@ -213,6 +242,53 @@ public class AlertManager {
     }
     
     /**
+     * Sends a brand violation alert
+     * @param player The player with the violation
+     * @param reason The violation reason
+     * @param brand The player's client brand
+     * @param violatedChannel The violated channel (if applicable)
+     * @param violationType The type of violation
+     * @param brandConfig The brand configuration
+     */
+    public void sendBrandViolationAlert(Player player, String reason, String brand, 
+                                      String violatedChannel, String violationType,
+                                      ConfigManager.ClientBrandConfig brandConfig) {
+        if (!canSendAlert(player.getUniqueId(), violationType)) {
+            return;
+        }
+        
+        // Get alert message from brand config
+        String alertMessage = brandConfig.getAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        // Get console message from brand config
+        String consoleMessage = brandConfig.getConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        if (violatedChannel != null) {
+            alertMessage = alertMessage.replace("%channel%", violatedChannel);
+            consoleMessage = consoleMessage.replace("%channel%", violatedChannel);
+        }
+        
+        // Log to console
+        plugin.getLogger().info(consoleMessage);
+        
+        // Send to players with permission
+        sendAlertToRecipients(alertMessage);
+        
+        // Send to Discord if enabled
+        if (config.isDiscordWebhookEnabled() && brandConfig.shouldDiscordAlert()) {
+            List<String> singleViolation = new ArrayList<>();
+            singleViolation.add(reason);
+            plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
+        }
+    }
+    
+    /**
      * Sends a violation alert for a player
      * @param player The player with the violation
      * @param reason The violation reason
@@ -257,12 +333,6 @@ public class AlertManager {
                 sendDiscordAlert = config.isBlockedChannelsDiscordAlertEnabled();
                 break;
                 
-            case "BLOCKED_BRAND":
-                alertTemplate = config.getBlockedBrandsAlertMessage();
-                consoleAlertTemplate = config.getBlockedBrandsConsoleAlertMessage();
-                sendDiscordAlert = config.isBlockedBrandsDiscordAlertEnabled();
-                break;
-                
             case "GEYSER_SPOOF":
                 alertTemplate = config.getGeyserSpoofAlertMessage();
                 consoleAlertTemplate = config.getGeyserSpoofConsoleAlertMessage();
@@ -273,6 +343,18 @@ public class AlertManager {
                 alertTemplate = config.getNoBrandAlertMessage();
                 consoleAlertTemplate = config.getNoBrandConsoleAlertMessage();
                 sendDiscordAlert = config.isNoBrandDiscordAlertEnabled();
+                break;
+                
+            case "MISSING_REQUIRED_CHANNELS":
+                alertTemplate = config.getAlertMessage(); // Use general alert for now
+                consoleAlertTemplate = config.getConsoleAlertMessage();
+                sendDiscordAlert = true;
+                break;
+                
+            case "UNKNOWN_BRAND":
+                alertTemplate = config.getClientBrandConfig(null).getAlertMessage();
+                consoleAlertTemplate = config.getClientBrandConfig(null).getConsoleAlertMessage();
+                sendDiscordAlert = config.getClientBrandConfig(null).shouldDiscordAlert();
                 break;
                 
             default:
@@ -314,6 +396,44 @@ public class AlertManager {
     }
     
     /**
+     * Executes brand-specific punishment for a player
+     * @param player The player to punish
+     * @param reason The reason for punishment
+     * @param brand The player's client brand
+     * @param violationType The type of violation
+     * @param violatedChannel The violated channel (if applicable)
+     * @param brandConfig The brand configuration
+     */
+    public void executeBrandPunishment(Player player, String reason, String brand, 
+                                     String violationType, String violatedChannel,
+                                     ConfigManager.ClientBrandConfig brandConfig) {
+        // Get punishments from brand config
+        List<String> punishments = brandConfig.getPunishments();
+        
+        // If no punishments defined, don't do anything
+        if (punishments.isEmpty()) {
+            return;
+        }
+        
+        // Execute the punishments
+        for (String command : punishments) {
+            String formatted = command.replace("%player%", player.getName())
+                                     .replace("%reason%", reason)
+                                     .replace("%brand%", brand != null ? brand : "unknown");
+            
+            if (violatedChannel != null) {
+                formatted = formatted.replace("%channel%", violatedChannel);
+            }
+            
+            // Execute command on the main thread
+            final String finalCommand = formatted;
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), finalCommand);
+            });
+        }
+    }
+    
+    /**
      * Executes punishment for a player
      * @param player The player to punish
      * @param reason The reason for punishment
@@ -340,16 +460,53 @@ public class AlertManager {
                 punishments = config.getBlockedChannelsPunishments();
                 break;
                 
-            case "BLOCKED_BRAND":
-                punishments = config.getBlockedBrandsPunishments();
-                break;
-                
             case "GEYSER_SPOOF":
                 punishments = config.getGeyserSpoofPunishments();
                 break;
                 
             case "NO_BRAND":
                 punishments = config.getNoBrandPunishments();
+                break;
+                
+            case "MISSING_REQUIRED_CHANNELS":
+                // Check for brand-specific required-channels punishments first
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                    
+                    // Get the required-channels-punishments first
+                    List<String> requiredChannelsPunishments = brandConfig.getRequiredChannelsPunishments();
+                    if (!requiredChannelsPunishments.isEmpty()) {
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Using brand's required-channels-punishments for " + player.getName());
+                        }
+                        punishments = requiredChannelsPunishments;
+                        break;
+                    }
+                    
+                    // Fall back to regular brand punishments if required-channel-punishments is empty
+                    List<String> brandPunishments = brandConfig.getPunishments();
+                    if (!brandPunishments.isEmpty()) {
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Falling back to brand's regular punishments for " + player.getName());
+                        }
+                        punishments = brandPunishments;
+                        break;
+                    }
+                }
+                // If no brand-specific punishments found, fall back to global
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Falling back to global punishments for " + player.getName());
+                }
+                punishments = config.getPunishments();
+                break;
+                
+            case "UNKNOWN_BRAND":
+                // Use default brand config punishments
+                punishments = config.getClientBrandConfig(null).getPunishments();
+                if (punishments.isEmpty()) {
+                    punishments = config.getPunishments();
+                }
                 break;
                 
             default:

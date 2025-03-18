@@ -1,5 +1,6 @@
 package com.gigazelensky.antispoof.managers;
 
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -16,7 +17,48 @@ public class ConfigManager {
     
     // Cache for compiled regex patterns
     private final Map<String, Pattern> channelPatterns = new HashMap<>();
-    private final Map<String, Pattern> brandPatterns = new HashMap<>();
+    
+    // Client brand configurations
+    private boolean clientBrandsEnabled;
+    private final Map<String, ClientBrandConfig> clientBrands = new HashMap<>();
+    private ClientBrandConfig defaultBrandConfig;
+
+    // Class to hold client brand configuration
+    public static class ClientBrandConfig {
+        private boolean enabled;
+        private List<Pattern> patterns = new ArrayList<>();
+        private List<String> patternStrings = new ArrayList<>();
+        private boolean flag;
+        private boolean alert;
+        private boolean discordAlert;
+        private String alertMessage;
+        private String consoleAlertMessage;
+        private boolean punish;
+        private List<String> punishments = new ArrayList<>();
+        private List<Pattern> requiredChannels = new ArrayList<>();
+        private List<String> requiredChannelStrings = new ArrayList<>();
+        private boolean strictCheck;
+        // Added fields for required channels punishment
+        private boolean requiredChannelsPunish;
+        private List<String> requiredChannelsPunishments = new ArrayList<>();
+        
+        public boolean isEnabled() { return enabled; }
+        public List<Pattern> getPatterns() { return patterns; }
+        public List<String> getPatternStrings() { return patternStrings; }
+        public boolean shouldFlag() { return flag; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldDiscordAlert() { return discordAlert; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+        public boolean shouldPunish() { return punish; }
+        public List<String> getPunishments() { return punishments; }
+        public List<Pattern> getRequiredChannels() { return requiredChannels; }
+        public List<String> getRequiredChannelStrings() { return requiredChannelStrings; }
+        public boolean hasStrictCheck() { return strictCheck; }
+        // Added getters for required channels punishment
+        public boolean shouldPunishRequiredChannels() { return requiredChannelsPunish; }
+        public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
+    }
 
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -30,7 +72,6 @@ public class ConfigManager {
         
         // Clear and recompile regex patterns
         channelPatterns.clear();
-        brandPatterns.clear();
         
         // Compile channel patterns
         List<String> channelRegexes = getBlockedChannels();
@@ -42,15 +83,113 @@ public class ConfigManager {
             }
         }
         
-        // Compile brand patterns
-        List<String> brandRegexes = getBlockedBrands();
-        for (String regex : brandRegexes) {
-            try {
-                brandPatterns.put(regex, Pattern.compile(regex));
-            } catch (PatternSyntaxException e) {
-                plugin.getLogger().warning("Invalid brand regex pattern: " + regex + " - " + e.getMessage());
+        // Load client brand configurations
+        loadClientBrandConfigs();
+    }
+    
+    /**
+     * Load all client brand configurations from config
+     */
+    private void loadClientBrandConfigs() {
+        // Clear existing configurations
+        clientBrands.clear();
+        
+        // Check if client brands system is enabled
+        clientBrandsEnabled = config.getBoolean("client-brands.enabled", true);
+        
+        // Load default brand config
+        ConfigurationSection defaultSection = config.getConfigurationSection("client-brands.default");
+        defaultBrandConfig = new ClientBrandConfig();
+        
+        if (defaultSection != null) {
+            defaultBrandConfig.enabled = true;
+            defaultBrandConfig.flag = defaultSection.getBoolean("flag", true);
+            defaultBrandConfig.alert = defaultSection.getBoolean("alert", true);
+            defaultBrandConfig.discordAlert = defaultSection.getBoolean("discord-alert", false);
+            defaultBrandConfig.alertMessage = defaultSection.getString("alert-message", 
+                "&8[&cAntiSpoof&8] &7%player% using unknown client: &e%brand%");
+            defaultBrandConfig.consoleAlertMessage = defaultSection.getString("console-alert-message", 
+                "%player% using unknown client: %brand%");
+            defaultBrandConfig.punish = defaultSection.getBoolean("punish", false);
+            defaultBrandConfig.punishments = defaultSection.getStringList("punishments");
+        } else {
+            // Set up default values if section is missing
+            defaultBrandConfig.enabled = true;
+            defaultBrandConfig.flag = true;
+            defaultBrandConfig.alert = true;
+            defaultBrandConfig.discordAlert = false;
+            defaultBrandConfig.alertMessage = "&8[&cAntiSpoof&8] &7%player% using unknown client: &e%brand%";
+            defaultBrandConfig.consoleAlertMessage = "%player% using unknown client: %brand%";
+            defaultBrandConfig.punish = false;
+            defaultBrandConfig.punishments = new ArrayList<>();
+        }
+        
+        // Load individual brand configurations
+        ConfigurationSection brandsSection = config.getConfigurationSection("client-brands.brands");
+        if (brandsSection != null) {
+            for (String brandKey : brandsSection.getKeys(false)) {
+                ConfigurationSection brandSection = brandsSection.getConfigurationSection(brandKey);
+                if (brandSection != null) {
+                    ClientBrandConfig brandConfig = loadBrandConfig(brandSection);
+                    clientBrands.put(brandKey, brandConfig);
+                    
+                    if (isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Loaded client brand config: " + brandKey + 
+                                              " with " + brandConfig.patterns.size() + " patterns");
+                    }
+                }
             }
         }
+    }
+    
+    /**
+     * Load a specific brand configuration from a config section
+     */
+    private ClientBrandConfig loadBrandConfig(ConfigurationSection section) {
+        ClientBrandConfig brandConfig = new ClientBrandConfig();
+        brandConfig.enabled = section.getBoolean("enabled", true);
+        brandConfig.flag = section.getBoolean("flag", false);
+        brandConfig.alert = section.getBoolean("alert", true);
+        brandConfig.discordAlert = section.getBoolean("discord-alert", false);
+        brandConfig.alertMessage = section.getString("alert-message", defaultBrandConfig.alertMessage);
+        brandConfig.consoleAlertMessage = section.getString("console-alert-message", defaultBrandConfig.consoleAlertMessage);
+        brandConfig.punish = section.getBoolean("punish", false);
+        brandConfig.punishments = section.getStringList("punishments");
+        brandConfig.strictCheck = section.getBoolean("strict-check", false);
+        
+        // Added loading for required channels punishment fields
+        brandConfig.requiredChannelsPunish = section.getBoolean("required-channels-punish", false);
+        brandConfig.requiredChannelsPunishments = section.getStringList("required-channels-punishments");
+        
+        // Load and compile pattern strings
+        List<String> patterns = section.getStringList("values");
+        brandConfig.patternStrings.addAll(patterns);
+        
+        for (String pattern : patterns) {
+            try {
+                brandConfig.patterns.add(Pattern.compile(pattern));
+            } catch (PatternSyntaxException e) {
+                plugin.getLogger().warning("Invalid brand pattern: " + pattern + " - " + e.getMessage());
+                // Add a simple exact match pattern as fallback
+                brandConfig.patterns.add(Pattern.compile("^" + Pattern.quote(pattern) + "$"));
+            }
+        }
+        
+        // Load and compile required channel patterns
+        List<String> requiredChannels = section.getStringList("required-channels");
+        brandConfig.requiredChannelStrings.addAll(requiredChannels);
+        
+        for (String channel : requiredChannels) {
+            try {
+                brandConfig.requiredChannels.add(Pattern.compile(channel));
+            } catch (PatternSyntaxException e) {
+                plugin.getLogger().warning("Invalid required channel pattern: " + channel + " - " + e.getMessage());
+                // Add a simple exact match pattern as fallback
+                brandConfig.requiredChannels.add(Pattern.compile("^" + Pattern.quote(channel) + "$"));
+            }
+        }
+        
+        return brandConfig;
     }
 
     public int getCheckDelay() {
@@ -59,6 +198,203 @@ public class ConfigManager {
 
     public boolean isDebugMode() {
         return config.getBoolean("debug", false);
+    }
+    
+    /**
+     * @return Whether the client brands system is enabled
+     */
+    public boolean isClientBrandsEnabled() {
+        return clientBrandsEnabled;
+    }
+    
+    /**
+     * Check if a brand matches any configured client brands
+     * @param brand The brand to check
+     * @return The configured brand key or null if no match
+     */
+    public String getMatchingClientBrand(String brand) {
+        if (brand == null || !clientBrandsEnabled) return null;
+        
+        for (Map.Entry<String, ClientBrandConfig> entry : clientBrands.entrySet()) {
+            ClientBrandConfig brandConfig = entry.getValue();
+            
+            if (!brandConfig.isEnabled()) continue;
+            
+            for (Pattern pattern : brandConfig.getPatterns()) {
+                try {
+                    if (pattern.matcher(brand).matches()) {
+                        return entry.getKey();
+                    }
+                } catch (Exception e) {
+                    // If regex fails, try direct comparison
+                    if (brand.equals(pattern.pattern())) {
+                        return entry.getKey();
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Get the configuration for a specific client brand
+     * @param brandKey The brand key to get configuration for
+     * @return The brand configuration or default if not found
+     */
+    public ClientBrandConfig getClientBrandConfig(String brandKey) {
+        return clientBrands.getOrDefault(brandKey, defaultBrandConfig);
+    }
+    
+    /**
+     * Check if a channel matches any of the required channels for a brand
+     * @param brandKey The brand key to check
+     * @param channel The channel to check
+     * @return True if the channel matches a required channel pattern
+     */
+    public boolean matchesRequiredChannel(String brandKey, String channel) {
+        ClientBrandConfig brandConfig = getClientBrandConfig(brandKey);
+        
+        if (brandConfig.getRequiredChannels().isEmpty()) {
+            return true; // No required channels means any channel is fine
+        }
+        
+        for (Pattern pattern : brandConfig.getRequiredChannels()) {
+            try {
+                if (pattern.matcher(channel).matches()) {
+                    return true;
+                }
+            } catch (Exception e) {
+                // If regex fails, try direct comparison
+                if (channel.equals(pattern.pattern())) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if a brand has strict checking enabled (must have no channels)
+     * @param brandKey The brand key to check
+     * @return True if strict checking is enabled for this brand
+     */
+    public boolean hasStrictChecking(String brandKey) {
+        return getClientBrandConfig(brandKey).hasStrictCheck();
+    }
+    
+    /**
+     * @return Whether brand detection is enabled (maps to client-brands.enabled)
+     */
+    public boolean isBlockedBrandsEnabled() {
+        return isClientBrandsEnabled();
+    }
+    
+    /**
+     * Checks if a brand is blocked under the new system
+     * @param brand The brand to check
+     * @return True if the brand is blocked, false otherwise
+     */
+    public boolean isBrandBlocked(String brand) {
+        if (!isClientBrandsEnabled()) return false;
+        
+        // Match to a client brand
+        String matchedBrandKey = getMatchingClientBrand(brand);
+        if (matchedBrandKey != null) {
+            // Get the client brand config
+            ClientBrandConfig brandConfig = getClientBrandConfig(matchedBrandKey);
+            // Return whether this brand should be flagged
+            return brandConfig.shouldFlag();
+        }
+        
+        // If no brand pattern matched, use the default config for unknown brands
+        return defaultBrandConfig.shouldFlag();
+    }
+    
+    /**
+     * @return Whether non-whitelisted brands should be flagged
+     */
+    public boolean shouldCountNonWhitelistedBrandsAsFlag() {
+        // In the new system, this is controlled per brand by the 'flag' parameter
+        // Default to true for backward compatibility
+        return true;
+    }
+    
+    /**
+     * @return Whether brand whitelist mode is enabled (backward compatibility)
+     */
+    public boolean isBrandWhitelistEnabled() {
+        // In the new system, we don't have a global whitelist mode
+        // But if any brand with flag: false exists, we can consider it a whitelist
+        for (ClientBrandConfig brandConfig : clientBrands.values()) {
+            if (brandConfig.isEnabled() && !brandConfig.shouldFlag()) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Get all brand patterns for backward compatibility
+     * @return List of brand patterns
+     */
+    public List<String> getBlockedBrands() {
+        List<String> result = new ArrayList<>();
+        
+        // Collect all brand patterns
+        for (ClientBrandConfig brandConfig : clientBrands.values()) {
+            if (brandConfig.isEnabled()) {
+                result.addAll(brandConfig.getPatternStrings());
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Get the alert message for blocked brands (backward compatibility)
+     * @return The alert message
+     */
+    public String getBlockedBrandsAlertMessage() {
+        // Use the default client brand alert message
+        return defaultBrandConfig.getAlertMessage();
+    }
+    
+    /**
+     * Get the console alert message for blocked brands (backward compatibility)
+     * @return The console alert message
+     */
+    public String getBlockedBrandsConsoleAlertMessage() {
+        // Use the default client brand console alert message
+        return defaultBrandConfig.getConsoleAlertMessage();
+    }
+    
+    /**
+     * Check if Discord alerts are enabled for blocked brands (backward compatibility)
+     * @return True if Discord alerts are enabled, false otherwise
+     */
+    public boolean isBlockedBrandsDiscordAlertEnabled() {
+        // Use the default client brand discord alert setting
+        return defaultBrandConfig.shouldDiscordAlert();
+    }
+    
+    /**
+     * Get punishment commands for blocked brands (backward compatibility)
+     * @return List of punishment commands
+     */
+    public List<String> getBlockedBrandsPunishments() {
+        // Use the default client brand punishments
+        return defaultBrandConfig.getPunishments();
+    }
+    
+    /**
+     * Check if punishment is enabled for blocked brands (backward compatibility)
+     * @return True if punishment is enabled, false otherwise
+     */
+    public boolean shouldPunishBlockedBrands() {
+        // Use the default client brand punishment setting
+        return defaultBrandConfig.shouldPunish();
     }
     
     // Global alert messages (legacy)
@@ -251,77 +587,6 @@ public class ConfigManager {
         }
         
         return false; // No patterns matched
-    }
-    
-    // Blocked Brands Check
-    public boolean isBlockedBrandsEnabled() {
-        return config.getBoolean("blocked-brands.enabled", false);
-    }
-    
-    public boolean isBlockedBrandsDiscordAlertEnabled() {
-        return config.getBoolean("blocked-brands.discord-alert", false);
-    }
-    
-    public boolean isBrandWhitelistEnabled() {
-        return config.getBoolean("blocked-brands.whitelist-mode", false);
-    }
-    
-    public boolean shouldCountNonWhitelistedBrandsAsFlag() {
-        return config.getBoolean("blocked-brands.count-as-flag", true);
-    }
-    
-    public List<String> getBlockedBrands() {
-        return config.getStringList("blocked-brands.values");
-    }
-    
-    public String getBlockedBrandsAlertMessage() {
-        return config.getString("blocked-brands.alert-message", getAlertMessage());
-    }
-    
-    public String getBlockedBrandsConsoleAlertMessage() {
-        return config.getString("blocked-brands.console-alert-message", getConsoleAlertMessage());
-    }
-    
-    public boolean shouldPunishBlockedBrands() {
-        return config.getBoolean("blocked-brands.punish", true);
-    }
-    
-    public List<String> getBlockedBrandsPunishments() {
-        return config.getStringList("blocked-brands.punishments");
-    }
-    
-    // Brand regex matching
-    public boolean matchesBrandPattern(String brand) {
-        // Check if brand matches any pattern in the list
-        for (Map.Entry<String, Pattern> entry : brandPatterns.entrySet()) {
-            try {
-                if (entry.getValue().matcher(brand).matches()) {
-                    return true; // Brand matches a pattern
-                }
-            } catch (Exception e) {
-                // If there's any error with the pattern, try direct comparison as fallback
-                if (brand.equals(entry.getKey())) {
-                    return true;
-                }
-            }
-        }
-        return false; // No patterns matched
-    }
-    
-    // Fixed method: Checks if a brand should be blocked based on whitelist/blacklist mode
-    public boolean isBrandBlocked(String brand) {
-        if (brand == null) return false;
-        
-        boolean whitelistMode = isBrandWhitelistEnabled();
-        boolean matchesPattern = matchesBrandPattern(brand);
-        
-        if (whitelistMode) {
-            // In whitelist mode: if matches ANY pattern, it's allowed
-            return !matchesPattern;
-        } else {
-            // In blacklist mode: if matches ANY pattern, it's blocked
-            return matchesPattern;
-        }
     }
     
     // Bedrock Handling

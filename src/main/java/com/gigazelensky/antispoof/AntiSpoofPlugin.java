@@ -17,7 +17,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.geysermc.floodgate.api.FloodgateApi;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -32,6 +35,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
+    // Track which players have already had a brand alert to prevent duplicates
+    private final Set<UUID> brandAlertedPlayers = ConcurrentHashMap.newKeySet();
     private FloodgateApi floodgateApi = null;
     
     @Override
@@ -125,16 +130,23 @@ public class AntiSpoofPlugin extends JavaPlugin {
             (channel, player, message) -> {
                 // Brand message format: [length][brand]
                 String brand = new String(message).substring(1);
+                UUID playerUuid = player.getUniqueId();
                 
-                // Store brand by UUID to avoid name conflicts
-                playerBrands.put(player.getUniqueId(), brand);
+                // Check if this is a different brand from what we had before
+                String previousBrand = playerBrands.get(playerUuid);
+                boolean isNewBrand = previousBrand == null || !previousBrand.equals(brand);
                 
-                if (configManager.isDebugMode()) {
-                    getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
+                if (isNewBrand) {
+                    // Store brand by UUID to avoid name conflicts
+                    playerBrands.put(playerUuid, brand);
+                    
+                    if (configManager.isDebugMode()) {
+                        getLogger().info("[Debug] Received brand for " + player.getName() + ": " + brand);
+                    }
+                    
+                    // Trigger a check for this player if brand is now known
+                    detectionManager.checkPlayerAsync(player, false);
                 }
-                
-                // Trigger a check for this player if brand is now known
-                detectionManager.checkPlayerAsync(player, false);
             });
     }
 
@@ -167,6 +179,90 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public Map<UUID, String> getPlayerBrands() {
         return playerBrands;
+    }
+    
+    /**
+     * Checks if a player has already been alerted for their brand
+     * @param player The player to check
+     * @return True if a brand alert has already been sent for this player
+     */
+    public boolean hasPlayerBeenBrandAlerted(Player player) {
+        return brandAlertedPlayers.contains(player.getUniqueId());
+    }
+    
+    /**
+     * Marks that a player has been alerted for their brand
+     * @param player The player to mark
+     */
+    public void markPlayerBrandAlerted(Player player) {
+        brandAlertedPlayers.add(player.getUniqueId());
+    }
+    
+    /**
+     * Centralized method to handle sending brand alerts.
+     * This ensures we don't get duplicate messages.
+     * 
+     * @param player The player
+     * @param brand The client brand
+     * @param brandKey The configuration key for the brand (can be null for unknown brands)
+     * @return true if the alert was sent, false if it was suppressed (already sent)
+     */
+    public boolean sendBrandAlert(Player player, String brand, String brandKey) {
+        UUID uuid = player.getUniqueId();
+        
+        // Skip if this player has already had a brand alert
+        if (hasPlayerBeenBrandAlerted(player)) {
+            if (configManager.isDebugMode()) {
+                getLogger().info("[Debug] Suppressing duplicate brand alert for " + player.getName());
+            }
+            return false;
+        }
+        
+        // Mark the player as having received a brand alert
+        markPlayerBrandAlerted(player);
+        
+        // If the brand key is null, use the join alert method
+        if (brandKey == null) {
+            alertManager.sendSimpleBrandAlert(player, brand);
+            return true;
+        }
+        
+        // Otherwise use the config-based alert
+        ConfigManager.ClientBrandConfig brandConfig = configManager.getClientBrandConfig(brandKey);
+        
+        // Skip if alerts are disabled for this brand
+        if (!brandConfig.shouldAlert()) {
+            return false;
+        }
+        
+        // Format the alert messages
+        String alertMessage = brandConfig.getAlertMessage()
+            .replace("%player%", player.getName())
+            .replace("%brand%", brand);
+        
+        String consoleMessage = brandConfig.getConsoleAlertMessage()
+            .replace("%player%", player.getName())
+            .replace("%brand%", brand);
+        
+        // Send the alert - to console and to players with permission
+        getLogger().info(consoleMessage);
+        alertManager.sendAlertToRecipients(alertMessage);
+        
+        // Send to Discord if enabled for this brand
+        if (configManager.isDiscordWebhookEnabled() && brandConfig.shouldDiscordAlert()) {
+            List<String> brandInfo = new ArrayList<>();
+            brandInfo.add("Client brand: " + brand);
+            
+            discordWebhookHandler.sendAlert(
+                player,
+                "Using client: " + brandKey,
+                brand,
+                null,
+                brandInfo
+            );
+        }
+        
+        return true;
     }
     
     public boolean isBedrockPlayer(Player player) {
@@ -322,6 +418,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getDiscordWebhookHandler().handlePlayerQuit(uuid);
         playerBrands.remove(uuid);
         playerDataMap.remove(uuid);
+        brandAlertedPlayers.remove(uuid);
         
         if (configManager.isDebugMode()) {
             getLogger().info("Cleaned up all data for player with UUID: " + uuid);
@@ -335,6 +432,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         }
         playerBrands.clear();
         playerDataMap.clear();
+        brandAlertedPlayers.clear();
         getLogger().info("AntiSpoof disabled!");
     }
 }

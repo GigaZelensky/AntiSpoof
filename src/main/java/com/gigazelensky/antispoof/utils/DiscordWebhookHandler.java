@@ -4,6 +4,7 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.awt.Color;
@@ -380,6 +381,110 @@ public class DiscordWebhookHandler {
     }
     
     /**
+     * Determines the appropriate console alert message based on the violation type
+     */
+    private String determineConsoleAlert(Player player, String reason, String brand, String channel, List<String> violations) {
+        // For multiple violations, use the multiple flags console message
+        if (violations != null && violations.size() > 1) {
+            String reasonsList = String.join(", ", violations);
+            return config.getConsoleMultipleFlagsMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reasons%", reasonsList);
+        }
+        
+        // For specific violation types, determine the appropriate message
+        if (reason.contains("Vanilla client with plugin channels")) {
+            return config.getVanillaCheckConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        } 
+        else if (reason.contains("Non-vanilla client with channels")) {
+            return config.getNonVanillaCheckConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("Blocked channel:") || reason.contains("Client channels don't match whitelist")) {
+            String alert = config.getBlockedChannelsConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+            
+            if (channel != null) {
+                alert = alert.replace("%channel%", channel);
+            }
+            return alert;
+        }
+        else if (reason.contains("Blocked client brand:") || reason.contains("Client brand not in whitelist:")) {
+            // Use client-brands if enabled
+            String message = "%player% using client brand: %brand%";
+            if (config.isClientBrandsEnabled()) {
+                // Try to get a branded message first
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                    message = brandConfig.getConsoleAlertMessage();
+                } else {
+                    // Fall back to default brand config
+                    message = config.getBlockedBrandsConsoleAlertMessage();
+                }
+            } else {
+                message = config.getBlockedBrandsConsoleAlertMessage();
+            }
+            return message.replace("%player%", player.getName())
+                          .replace("%brand%", brand != null ? brand : "unknown");
+        }
+        else if (reason.contains("Spoofing Geyser client")) {
+            return config.getGeyserSpoofConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%brand%", brand != null ? brand : "unknown")
+                    .replace("%reason%", reason);
+        }
+        else if (reason.contains("joined using client brand:")) {
+            // For client brand join alerts, use client-brands if available
+            String message = "%player% using client brand: %brand%";
+            if (config.isClientBrandsEnabled()) {
+                // Try to get a branded message first
+                String brandKey = config.getMatchingClientBrand(brand);
+                if (brandKey != null) {
+                    ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
+                    message = brandConfig.getConsoleAlertMessage();
+                } else {
+                    // Fall back to default brand config
+                    message = config.getBlockedBrandsConsoleAlertMessage();
+                }
+            } else {
+                message = config.getBlockedBrandsConsoleAlertMessage();
+            }
+            return message.replace("%player%", player.getName())
+                          .replace("%brand%", brand != null ? brand : "unknown");
+        }
+        else if (reason.contains("Modified channel:")) {
+            return config.getModifiedChannelsConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%channel%", channel != null ? channel : "unknown");
+        }
+        else if (reason.contains("No client brand detected")) {
+            return config.getNoBrandConsoleAlertMessage()
+                    .replace("%player%", player.getName())
+                    .replace("%reason%", reason);
+        }
+        
+        // Default to the general console alert if no specific type is found
+        String alert = config.getConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%brand%", brand != null ? brand : "unknown")
+                .replace("%reason%", reason);
+        
+        if (channel != null) {
+            alert = alert.replace("%channel%", channel);
+        }
+        return alert;
+    }
+    
+    /**
      * Directly sends a webhook
      */
     private void sendWebhookDirectly(Player player, String reason, String brand, String channel, 
@@ -497,83 +602,6 @@ public class DiscordWebhookHandler {
         
         sb.append("}]}");
         return sb.toString();
-    }
-    
-    /**
-     * Determines the appropriate console alert message based on the violation type
-     */
-    private String determineConsoleAlert(Player player, String reason, String brand, String channel, List<String> violations) {
-        // For multiple violations, use the multiple flags console message
-        if (violations != null && violations.size() > 1) {
-            String reasonsList = String.join(", ", violations);
-            return config.getConsoleMultipleFlagsMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reasons%", reasonsList);
-        }
-        
-        // For specific violation types, determine the appropriate message
-        if (reason.contains("Vanilla client with plugin channels")) {
-            return config.getVanillaCheckConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-        } 
-        else if (reason.contains("Non-vanilla client with channels")) {
-            return config.getNonVanillaCheckConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-        }
-        else if (reason.contains("Blocked channel:") || reason.contains("Client channels don't match whitelist")) {
-            String alert = config.getBlockedChannelsConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-            
-            if (channel != null) {
-                alert = alert.replace("%channel%", channel);
-            }
-            return alert;
-        }
-        else if (reason.contains("Blocked client brand:") || reason.contains("Client brand not in whitelist:")) {
-            return config.getBlockedBrandsConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-        }
-        else if (reason.contains("Spoofing Geyser client")) {
-            return config.getGeyserSpoofConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown")
-                    .replace("%reason%", reason);
-        }
-        else if (reason.contains("joined using client brand:")) {
-            return config.getBlockedBrandsConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%brand%", brand != null ? brand : "unknown");
-        }
-        else if (reason.contains("Modified channel:")) {
-            return config.getModifiedChannelsConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%channel%", channel != null ? channel : "unknown");
-        }
-        else if (reason.contains("No client brand detected")) {
-            return config.getNoBrandConsoleAlertMessage()
-                    .replace("%player%", player.getName())
-                    .replace("%reason%", reason);
-        }
-        
-        // Default to the general console alert if no specific type is found
-        String alert = config.getConsoleAlertMessage()
-                .replace("%player%", player.getName())
-                .replace("%brand%", brand != null ? brand : "unknown")
-                .replace("%reason%", reason);
-        
-        if (channel != null) {
-            alert = alert.replace("%channel%", channel);
-        }
-        return alert;
     }
     
     /**
