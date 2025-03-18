@@ -499,6 +499,17 @@ public class DetectionManager {
      * @param brandKey The configuration key for the brand
      */
     private void sendBrandAlert(Player player, String brand, String brandKey) {
+        // Skip if player has already been alerted about their brand
+        if (plugin.hasPlayerBeenBrandAlerted(player)) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName());
+            }
+            return;
+        }
+        
+        // Mark player as alerted to prevent future duplicate alerts
+        plugin.markPlayerBrandAlerted(player);
+        
         ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(brandKey);
         
         // Skip if alerts are disabled for this brand
