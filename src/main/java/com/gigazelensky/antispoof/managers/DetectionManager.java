@@ -62,7 +62,7 @@ public class DetectionManager {
         
         // Trigger a check if requested and cooldown passed
         if (triggerCheck && canCheckPlayer(playerUUID)) {
-            checkPlayerAsync(player, false);
+            checkPlayerAsync(player, false, true);
         }
         
         return channelAdded;
@@ -109,23 +109,29 @@ public class DetectionManager {
      * @param player The player to check
      * @param isJoinCheck Whether this is an initial join check
      */
-    public void checkPlayerAsync(Player player, boolean isJoinCheck) {
+    public void checkPlayerAsync(Player player, boolean isJoinCheck, boolean checkRequiredChannels) {
         if (!player.isOnline() || player.hasPermission("antispoof.bypass")) {
             return;
         }
         
         // Run check asynchronously to avoid lag
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            checkPlayer(player, isJoinCheck);
+            checkPlayer(player, isJoinCheck, checkRequiredChannels);
         });
+    }
+
+    // Overload for backward compatibility
+    public void checkPlayerAsync(Player player, boolean isJoinCheck) {
+        checkPlayerAsync(player, isJoinCheck, true);
     }
     
     /**
      * Performs a comprehensive check on a player
      * @param player The player to check
      * @param isJoinCheck Whether this is an initial join check
+     * @param checkRequiredChannels Whether to check for required channels
      */
-    private void checkPlayer(Player player, boolean isJoinCheck) {
+    private void checkPlayer(Player player, boolean isJoinCheck, boolean checkRequiredChannels) {
         UUID uuid = player.getUniqueId();
         
         // Skip if player is offline or has been punished
@@ -243,8 +249,8 @@ public class DetectionManager {
                         "Client claiming '" + matchedBrandKey + "' detected with plugin channels");
                 }
                 
-                // Check required channels for this brand - IMPROVED MATCHING LOGIC
-                if (!brandConfig.getRequiredChannels().isEmpty() && hasChannels) {
+                // Check required channels for this brand - ONLY IF ENABLED BY PARAMETER
+                if (checkRequiredChannels && !brandConfig.getRequiredChannels().isEmpty() && hasChannels) {
                     boolean hasRequiredChannel = false;
                     
                     // Log channels in debug mode to help diagnose issues
@@ -255,85 +261,49 @@ public class DetectionManager {
                         plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
                     }
                     
-                    // FIXED CHANNEL MATCHING LOGIC
-                    // For each required pattern
-                    for (Pattern pattern : brandConfig.getRequiredChannels()) {
-                        // For each player channel
-                        for (String channel : data.getChannels()) {
+                    // For each player channel, check against each required channel pattern
+                    for (String channel : data.getChannels()) {
+                        for (Pattern pattern : brandConfig.getRequiredChannels()) {
                             try {
-                                String patternStr = pattern.toString();
-                                // Handle case insensitive patterns
-                                if (patternStr.contains("(?i)")) {
-                                    // Create a case-insensitive version for matching
-                                    String lcChannel = channel.toLowerCase();
-                                    String lcPattern = patternStr.toLowerCase().replace("(?i)", "");
-                                    
-                                    // Try a simple contains check first
-                                    if (lcChannel.contains(lcPattern.replace(".*", "").replace("^", "").replace("$", ""))) {
-                                        hasRequiredChannel = true;
-                                        
-                                        if (config.isDebugMode()) {
-                                            plugin.getLogger().info("[Debug] Found case-insensitive matching channel: " + channel + 
-                                                                  " contains " + lcPattern.replace(".*", "").replace("^", "").replace("$", ""));
-                                        }
-                                        break;
-                                    }
-                                    
-                                    // Try pattern matching if contains check failed
-                                    try {
-                                        if (lcChannel.matches(lcPattern)) {
-                                            hasRequiredChannel = true;
-                                            
-                                            if (config.isDebugMode()) {
-                                                plugin.getLogger().info("[Debug] Found case-insensitive regex match: " + channel);
-                                            }
-                                            break;
-                                        }
-                                    } catch (Exception e) {
-                                        if (config.isDebugMode()) {
-                                            plugin.getLogger().info("[Debug] Regex error for case-insensitive pattern: " + e.getMessage());
-                                        }
-                                    }
-                                }
-                                // Normal case-sensitive pattern
-                                else if (pattern.matcher(channel).matches()) {
+                                if (pattern.matcher(channel).matches()) {
                                     hasRequiredChannel = true;
                                     
                                     if (config.isDebugMode()) {
                                         plugin.getLogger().info("[Debug] Found matching channel: " + channel);
                                     }
+                                    
                                     break;
                                 }
                             } catch (Exception e) {
                                 // If regex fails, fallback to simple contains check
                                 String patternStr = pattern.toString();
-                                if (channel.contains(patternStr.replace(".*", "").replace("^", "").replace("$", ""))) {
+                                if (channel.toLowerCase().contains(patternStr.toLowerCase()
+                                    .replace("(?i)", "")
+                                    .replace(".*", "")
+                                    .replace("^", "")
+                                    .replace("$", ""))) {
+                                    
                                     hasRequiredChannel = true;
                                     
                                     if (config.isDebugMode()) {
                                         plugin.getLogger().info("[Debug] Found matching channel using fallback: " + channel);
                                     }
+                                    
                                     break;
                                 }
                             }
                         }
                         
-                        if (hasRequiredChannel) {
-                            // Found a match, no need to check more patterns
-                            break;
-                        }
+                        if (hasRequiredChannel) break;
                     }
                     
                     if (!hasRequiredChannel) {
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Debug] Required channel check failed for " + player.getName() + 
-                                                  " with brand " + matchedBrandKey);
-                        }
                         detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
                             "Client missing required channels for brand: " + matchedBrandKey);
-                    } else if (config.isDebugMode()) {
-                        plugin.getLogger().info("[Debug] Required channel check PASSED for " + player.getName() + 
-                                              " with brand " + matchedBrandKey);
+                        
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] No matching channels found for " + player.getName());
+                        }
                     }
                 }
                 
@@ -446,6 +416,15 @@ public class DetectionManager {
                 processViolations(player, finalViolations, finalBrand);
             });
         }
+    }
+    
+    /**
+     * Alias for checking player with checkRequiredChannels parameter
+     * @param player The player to check
+     * @param isJoinCheck Whether this is an initial join check
+     */
+    private void checkPlayer(Player player, boolean isJoinCheck) {
+        checkPlayer(player, isJoinCheck, true);
     }
     
     /**

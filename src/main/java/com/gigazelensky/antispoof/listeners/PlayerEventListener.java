@@ -23,6 +23,9 @@ import java.util.UUID;
 public class PlayerEventListener extends PacketListenerAbstract implements Listener {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
+    
+    // Extended delay in ticks for required channel checks (5 seconds)
+    private static final long REQUIRED_CHANNEL_CHECK_DELAY = 5 * 20L;
 
     public PlayerEventListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -104,7 +107,8 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         
         // Create initial player data
         UUID uuid = player.getUniqueId();
-        plugin.getPlayerDataMap().computeIfAbsent(uuid, k -> new PlayerData());
+        PlayerData data = new PlayerData();
+        plugin.getPlayerDataMap().put(uuid, data);
         
         // Special handling for no-brand detection
         if (config.isNoBrandCheckEnabled()) {
@@ -127,19 +131,32 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
             }, 20L); // 1 second delay to allow brand packet to arrive
         }
         
-        // Schedule the standard check based on configured delay
-        int delay = config.getCheckDelay();
+        // Schedule the normal checks
+        int standardDelay = config.getCheckDelay();
         
-        // If delay is greater than 0, schedule the check
-        if (delay > 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, 
-                () -> plugin.getDetectionManager().checkPlayerAsync(player, true), 
-                delay * 20L);
-        } else if (delay == 0) {
-            // For zero delay, check immediately
-            plugin.getDetectionManager().checkPlayerAsync(player, true);
+        // First, do a "brand-only" check after the standard delay
+        // This will only check for problematic brands but NOT required channels
+        if (standardDelay >= 0) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline()) {
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Running initial brand check for " + player.getName() + " (without required channels check)");
+                    }
+                    plugin.getDetectionManager().checkPlayerAsync(player, true, false);
+                }
+            }, standardDelay * 20L);
         }
-        // If delay is negative, rely on packet listener checks only
+        
+        // Then, do a complete check with required channels, but with a longer delay
+        // This gives the client more time to register all its channels
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Running complete check with required channels for " + player.getName());
+                }
+                plugin.getDetectionManager().checkPlayerAsync(player, false, true);
+            }
+        }, REQUIRED_CHANNEL_CHECK_DELAY);
     }
     
     @EventHandler(priority = EventPriority.MONITOR)
