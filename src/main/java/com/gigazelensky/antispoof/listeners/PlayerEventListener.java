@@ -48,16 +48,14 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         
         // Skip if player has bypass permission
         if (player.hasPermission("antispoof.bypass")) return;
-
-        boolean wasChannelRegistered = false;
         
         // Handle plugin messages based on the packet type
         if (event.getPacketType() == PacketType.Play.Client.PLUGIN_MESSAGE) {
             WrapperPlayClientPluginMessage packet = new WrapperPlayClientPluginMessage(event);
-            wasChannelRegistered = handlePluginMessage(player, packet.getChannelName(), packet.getData());
+            handlePluginMessage(player, packet.getChannelName(), packet.getData());
         } else if (event.getPacketType() == PacketType.Configuration.Client.PLUGIN_MESSAGE) {
             WrapperConfigClientPluginMessage packet = new WrapperConfigClientPluginMessage(event);
-            wasChannelRegistered = handlePluginMessage(player, packet.getChannelName(), packet.getData());
+            handlePluginMessage(player, packet.getChannelName(), packet.getData());
         }
     }
     
@@ -95,6 +93,37 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         return didRegister;
     }
     
+    /**
+     * Run the initial brand-only check
+     * This doesn't check for required channels
+     */
+    private void scheduleInitialBrandCheck(Player player, long delayTicks) {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Running initial brand check for " + player.getName() + 
+                                         " (without required channels check)");
+                }
+                plugin.getDetectionManager().checkPlayerAsync(player, true, false);
+            }
+        }, delayTicks);
+    }
+
+    /**
+     * Schedule the final check with required channels validation
+     * This is run after a longer delay to ensure all channels are registered
+     */
+    private void scheduleRequiredChannelsCheck(Player player, long delayTicks) {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Running complete check with required channels for " + player.getName());
+                }
+                plugin.getDetectionManager().checkPlayerAsync(player, false, true);
+            }
+        }, delayTicks);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -131,32 +160,18 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
             }, 20L); // 1 second delay to allow brand packet to arrive
         }
         
-        // Schedule the normal checks
+        // Schedule the checks with appropriate delays
         int standardDelay = config.getCheckDelay();
         
         // First, do a "brand-only" check after the standard delay
         // This will only check for problematic brands but NOT required channels
         if (standardDelay >= 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline()) {
-                    if (config.isDebugMode()) {
-                        plugin.getLogger().info("[Debug] Running initial brand check for " + player.getName() + " (without required channels check)");
-                    }
-                    plugin.getDetectionManager().checkPlayerAsync(player, true, false);
-                }
-            }, standardDelay * 20L);
+            scheduleInitialBrandCheck(player, standardDelay * 20L);
         }
         
         // Then, do a complete check with required channels, but with a longer delay
         // This gives the client more time to register all its channels
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline()) {
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Running complete check with required channels for " + player.getName());
-                }
-                plugin.getDetectionManager().checkPlayerAsync(player, false, true);
-            }
-        }, REQUIRED_CHANNEL_CHECK_DELAY);
+        scheduleRequiredChannelsCheck(player, REQUIRED_CHANNEL_CHECK_DELAY);
     }
     
     @EventHandler(priority = EventPriority.MONITOR)

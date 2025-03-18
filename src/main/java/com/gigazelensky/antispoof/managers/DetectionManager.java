@@ -291,7 +291,8 @@ public class DetectionManager {
                 
                 // Check required channels for this brand - ONLY IF ENABLED BY PARAMETER
                 if (checkRequiredChannels && !brandConfig.getRequiredChannels().isEmpty() && hasChannels) {
-                    boolean hasRequiredChannel = false;
+                    // We now check that the player has ALL required channels, not just one
+                    List<String> missingChannelPatterns = new ArrayList<>();
                     
                     // Log channels in debug mode to help diagnose issues
                     if (config.isDebugMode()) {
@@ -301,32 +302,39 @@ public class DetectionManager {
                         plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
                     }
                     
-                    // For each player channel, check against each required channel pattern
-                    for (String channel : data.getChannels()) {
-                        for (Pattern pattern : brandConfig.getRequiredChannels()) {
+                    // For each required channel pattern, check if any player channel matches it
+                    for (int i = 0; i < brandConfig.getRequiredChannels().size(); i++) {
+                        Pattern pattern = brandConfig.getRequiredChannels().get(i);
+                        String patternStr = brandConfig.getRequiredChannelStrings().get(i);
+                        boolean patternMatched = false;
+                        
+                        // Check each player channel against this pattern
+                        for (String channel : data.getChannels()) {
                             try {
                                 if (pattern.matcher(channel).matches()) {
-                                    hasRequiredChannel = true;
+                                    patternMatched = true;
                                     
                                     if (config.isDebugMode()) {
-                                        plugin.getLogger().info("[Debug] Found matching channel: " + channel);
+                                        plugin.getLogger().info("[Debug] Found matching channel for pattern " + 
+                                                   patternStr + ": " + channel);
                                     }
                                     
                                     break;
                                 }
                             } catch (Exception e) {
                                 // If regex fails, fallback to simple contains check
-                                String patternStr = pattern.toString();
-                                if (channel.toLowerCase().contains(patternStr.toLowerCase()
+                                String simplePatternStr = pattern.toString()
                                     .replace("(?i)", "")
                                     .replace(".*", "")
                                     .replace("^", "")
-                                    .replace("$", ""))) {
+                                    .replace("$", "");
                                     
-                                    hasRequiredChannel = true;
+                                if (channel.toLowerCase().contains(simplePatternStr.toLowerCase())) {
+                                    patternMatched = true;
                                     
                                     if (config.isDebugMode()) {
-                                        plugin.getLogger().info("[Debug] Found matching channel using fallback: " + channel);
+                                        plugin.getLogger().info("[Debug] Found matching channel using fallback for pattern " + 
+                                                   patternStr + ": " + channel);
                                     }
                                     
                                     break;
@@ -334,25 +342,31 @@ public class DetectionManager {
                             }
                         }
                         
-                        if (hasRequiredChannel) break;
+                        // If no match was found for this pattern, add it to missing patterns
+                        if (!patternMatched) {
+                            missingChannelPatterns.add(patternStr);
+                        }
                     }
                     
-                    if (!hasRequiredChannel) {
+                    // Only pass if ALL required patterns were matched (no missing patterns)
+                    if (!missingChannelPatterns.isEmpty()) {
                         // Check if this is the final required channel check (past grace period)
                         // or if it's a preliminary check
                         boolean isPastGracePeriod = System.currentTimeMillis() - data.getJoinTime() > CHANNEL_GRACE_PERIOD;
                         
                         if (isPastGracePeriod) {
+                            String missingChannelsStr = String.join(", ", missingChannelPatterns);
                             detectedViolations.put("MISSING_REQUIRED_CHANNELS", 
-                                "Client missing required channels for brand: " + matchedBrandKey);
+                                "Client missing required channels for brand " + matchedBrandKey + ": " + missingChannelsStr);
                             
                             if (config.isDebugMode()) {
-                                plugin.getLogger().info("[Debug] No matching channels found for " + player.getName() + 
-                                                      " (FINAL CHECK - PAST GRACE PERIOD)");
+                                plugin.getLogger().info("[Debug] Missing required channels for " + player.getName() + 
+                                                      ": " + missingChannelsStr + " (FINAL CHECK - PAST GRACE PERIOD)");
                             }
                         } else if (config.isDebugMode()) {
                             // Only log during grace period, don't flag yet
-                            plugin.getLogger().info("[Debug] No matching channels found for " + player.getName() + 
+                            plugin.getLogger().info("[Debug] Missing required channels for " + player.getName() + 
+                                                  ": " + String.join(", ", missingChannelPatterns) + 
                                                   " (still in grace period, will check again later)");
                         }
                     }

@@ -127,6 +127,17 @@ public class AlertManager {
             return;
         }
         
+        // Check if we've already sent a brand alert for this player
+        if (plugin.hasPlayerBeenBrandAlerted(player)) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Skipping duplicate brand alert for " + player.getName());
+            }
+            return;
+        }
+        
+        // Mark the player as alerted to prevent duplicate messages
+        plugin.markPlayerBrandAlerted(player);
+        
         // Format the player alert message with placeholders
         String playerAlert = config.getBlockedBrandsAlertMessage()
                 .replace("%player%", player.getName())
