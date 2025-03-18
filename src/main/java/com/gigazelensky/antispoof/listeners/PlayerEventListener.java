@@ -24,8 +24,8 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
     
-    // Extended delay in ticks for required channel checks (3 seconds)
-    private static final long REQUIRED_CHANNEL_CHECK_DELAY = 3 * 20L;
+    // Extended delay in ticks for required channel checks (5 seconds)
+    private static final long REQUIRED_CHANNEL_CHECK_DELAY = 5 * 20L;
 
     public PlayerEventListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
