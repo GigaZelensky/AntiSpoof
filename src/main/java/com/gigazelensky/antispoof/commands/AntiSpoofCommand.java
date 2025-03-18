@@ -2,6 +2,7 @@ package com.gigazelensky.antispoof.commands;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
+import com.gigazelensky.antispoof.managers.ConfigManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -18,7 +19,7 @@ import java.util.stream.Collectors;
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands"
+        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -75,6 +76,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             }
             
             showBlockedBrands(sender);
+            return true;
+        }
+        
+        // Handle runcheck command
+        if (subCommand.equals("runcheck")) {
+            handleRunCheckCommand(sender, args);
             return true;
         }
         
@@ -141,6 +148,52 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
         
         return true;
+    }
+    
+    private void handleRunCheckCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("antispoof.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+            return;
+        }
+
+        if (args.length < 2) {
+            // Run check for all online players
+            sender.sendMessage(ChatColor.AQUA + "Running check for all online players...");
+            int count = 0;
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                plugin.getDetectionManager().checkPlayerAsync(player, false, true);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Check triggered for " + count + " players.");
+            sender.sendMessage(ChatColor.YELLOW + "Note: This only re-analyzes existing data, players might need to rejoin for fresh data.");
+            return;
+        }
+
+        // Check specific player
+        String playerName = args[1];
+        if (playerName.equals("*")) {
+            // Also run for all players if * is specified
+            sender.sendMessage(ChatColor.AQUA + "Running check for all online players...");
+            int count = 0;
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                plugin.getDetectionManager().checkPlayerAsync(player, false, true);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Check triggered for " + count + " players.");
+            sender.sendMessage(ChatColor.YELLOW + "Note: This only re-analyzes existing data, players might need to rejoin for fresh data.");
+            return;
+        }
+
+        Player target = Bukkit.getPlayer(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+
+        sender.sendMessage(ChatColor.AQUA + "Running check for player " + target.getName() + "...");
+        plugin.getDetectionManager().checkPlayerAsync(target, false, true);
+        sender.sendMessage(ChatColor.GREEN + "Check triggered for " + target.getName() + ".");
+        sender.sendMessage(ChatColor.YELLOW + "Note: This only re-analyzes existing data, players might need to rejoin for fresh data.");
     }
     
     private void showBlockedBrands(CommandSender sender) {
@@ -288,6 +341,45 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     String blockedChannel = plugin.getDetectionManager().findBlockedChannel(data.getChannels());
                     if (blockedChannel != null) {
                         flagReasons.add("Using blocked channel: " + blockedChannel);
+                    }
+                }
+            }
+            
+            // Check for missing required brand channels
+            String matchedBrand = plugin.getConfigManager().getMatchingClientBrand(brand);
+            if (matchedBrand != null && hasChannels) {
+                ConfigManager.ClientBrandConfig brandConfig = plugin.getConfigManager().getClientBrandConfig(matchedBrand);
+                if (!brandConfig.getRequiredChannels().isEmpty()) {
+                    // Look for missing required channels
+                    List<String> missingRequiredChannels = new ArrayList<>();
+                    for (String requiredChannel : brandConfig.getRequiredChannelStrings()) {
+                        boolean found = false;
+                        for (String playerChannel : data.getChannels()) {
+                            try {
+                                if (playerChannel.matches(requiredChannel)) {
+                                    found = true;
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                // If regex fails, try simple contains check
+                                String simplePattern = requiredChannel
+                                    .replace("(?i)", "")
+                                    .replace(".*", "")
+                                    .replace("^", "")
+                                    .replace("$", "");
+                                if (playerChannel.toLowerCase().contains(simplePattern.toLowerCase())) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!found) {
+                            missingRequiredChannels.add(requiredChannel);
+                        }
+                    }
+                    
+                    if (!missingRequiredChannels.isEmpty()) {
+                        flagReasons.add("Missing required channels for " + matchedBrand + ": " + String.join(", ", missingRequiredChannels));
                     }
                 }
             }
@@ -445,6 +537,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof channels <player> " + ChatColor.WHITE + "- Show player's plugin channels");
         sender.sendMessage(ChatColor.GRAY + "/antispoof brand <player> " + ChatColor.WHITE + "- Show player's client brand");
         sender.sendMessage(ChatColor.GRAY + "/antispoof check [player|*] " + ChatColor.WHITE + "- Check if player is spoofing");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof runcheck [player|*] " + ChatColor.WHITE + "- Re-run checks on player(s)");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
@@ -530,13 +623,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         } else if (args.length == 2) {
             String partialArg = args[1].toLowerCase();
             
-            if (args[0].equalsIgnoreCase("check")) {
+            if (args[0].equalsIgnoreCase("check") || 
+                args[0].equalsIgnoreCase("runcheck")) {
                 completions.add("*");
             }
             
             if (args[0].equalsIgnoreCase("channels") || 
                 args[0].equalsIgnoreCase("brand") ||
-                args[0].equalsIgnoreCase("check")) {
+                args[0].equalsIgnoreCase("check") ||
+                args[0].equalsIgnoreCase("runcheck")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)
                         .filter(name -> name.toLowerCase().startsWith(partialArg))

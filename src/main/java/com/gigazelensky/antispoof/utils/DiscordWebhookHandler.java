@@ -591,7 +591,8 @@ public class DiscordWebhookHandler {
         // Use specific message for modified channels
         sb.append("**Modified channel(s)**:\\n");
         for (String channel : modifiedChannels) {
-            sb.append("• ").append(escapeJson(channel)).append("\\n");
+            // Wrap channel in backticks for Discord
+            sb.append("• `").append(escapeJson(channel)).append("`\\n");
         }
         
         // Close the description
@@ -664,7 +665,9 @@ public class DiscordWebhookHandler {
         
         // Add other standard information
         sb.append("**Client Version**: ").append(getClientVersionFromPlaceholders(player)).append("\\n");
-        sb.append("**Brand**: ").append(escapeJson(brand != null ? brand : "unknown")).append("\\n");
+        
+        // Wrap brand in backticks for Discord
+        sb.append("**Brand**: `").append(escapeJson(brand != null ? brand : "unknown")).append("`\\n");
         
         // Add channels
         sb.append("**Channels**:\\n");
@@ -672,7 +675,8 @@ public class DiscordWebhookHandler {
         if (data != null && !data.getChannels().isEmpty()) {
             Set<String> channels = data.getChannels();
             for (String ch : channels) {
-                sb.append("• ").append(escapeJson(ch)).append("\\n");
+                // Wrap channel in backticks for Discord
+                sb.append("• `").append(escapeJson(ch)).append("`\\n");
             }
         } else {
             sb.append("• None detected\\n");
