@@ -28,6 +28,7 @@
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#frequently-asked-questions)
 - [Support & Development](#support--development)
+- [Complete Configuration Example](#complete-configuration-example)
 - [License](#license)
 
 ---
@@ -483,6 +484,429 @@ Contributions are welcome! To contribute:
 - Follow existing code style and architecture
 - Add appropriate documentation for new features
 - Maintain backward compatibility when possible
+
+---
+
+## 📋 Complete Configuration Example
+
+```yaml
+#        ___          __  _ _____                   ____
+#       /   |  ____  / /_(_) ___/____  ____  ____  / __/
+#      / /| | / __ \/ __/ /\__ \/ __ \/ __ \/ __ \/ /_  
+#     / ___ |/ / / / /_/ /___/ / /_/ / /_/ / /_/ / __/  
+#    /_/  |_/_/ /_/\__/_//____/ .___/\____/\____/_/     
+#                            /_/                        
+#                   Made by GigaZelensky
+
+# ──────────────────────────────────────────────────────────
+#                  AntiSpoof Configuration
+# ──────────────────────────────────────────────────────────
+# Welcome to AntiSpoof. This plugin helps server admins detect and manage 
+# client-side modifications by analyzing client information sent by players.
+#
+# ⚠️ Note: While this plugin enhances security, it is not foolproof. 
+# Skilled users can (ironically) spoof their client details to bypass detection.
+#
+# By default, the plugin only verifies whether a player claiming to use
+# 'vanilla' has registered plugin channels, something that is impossible
+# on a true vanilla client.
+# ──────────────────────────────────────────────────────────
+
+# ⏳ Delay (in seconds) before checking for client spoofing.
+# Set to 0 for an immediate check upon player login (unrealiable). (Default: 1)
+delay-in-seconds: 1
+
+# ️ Debug Mode
+# If enabled, logs client channels and brand details in the console when a player logs in.
+debug: false
+
+# ──────────────────────────────────────────────────────────
+#                  Core Detection Settings
+# ──────────────────────────────────────────────────────────
+
+# Vanilla Spoof Detection
+# Detects when a player claims to use vanilla but has registered plugin channels
+vanillaspoof-check:
+  # Whether to check if a player claiming "vanilla" client has plugin channels
+  enabled: true
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: true
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cVanilla client with plugin channels"
+  console-alert-message: "%player% flagged! Vanilla client with plugin channels"
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  punishments:
+    - "kick %player% &cVanilla spoof detected: %reason%"
+    # - "ban %player% &cVanilla client spoofing detected"
+
+# Super Strict Mode (Not Recommended)
+# Blocks players who either:
+#    - Do NOT have a "vanilla" client, OR
+#    - Have registered plugin channels (indicating mods/plugins)
+# ⚠️ This is an extremely strict mode and may block legitimate players
+non-vanilla-check:
+  # Whether to enable this strict check
+  enabled: false
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: false
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cClient modifications detected"
+  console-alert-message: "%player% flagged! Client modifications detected"
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  punishments:
+    - "kick %player% &cNon-vanilla client with channels detected"
+    # - "tempban %player% 1h &cUsing a modified client"
+
+# ──────────────────────────────────────────────────────────
+#               No Brand Detection Settings
+# ──────────────────────────────────────────────────────────
+# Some hacked clients avoid detection by not sending a client brand at all
+# This check flags players who connect without providing any brand information
+no-brand-check:
+  # Whether to flag players who don't send a client brand
+  enabled: true
+  # Whether to send alerts to Discord for this violation type
+  discord-alert: true
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cNo client brand detected"
+  console-alert-message: "%player% flagged! No client brand detected"
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%
+  punishments:
+    - "kick %player% &cNo client brand detected"
+    # - "ban %player% &cSuspicious client detected (no brand)"
+
+# ──────────────────────────────────────────────────────────
+#                 Channel Detection Settings
+# ──────────────────────────────────────────────────────────
+blocked-channels:
+  # Enable channel-based detection
+  enabled: false
+  # Whether to send alerts to Discord for blocked channel violations
+  discord-alert: false
+  
+  # ⚪ Whitelist Mode
+  # - FALSE: Block listed channels.
+  # - SIMPLE: Only allow players with at least one whitelisted channel.
+  # - STRICT: Only allow players who match the exact whitelist and have no extra channels.
+  whitelist-mode: FALSE
+  
+  # List of channels to block/whitelist
+  values:
+    - "^fabric-screen-handler-api-v1:open_screen$"
+    # Add more channels to block here
+    # - "another:blocked:channel"
+    # - "(?i).*litematica.*"
+    # - "(?i).*fabric.*"
+
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing blocked channel: &f%channel%"
+  console-alert-message: "%player% flagged! Using blocked channel: %channel%"
+
+  # Alert when a player's plugin channel is modified
+  modifiedchannels:
+    enabled: true
+    # Whether to send Discord alerts for modified channels
+    discord-alert: false
+    alert-message: "&8[&cAntiSpoof&8] &e%player% modified channel: &f%channel%"
+    console-alert-message: "%player% modified channel: %channel%"
+
+  # Whether to punish the player if detection is positive
+  punish: false
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  punishments:
+    - "kick %player% &cBlocked channel detected: %channel%"
+    # - "tempban %player% 1d &cUsing blocked mod channels"
+
+# ──────────────────────────────────────────────────────────
+#                 Client Brands Configuration
+# ──────────────────────────────────────────────────────────
+# This section allows for granular control over different client types.
+# Each brand can have its own detection patterns, alert messages, 
+# punishments, and special exemptions.
+client-brands:
+  # Master switch for the client brands system
+  enabled: true
+  
+  # Default settings for brands not explicitly configured
+  default:
+    flag: true
+    alert: true
+    discord-alert: false
+    punish: false
+    # Default alert message if not specified for a brand
+    alert-message: "&8[&cAntiSpoof&8] &7%player% using unknown client: &e%brand%"
+    console-alert-message: "%player% using unknown client: %brand%"
+  
+  # Brand-specific configurations
+  brands:
+    # Lunar Client Configuration
+    lunar:
+      enabled: true
+      values:
+        - "^lunarclient:v\\d+\\.\\d+\\.\\d+-\\d{4}$"
+      # Whether to count the player as flagged by AntiSpoof
+      flag: false
+      # Whether to send in-game alerts for this brand
+      alert: true
+      # Whether to send Discord alerts for this brand
+      discord-alert: false
+      # Custom alert messages for this brand
+      alert-message: "&8[&eAntiSpoof&8] &7%player% is using &9Lunar Client &7version: &b%brand%"
+      console-alert-message: "%player% is using Lunar Client: %brand%"
+      # Whether to punish players using this brand
+      punish: false
+      # Punishment commands if punish is true
+      punishments: []
+      # Channels that must be present for this brand to be legitimate
+      required-channels:
+        - "lunar.*"  # Must have at least one lunar channel
+      # Punish players if they do not have the channel(s)? Set to false to simply alert.
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cLunar Client spoofing detected"
+
+    # Badlion Client Configuration
+    badlion:
+      enabled: true
+      values:
+        - "^badlion.*"
+        - "^BLC.*"
+      flag: false
+      alert: true
+      discord-alert: false
+      alert-message: "&8[&eAntiSpoof&8] &7%player% is using &b%brand%"
+      console-alert-message: "%player% is using Badlion Client: %brand%"
+      punish: false
+      punishments: []
+      required-channels: []
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cLunar Client spoofing detected"
+
+    # Forge Configuration
+    forge:
+      enabled: true
+      values:
+        - "^fml,forge.*"
+        - "^forge.*"
+      flag: false
+      alert: true
+      discord-alert: false
+      alert-message: "&8[&eAntiSpoof&8] &7%player% is using &b%brand%"
+      console-alert-message: "%player% is using Forge: %brand%"
+      punish: false
+      punishments: []
+      required-channels:
+        - "(?i).*forge.*"
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannel spoofing detected"
+      
+    # Fabric Configuration
+    fabric:
+      enabled: true
+      values:
+        - "^fabric$"
+      flag: false
+      alert: true
+      discord-alert: false
+      alert-message: "&8[&eAntiSpoof&8] &7%player% is using &b%brand%"
+      console-alert-message: "%player% is using Fabric: %brand%"
+      punish: false
+      punishments: []
+      required-channels:
+        - "(?i).*fabric.*" # Matches any channel containing "fabric" (case insensitive)
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannel spoofing detected"
+
+    # LabyMod Configuration
+    labymod:
+      enabled: true
+      values:
+        - "^labymod.*"
+      flag: false
+      alert: true
+      discord-alert: false
+      alert-message: "&8[&eAntiSpoof&8] &7%player% is using &b%brand%"
+      console-alert-message: "%player% is using %brand%"
+      punish: false
+      punishments: []
+      required-channels: []
+      required-channels-punish: false
+      required-channels-punishments:
+        - "kick %player% &cChannels spoofing detected"
+
+    # Hacked Clients Configuration
+    hacked:
+      enabled: true
+      values:
+        - "(?i).*wurst.*"
+        - "(?i).*impact.*"
+        - "(?i).*aristois.*"
+        - "(?i).*future.*"
+        - "(?i).*meteor.*"
+        - "(?i).*inertia.*"
+        - "(?i).*sigma.*"
+        - "(?i).*liquidbounce.*"
+      flag: true
+      alert: true
+      discord-alert: true
+      alert-message: "&8[&cAntiSpoof&8] &e%player% is using &c&lknown hacked client: &f%brand%"
+      console-alert-message: "ALERT! %player% is using known hacked client: %brand%"
+      punish: true
+      punishments:
+        - "kick %player% &cHacked client detected: %brand%"
+        # - "ban %player% &cUse of hacked client detected"
+
+    # Vanilla Configuration
+    vanilla:
+      enabled: true
+      values:
+        - "^vanilla$"
+      flag: false # Only flags if the player is caught spoofing
+      alert: false  # Don't alert for vanilla clients by default
+      discord-alert: false
+      alert-message: "&8[&cAntiSpoof&8] &7%player% is using &d%brand%"
+      console-alert-message: "%player% is using %brand%"
+      punish: false
+      punishments: []
+      # Special settings for vanilla
+      # "strict-check" flags if the client has ANY plugin channels (Must be enabled to detect VanillaSpoof)
+      # You can add this "strict-check" to any client brand and only then will it be processed by the earlier "vanillaspoof-check"
+      strict-check: true  # Enable strict checking for vanilla (must have NO channels)
+
+    vanilla-variation: # When a client shows "Vanilla" or "vAnilla2" but not "vanilla"
+      enabled: true
+      values:
+        - "^(?!vanilla$).*?(?i)vanilla.*"
+      flag: true
+      alert: true
+      discord-alert: true
+      alert-message: "&8[&cAntiSpoof&8] &e%player% using fake Vanilla: &c%brand%"
+      console-alert-message: "%player% is using fake Vanilla: %brand%"
+      punish: false
+      punishments: []
+      strict-check: true
+
+# ──────────────────────────────────────────────────────────
+#                Bedrock Handling Settings
+# ──────────────────────────────────────────────────────────
+bedrock-handling:
+  # Choose how to handle Bedrock players.
+  # Options:
+  #   - "IGNORE": Completely ignore these players; process them like regular players.
+  #   - "EXEMPT": Process them but don't punish them for failing checks.
+  #
+  # Either way, Bedrock players won't get the anti-spoof treatment.
+  # "EXEMPT" mode is highly recommended as "IGNORE" can easily falsely punish Bedrock players.
+  mode: "EXEMPT"
+
+  # Geyser Spoofing Detection
+  # Detects players claiming a client brand including a variation of "geyser" without being verified
+  # as Bedrock players by the Floodgate API.
+  geyser-spoof:
+    # Whether to enable geyser spoofing detection
+    enabled: true
+    # Whether to send alerts to Discord for Geyser spoofing violations
+    discord-alert: true
+    # Custom alert messages for this specific violation
+    alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cGeyser client spoofing"
+    console-alert-message: "%player% flagged! Geyser client spoofing with brand: %brand%"
+
+    # Whether to punish the player if detection is positive
+    punish: false
+    # Punishment actions to execute
+    # Available placeholders: %player%, %reason%, %brand%
+    punishments:
+      - "kick %player% &cGeyser client spoofing detected"
+      # - "ban %player% &cGeyser client spoofing"
+
+  # Check Player Prefix:
+  # This option checks whether a player is identified as a Bedrock player by verifying their prefix.
+  # When enabled, the system will verify if the player's username or identifier starts with the specified prefix.
+  # Default prefix is ".", and if a player's client brand includes "geyser" in any form without matching
+  # the expected prefix, they will be flagged.
+  prefix-check:
+    enabled: true
+    # The prefix used to identify Bedrock players.
+    prefix: "."
+
+# ──────────────────────────────────────────────────────────
+#                 Discord Webhook Settings
+# ──────────────────────────────────────────────────────────
+discord:
+  enabled: false
+  webhook: ""
+  embed-title: "**AntiSpoof Alert**"
+  embed-color: "#2AB7CA"
+  violation-content:
+    - "**Player**: %player%"
+    - "**Violations**:%violations%"
+    - "**Client Version**: %viaversion_version%" # Requires Viaversion and PlaceholderAPI
+    - "**Brand**: %brand%"
+    - "**Channels**:"
+    - "%channel%" # Vertical channel list
+
+# Global settings for all alerts (used as fallback)
+# These options control whether to send join messages for players to Discord
+# even when they don't trigger any violations
+global-alerts:
+  # Whether to send alerts to Discord when players join with a brand
+  join-brand-alerts: false
+  # Whether to send alerts to Discord when players register initial channels
+  initial-channels-alerts: false
+
+# ──────────────────────────────────────────────────────────
+#                  Update Checker Settings
+# ──────────────────────────────────────────────────────────
+# Checks for updates from GitHub when the server starts
+update-checker:
+  # Whether to check for updates on startup
+  enabled: true
+  # Whether to notify admins when they join
+  notify-on-join: true
+
+# ──────────────────────────────────────────────────────────
+#                Legacy Punishment Settings
+# ──────────────────────────────────────────────────────────
+# Legacy global punishment system (for backward compatibility)
+# These punishments will be used if a specific check has 'punish: true'
+# but doesn't have its own punishments defined
+# Available placeholders: %player%, %reason%, %brand%, %channel%
+punishments:
+  - "kick %player% &cSuspicious client detected!"
+  # - "ban %player% &cClient spoofing detected"
+
+# ──────────────────────────────────────────────────────────
+#                 Legacy Alert Messages
+# ──────────────────────────────────────────────────────────
+# Legacy global alert system (for backward compatibility)
+# These messages will be used if a specific check is enabled
+# but doesn't have its own alerts defined
+# Available placeholders: %player%, %reason%, %brand%, %channel%
+# Defines the message sent to players with the `antispoof.alerts` permission
+# when a spoofing attempt is detected.
+messages:
+  # Message shown to players with antispoof.alerts permission
+  alert: "&8[&cAntiSpoof&8] &e%player% flagged! &c%reason%"
+  # Message logged to console (no color codes needed)
+  console-alert: "%player% flagged! %reason%"
+  # Message for multiple violations
+  multiple-flags: "&8[&cAntiSpoof&8] &e%player% has multiple violations: &c%reasons%"
+  # Message for console when multiple violations
+  console-multiple-flags: "%player% has multiple violations: %reasons%"
+```
 
 ---
 
