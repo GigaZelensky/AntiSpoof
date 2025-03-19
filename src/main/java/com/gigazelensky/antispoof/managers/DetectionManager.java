@@ -855,4 +855,12 @@ public class DetectionManager {
         recentlyCheckedPlayers.remove(playerUUID);
         requiredChannelCheckedPlayers.remove(playerUUID);
     }
+    
+    /**
+     * Get the player violations map (for alert reset purposes)
+     * @return The map of player violations
+     */
+    public Map<UUID, Map<String, Boolean>> getPlayerViolations() {
+        return playerViolations;
+    }
 }
