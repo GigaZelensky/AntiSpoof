@@ -4,7 +4,6 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPluginMessage;
 import org.bukkit.entity.Player;
 
@@ -44,12 +43,11 @@ public class PacketListener extends PacketListenerAbstract {
         }
         
         // Get the player from the event
-        User user = event.getUser();
-        if (!(user.getPlayer() instanceof Player)) {
+        if (!(event.getPlayer() instanceof Player)) {
             return;
         }
         
-        Player player = (Player) user.getPlayer();
+        Player player = (Player) event.getPlayer();
         if (player == null || !player.isOnline()) {
             return;
         }
