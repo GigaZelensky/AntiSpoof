@@ -69,8 +69,8 @@ public class DetectionService {
             // Check for Bedrock player
             boolean isBedrockPlayer = plugin.getBedrockService().isBedrockPlayer(player);
             
-            // Exempt Bedrock players if configured
-            if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+            // Exempt Bedrock players
+            if (isBedrockPlayer) {
                 if (plugin.getConfigManager().isDebugMode()) {
                     plugin.getLogger().info("[Debug] Skipping check for Bedrock player " + player.getName());
                 }
@@ -179,8 +179,8 @@ public class DetectionService {
         // Check for Bedrock player
         boolean isBedrockPlayer = plugin.getBedrockService().isBedrockPlayer(player);
         
-        // Exempt Bedrock players if configured
-        if (isBedrockPlayer && plugin.getConfigManager().isBedrockExemptMode()) {
+        // Exempt Bedrock players
+        if (isBedrockPlayer) {
             return false;
         }
         

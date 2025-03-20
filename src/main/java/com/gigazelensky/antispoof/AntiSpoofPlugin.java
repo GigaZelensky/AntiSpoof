@@ -173,4 +173,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public Map<UUID, PlayerSession> getPlayerSessions() {
         return playerSessions;
     }
+    /**
+     * Gets the version checker
+     */
+    public VersionChecker getVersionChecker() { 
+        return versionChecker; 
+    }
 }

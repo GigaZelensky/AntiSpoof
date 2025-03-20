@@ -1,28 +1,26 @@
 package com.gigazelensky.antispoof.service;
-
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import org.bukkit.entity.Player;
 import org.geysermc.floodgate.api.FloodgateApi;
-
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
-
 /**
  * Handles Bedrock player detection
+ * In this version, Bedrock players are always ignored for detection
  */
 public class BedrockService {
     private final AntiSpoofPlugin plugin;
     private FloodgateApi floodgateApi;
-    
+   
     // Cache Bedrock status for better performance
     private final Map<UUID, Boolean> bedrockCache = new ConcurrentHashMap<>();
-    
+   
     public BedrockService(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         initFloodgateApi();
     }
-    
+   
     /**
      * Initializes Floodgate API if available
      */
@@ -37,27 +35,34 @@ public class BedrockService {
             floodgateApi = null;
         }
     }
-    
+   
     /**
      * Checks if a player is a Bedrock player
+     * Bedrock players are always exempted from checks
      */
     public boolean isBedrockPlayer(Player player) {
         if (player == null) return false;
-        
+       
         UUID uuid = player.getUniqueId();
-        
+       
         // Check cache first
         if (bedrockCache.containsKey(uuid)) {
             return bedrockCache.get(uuid);
         }
-        
+       
         boolean bedrock = checkBedrockPlayer(player);
         bedrockCache.put(uuid, bedrock);
+       
+        if (bedrock && plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("[Debug] Player " + player.getName() +
+                                 " identified as Bedrock player - will be ignored");
+        }
+       
         return bedrock;
     }
-    
+   
     /**
-     * Performs the actual Bedrock check
+     * Performs the actual Bedrock check using available methods
      */
     private boolean checkBedrockPlayer(Player player) {
         // Try Floodgate API first if available
@@ -65,34 +70,34 @@ public class BedrockService {
             try {
                 if (floodgateApi.isFloodgatePlayer(player.getUniqueId())) {
                     if (plugin.getConfigManager().isDebugMode()) {
-                        plugin.getLogger().info("[Debug] Player " + player.getName() + 
+                        plugin.getLogger().info("[Debug] Player " + player.getName() +
                                              " identified as Bedrock player via Floodgate API");
                     }
                     return true;
                 }
             } catch (Exception e) {
                 if (plugin.getConfigManager().isDebugMode()) {
-                    plugin.getLogger().warning("[Debug] Error checking Floodgate API for " + 
+                    plugin.getLogger().warning("[Debug] Error checking Floodgate API for " +
                                            player.getName() + ": " + e.getMessage());
                 }
             }
         }
-        
+       
         // Fall back to prefix check
         if (plugin.getConfigManager().isBedrockPrefixCheckEnabled()) {
             String prefix = plugin.getConfigManager().getBedrockPrefix();
             if (player.getName().startsWith(prefix)) {
                 if (plugin.getConfigManager().isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Player " + player.getName() + 
+                    plugin.getLogger().info("[Debug] Player " + player.getName() +
                                          " identified as Bedrock player via prefix check");
                 }
                 return true;
             }
         }
-        
+       
         return false;
     }
-    
+   
     /**
      * Clears the Bedrock cache for a player
      */
@@ -101,7 +106,7 @@ public class BedrockService {
             bedrockCache.remove(uuid);
         }
     }
-    
+   
     /**
      * Clears the entire Bedrock cache
      */

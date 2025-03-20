@@ -13,6 +13,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
@@ -90,8 +92,8 @@ public class VersionChecker implements Listener {
     /**
      * Fetches the latest release version from GitHub API
      */
-    private String getLatestRelease() throws IOException {
-        URL url = new URL(GITHUB_API_URL);
+    private String getLatestRelease() throws IOException, URISyntaxException {
+        URL url = new URI(GITHUB_API_URL).toURL();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
         connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
@@ -169,7 +171,7 @@ public class VersionChecker implements Listener {
     /**
      * Sends update notification to a specific player
      */
-    private void sendUpdateNotification(Player player) {
+    public void sendUpdateNotification(Player player) {
         player.sendMessage(ChatColor.GRAY + "=======================================================");
         player.sendMessage(ChatColor.AQUA + "A new version of " + ChatColor.BOLD + "AntiSpoof" + 
                           ChatColor.AQUA + " is available: " + ChatColor.GREEN + "v" + latestVersion);

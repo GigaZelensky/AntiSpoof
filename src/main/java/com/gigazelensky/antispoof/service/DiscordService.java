@@ -10,6 +10,7 @@ import java.awt.Color;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -31,9 +32,6 @@ public class DiscordService {
     // Track last alert time for cooldown
     private final Map<UUID, Long> lastAlertTimes = new ConcurrentHashMap<>();
     
-    // Cooldown time in milliseconds
-    private static final long COOLDOWN_TIME = 5000; // 5 seconds
-    
     public DiscordService(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
     }
@@ -49,11 +47,11 @@ public class DiscordService {
         
         UUID uuid = player.getUniqueId();
         
-        // Skip if this player already had an alert in the current session
-        if (alertedPlayers.contains(uuid)) {
+        // Check batching
+        if (plugin.getConfigManager().shouldBatchDiscordAlerts() && alertedPlayers.contains(uuid)) {
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("[Discord] Player " + player.getName() + 
-                                    " already alerted, skipping");
+                                    " already alerted, skipping due to batching");
             }
             return;
         }
@@ -97,7 +95,9 @@ public class DiscordService {
         
         // Check cooldown
         Long lastTime = lastAlertTimes.get(uuid);
-        if (lastTime != null && now - lastTime < COOLDOWN_TIME) {
+        long cooldown = plugin.getConfigManager().getDiscordBatchingCooldown();
+        
+        if (lastTime != null && now - lastTime < cooldown) {
             // In cooldown, add to pending
             Set<String> pending = pendingModifiedChannels.computeIfAbsent(uuid, k -> new HashSet<>());
             pending.add(channel);
@@ -119,20 +119,20 @@ public class DiscordService {
     /**
      * Sends a full webhook with all player information
      */
-    private void sendFullWebhook(Player player, List<String> violations, String brand, String channel) {
+    private void sendFullWebhook(Player player, List<String> reasons, String brand, String channel) {
         String webhookUrl = plugin.getConfigManager().getDiscordWebhookUrl();
         if (webhookUrl == null || webhookUrl.isEmpty()) return;
         
         CompletableFuture.runAsync(() -> {
             try {
-                URL url = new URL(webhookUrl);
+                URL url = new URI(webhookUrl).toURL();
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");
                 connection.setRequestProperty("User-Agent", "AntiSpoof-Plugin");
                 connection.setDoOutput(true);
                 
-                String json = createWebhookJson(player, violations, brand, channel);
+                String json = createWebhookJson(player, reasons, brand, channel);
                 
                 try (OutputStream os = connection.getOutputStream()) {
                     byte[] input = json.getBytes(StandardCharsets.UTF_8);
@@ -147,7 +147,7 @@ public class DiscordService {
                 }
                 
                 connection.disconnect();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 plugin.getLogger().warning("[Discord] Error sending webhook: " + e.getMessage());
             }
         });
@@ -162,7 +162,7 @@ public class DiscordService {
         
         CompletableFuture.runAsync(() -> {
             try {
-                URL url = new URL(webhookUrl);
+                URL url = new URI(webhookUrl).toURL();
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");
@@ -184,7 +184,7 @@ public class DiscordService {
                 }
                 
                 connection.disconnect();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 plugin.getLogger().warning("[Discord] Error sending channel webhook: " + e.getMessage());
             }
         });
@@ -195,7 +195,37 @@ public class DiscordService {
      */
     private String createWebhookJson(Player player, List<String> violations, String brand, String channel) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"embeds\":[{");
+        sb.append("{");
+        
+        // Add username if configured
+        String username = plugin.getConfigManager().getDiscordUsername();
+        if (username != null && !username.isEmpty()) {
+            sb.append("\"username\":\"").append(escapeJson(username)).append("\",");
+        }
+        
+        // Add avatar if configured
+        String avatarUrl = plugin.getConfigManager().getDiscordAvatarUrl();
+        if (avatarUrl != null && !avatarUrl.isEmpty()) {
+            sb.append("\"avatar_url\":\"").append(escapeJson(avatarUrl)).append("\",");
+        }
+        
+        // Add content with mentions if configured
+        if (plugin.getConfigManager().shouldMentionEveryone() || !plugin.getConfigManager().getMentionRoleIds().isEmpty()) {
+            sb.append("\"content\":\"");
+            
+            if (plugin.getConfigManager().shouldMentionEveryone()) {
+                sb.append("@everyone ");
+            }
+            
+            for (String roleId : plugin.getConfigManager().getMentionRoleIds()) {
+                sb.append("<@&").append(roleId).append("> ");
+            }
+            
+            sb.append("\",");
+        }
+        
+        // Add embeds
+        sb.append("\"embeds\":[{");
         
         // Title
         String title = plugin.getConfigManager().getDiscordEmbedTitle()
@@ -218,34 +248,59 @@ public class DiscordService {
         // Player info
         sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
         
-        // Violations
-        sb.append("**Violations**:\\n");
-        for (String violation : violations) {
-            sb.append("• ").append(escapeJson(violation)).append("\\n");
+        // Include UUID if configured
+        if (plugin.getConfigManager().shouldIncludePlayerUuid()) {
+            sb.append("**UUID**: ").append(escapeJson(player.getUniqueId().toString())).append("\\n");
         }
         
-        // Client version (if PlaceholderAPI available)
-        String version = getClientVersion(player);
-        sb.append("**Client Version**: ").append(escapeJson(version)).append("\\n");
-        
-        // Brand
-        sb.append("**Brand**: `").append(escapeJson(brand != null ? brand : "unknown")).append("`\\n");
-        
-        // Channels
-        sb.append("**Channels**:\\n");
-        PlayerSession session = plugin.getPlayerSession(player.getUniqueId());
-        if (session != null && !session.getChannels().isEmpty()) {
-            for (String ch : session.getChannels()) {
-                sb.append("• `").append(escapeJson(ch)).append("`\\n");
+        // Only show violations if configured
+        if (plugin.getConfigManager().shouldShowViolations()) {
+            sb.append("**Violations**:\\n");
+            for (String violation : violations) {
+                sb.append("• ").append(escapeJson(violation)).append("\\n");
             }
-        } else {
-            sb.append("• None detected\\n");
+        }
+        
+        // Only show version if configured
+        if (plugin.getConfigManager().shouldShowVersion()) {
+            String version = getClientVersion(player);
+            sb.append("**Client Version**: ").append(escapeJson(version)).append("\\n");
+        }
+        
+        // Only show brand if configured
+        if (plugin.getConfigManager().shouldShowBrand()) {
+            sb.append("**Brand**: `").append(escapeJson(brand != null ? brand : "unknown")).append("`\\n");
+        }
+        
+        // Only show channels if configured
+        if (plugin.getConfigManager().shouldShowChannels()) {
+            sb.append("**Channels**:\\n");
+            PlayerSession session = plugin.getPlayerSession(player.getUniqueId());
+            if (session != null && !session.getChannels().isEmpty()) {
+                for (String ch : session.getChannels()) {
+                    sb.append("• `").append(escapeJson(ch)).append("`\\n");
+                }
+            } else {
+                sb.append("• None detected\\n");
+            }
         }
         
         sb.append("\",");
         
-        // Timestamp
-        sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
+        // Include server name if configured
+        if (plugin.getConfigManager().shouldIncludeServerName()) {
+            sb.append("\"footer\":{\"text\":\"").append(escapeJson(Bukkit.getServer().getName())).append("\"},");
+        }
+        
+        // Include timestamp if configured
+        if (plugin.getConfigManager().shouldIncludeTimestamp()) {
+            sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
+        } else {
+            // Remove trailing comma if no timestamp
+            if (sb.charAt(sb.length() - 1) == ',') {
+                sb.deleteCharAt(sb.length() - 1);
+            }
+        }
         
         sb.append("}]}");
         return sb.toString();
@@ -256,7 +311,22 @@ public class DiscordService {
      */
     private String createModifiedChannelJson(Player player, Set<String> channels) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"embeds\":[{");
+        sb.append("{");
+        
+        // Add username if configured
+        String username = plugin.getConfigManager().getDiscordUsername();
+        if (username != null && !username.isEmpty()) {
+            sb.append("\"username\":\"").append(escapeJson(username)).append("\",");
+        }
+        
+        // Add avatar if configured
+        String avatarUrl = plugin.getConfigManager().getDiscordAvatarUrl();
+        if (avatarUrl != null && !avatarUrl.isEmpty()) {
+            sb.append("\"avatar_url\":\"").append(escapeJson(avatarUrl)).append("\",");
+        }
+        
+        // Add embeds
+        sb.append("\"embeds\":[{");
         
         // Title
         String title = plugin.getConfigManager().getDiscordEmbedTitle()
@@ -279,6 +349,11 @@ public class DiscordService {
         // Player info
         sb.append("**Player**: ").append(escapeJson(player.getName())).append("\\n");
         
+        // Include UUID if configured
+        if (plugin.getConfigManager().shouldIncludePlayerUuid()) {
+            sb.append("**UUID**: ").append(escapeJson(player.getUniqueId().toString())).append("\\n");
+        }
+        
         // Modified channels
         sb.append("**Modified Channels**:\\n");
         for (String channel : channels) {
@@ -287,8 +362,20 @@ public class DiscordService {
         
         sb.append("\",");
         
-        // Timestamp
-        sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
+        // Include server name if configured
+        if (plugin.getConfigManager().shouldIncludeServerName()) {
+            sb.append("\"footer\":{\"text\":\"").append(escapeJson(Bukkit.getServer().getName())).append("\"},");
+        }
+        
+        // Include timestamp if configured
+        if (plugin.getConfigManager().shouldIncludeTimestamp()) {
+            sb.append("\"timestamp\":\"").append(java.time.OffsetDateTime.now()).append("\"");
+        } else {
+            // Remove trailing comma if no timestamp
+            if (sb.charAt(sb.length() - 1) == ',') {
+                sb.deleteCharAt(sb.length() - 1);
+            }
+        }
         
         sb.append("}]}");
         return sb.toString();

@@ -64,8 +64,8 @@ public class PlayerListener implements Listener {
             plugin.getConfigManager().isUpdateNotifyOnJoinEnabled()) {
             
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline()) {
-                    // VersionChecker will handle the notification
+                if (player.isOnline() && plugin.getVersionChecker().isUpdateAvailable()) {
+                    plugin.getVersionChecker().sendUpdateNotification(player);
                 }
             }, 40L); // 2 seconds delay
         }
