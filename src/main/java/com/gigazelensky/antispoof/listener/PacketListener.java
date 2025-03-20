@@ -54,7 +54,13 @@ public class PacketListener extends PacketListenerAbstract {
         // Handle brand channel
         String brandChannel = getBrandChannel();
         if (channel.equals(brandChannel)) {
-            handleBrandMessage(player, data);
+            String brand = extractBrand(data);
+            if (brand != null && !brand.isEmpty()) {
+                if (plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Brand packet from " + player.getName() + ": " + brand);
+                }
+                plugin.getDetectionService().handleClientBrand(player, brand);
+            }
             return;
         }
         
@@ -72,19 +78,31 @@ public class PacketListener extends PacketListenerAbstract {
     }
     
     /**
-     * Handles a client brand message
+     * Extracts brand from packet data
      */
-    private void handleBrandMessage(Player player, byte[] data) {
-        // Brand message format: [length][brand]
-        if (data.length <= 1) return;
-        
-        String brand = new String(data, 1, data.length - 1, StandardCharsets.UTF_8);
-        
-        if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("[Debug] Brand packet from " + player.getName() + ": " + brand);
+    private String extractBrand(byte[] data) {
+        if (data == null || data.length <= 1) {
+            return null;
         }
         
-        plugin.getDetectionService().handleClientBrand(player, brand);
+        try {
+            // Standard format: [length][brand]
+            return new String(data, 1, data.length - 1, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            try {
+                // Fallback: try to parse the whole data as a string
+                String fullData = new String(data, StandardCharsets.UTF_8);
+                
+                // If the first character looks like a length byte (control character), strip it
+                if (fullData.length() > 0 && fullData.charAt(0) <= 16) {
+                    return fullData.substring(1);
+                }
+                return fullData;
+            } catch (Exception ex) {
+                // Last resort: just return null
+                return null;
+            }
+        }
     }
     
     /**

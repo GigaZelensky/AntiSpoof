@@ -331,15 +331,47 @@ public class DetectionService {
             session = plugin.getPlayerSession(uuid);
         }
         
+        // Normalize the brand - handle special cases
+        if (brand != null) {
+            // Trim the brand to remove any extra spaces
+            brand = brand.trim();
+            
+            // If brand is empty after trimming, treat as null
+            if (brand.isEmpty()) {
+                brand = null;
+            }
+        }
+        
         String previousBrand = session.getClientBrand();
         boolean isNewBrand = previousBrand == null || !previousBrand.equals(brand);
         
         if (isNewBrand) {
             if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("[Debug] Client brand for " + player.getName() + ": " + brand);
+                plugin.getLogger().info("[Debug] Client brand for " + player.getName() + ": " + 
+                                    (brand != null ? brand : "null"));
             }
             
             session.setClientBrand(brand);
+            
+            // If the client has any channels and this is a Fabric client but no brand was detected previously,
+            // check to see if the client has Fabric channels
+            if ((previousBrand == null || previousBrand.isEmpty()) && 
+                brand != null && brand.equalsIgnoreCase("fabric") &&
+                !session.getChannels().isEmpty()) {
+                
+                boolean hasFabricChannel = false;
+                for (String channel : session.getChannels()) {
+                    if (channel.toLowerCase().contains("fabric")) {
+                        hasFabricChannel = true;
+                        break;
+                    }
+                }
+                
+                if (hasFabricChannel && plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Validated Fabric client for " + player.getName() + 
+                                        " - has Fabric channels");
+                }
+            }
             
             // Run detection with a short delay to allow time for channel registration
             Bukkit.getScheduler().runTaskLater(plugin, () -> {

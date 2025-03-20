@@ -65,9 +65,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         // Register commands
         registerCommands();
         
-        // Register plugin channels
-        registerPluginChannels();
-        
         // Initialize PacketEvents
         PacketEvents.getAPI().init();
         
@@ -93,18 +90,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     private void registerCommands() {
         getCommand("antispoof").setExecutor(new AntiSpoofCommand(this));
-    }
-    
-    private void registerPluginChannels() {
-        // Register for client brand channel
-        String channelName = getServer().getBukkitVersion().contains("1.13") || 
-                Integer.parseInt(getServer().getBukkitVersion().split("-")[0].split("\\.")[1]) >= 13 ?
-                "minecraft:brand" : "MC|Brand";
-        
-        getServer().getMessenger().registerIncomingPluginChannel(this, channelName, 
-            (channel, player, message) -> {
-                // Processing done in PacketListener
-            });
     }
     
     private void registerOnlinePlayers() {
@@ -173,6 +158,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public Map<UUID, PlayerSession> getPlayerSessions() {
         return playerSessions;
     }
+    
     /**
      * Gets the version checker
      */

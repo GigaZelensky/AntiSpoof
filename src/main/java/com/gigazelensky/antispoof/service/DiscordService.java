@@ -385,17 +385,34 @@ public class DiscordService {
      * Gets the client version from PlaceholderAPI
      */
     private String getClientVersion(Player player) {
-        // If ViaVersion and PlaceholderAPI are available, get the protocol version
-        if (plugin.getServer().getPluginManager().isPluginEnabled("ViaVersion") && 
-            plugin.getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+        // Check if PlaceholderAPI is available
+        if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             try {
-                return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
-                    player, "%viaversion_player_protocol_version%");
+                // Try to get the version directly from PlaceholderAPI
+                me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, "%player_name%"); // Test if PlaceholderAPI is working
+                
+                // If ViaVersion is available
+                if (Bukkit.getPluginManager().isPluginEnabled("ViaVersion")) {
+                    return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                        player, "%viaversion_player_protocol_version%");
+                }
+                
+                // Try other version placeholders if ViaVersion isn't available
+                if (Bukkit.getPluginManager().isPluginEnabled("ProtocolSupport")) {
+                    return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                        player, "%protocolsupport_version_name%");
+                }
+                
+                return "Unknown (No version plugin)";
             } catch (Exception e) {
-                return "Unknown";
+                plugin.getLogger().warning("[Discord] Error getting version via PlaceholderAPI: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugMode()) {
+                    e.printStackTrace();
+                }
+                return "Error: " + e.getMessage();
             }
         }
-        return "Unknown";
+        return "Unknown (No PlaceholderAPI)";
     }
     
     /**

@@ -1,5 +1,6 @@
 package com.gigazelensky.antispoof.util;
 
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
@@ -12,6 +13,8 @@ import java.util.regex.Pattern;
  */
 public class MessageFormatter {
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("%([a-zA-Z_]+)%");
+    private static boolean placeholderApiChecked = false;
+    private static boolean placeholderApiAvailable = false;
     
     /**
      * Formats a message with player and violation placeholders
@@ -20,10 +23,25 @@ public class MessageFormatter {
                              String brand, String channel) {
         if (message == null) return "";
         
+        // First check if PlaceholderAPI is available (only do this check once)
+        if (!placeholderApiChecked) {
+            placeholderApiAvailable = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
+            placeholderApiChecked = true;
+        }
+        
+        // Apply PlaceholderAPI placeholders if available
+        if (placeholderApiAvailable && player != null) {
+            try {
+                message = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, message);
+            } catch (Exception e) {
+                // Silently ignore PlaceholderAPI errors
+            }
+        }
+        
         // Apply color codes
         String formatted = ChatColor.translateAlternateColorCodes('&', message);
         
-        // Apply placeholders
+        // Apply our own placeholders
         Matcher matcher = PLACEHOLDER_PATTERN.matcher(formatted);
         StringBuffer buffer = new StringBuffer();
         
@@ -91,5 +109,32 @@ public class MessageFormatter {
      */
     public static String format(String message, Player player, String brand) {
         return format(message, player, null, brand, null);
+    }
+    
+    /**
+     * Applies PlaceholderAPI placeholders to a message if available
+     */
+    public static String applyExternalPlaceholders(String message, Player player) {
+        if (message == null || message.isEmpty() || player == null) {
+            return message;
+        }
+        
+        // First check if PlaceholderAPI is available (only do this check once)
+        if (!placeholderApiChecked) {
+            placeholderApiAvailable = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
+            placeholderApiChecked = true;
+        }
+        
+        // Apply PlaceholderAPI placeholders if available
+        if (placeholderApiAvailable) {
+            try {
+                return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, message);
+            } catch (Exception e) {
+                // Silently ignore PlaceholderAPI errors
+                return message;
+            }
+        }
+        
+        return message;
     }
 }
