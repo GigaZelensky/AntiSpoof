@@ -17,13 +17,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.Set;
-import java.util.HashSet;
 
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck", "detectmods"
+        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", 
+        "runcheck", "detectmods", "clearcooldowns"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -130,6 +129,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         
+        // Handle clearcooldowns command
+        if (subCommand.equals("clearcooldowns")) {
+            if (!sender.hasPermission("antispoof.admin")) {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+                return true;
+            }
+            
+            handleClearCooldownsCommand(sender, args);
+            return true;
+        }
+        
         // Commands that require a player argument
         if (args.length < 2) {
             sender.sendMessage(ChatColor.RED + "Usage: /" + label + " " + subCommand + " <player>");
@@ -163,6 +173,36 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
         
         return true;
+    }
+    
+    /**
+     * Handles the clearCooldowns command to reset detection cooldowns
+     * @param sender The command sender
+     * @param args The command arguments
+     */
+    private void handleClearCooldownsCommand(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "Usage: /antispoof clearcooldowns <player|*>");
+            return;
+        }
+        
+        String playerName = args[1];
+        
+        if (playerName.equals("*")) {
+            // Clear all cooldowns
+            plugin.getTranslationKeyDetector().clearAllCooldowns();
+            sender.sendMessage(ChatColor.GREEN + "Cleared detection cooldowns for all players.");
+            return;
+        }
+        
+        Player target = Bukkit.getPlayer(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+        
+        plugin.getTranslationKeyDetector().clearCooldown(target.getUniqueId());
+        sender.sendMessage(ChatColor.GREEN + "Cleared detection cooldown for " + target.getName() + ".");
     }
     
     /**
@@ -201,9 +241,9 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.YELLOW + "No mods previously detected for " + target.getName() + ".");
         }
         
-        // Run a new scan
+        // Run a new scan - passing true to forceScan to bypass cooldown
         sender.sendMessage(ChatColor.AQUA + "Starting new mod detection scan for " + target.getName() + "...");
-        plugin.getTranslationKeyDetector().scanPlayer(target);
+        plugin.getTranslationKeyDetector().scanPlayer(target, true);
         sender.sendMessage(ChatColor.GREEN + "Detection scan initiated. Results will be reported via alerts if mods are found.");
     }
     
@@ -411,10 +451,11 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 }
             }
             
-            // Check for missing required brand channels
+            // Check for missing required channels for their brand
             String matchedBrand = plugin.getConfigManager().getMatchingClientBrand(brand);
             if (matchedBrand != null && hasChannels) {
                 ConfigManager.ClientBrandConfig brandConfig = plugin.getConfigManager().getClientBrandConfig(matchedBrand);
+                
                 if (!brandConfig.getRequiredChannels().isEmpty()) {
                     // Look for missing required channels
                     List<String> missingRequiredChannels = new ArrayList<>();
@@ -607,6 +648,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof detectmods <player> " + ChatColor.WHITE + "- Scan player for mods using translation keys");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof clearcooldowns <player|*> " + ChatColor.WHITE + "- Clear detection cooldowns");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
     }
@@ -700,7 +742,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             String partialArg = args[1].toLowerCase();
             
             if (args[0].equalsIgnoreCase("check") || 
-                args[0].equalsIgnoreCase("runcheck")) {
+                args[0].equalsIgnoreCase("runcheck") ||
+                args[0].equalsIgnoreCase("clearcooldowns")) {
                 completions.add("*");
             }
             
@@ -708,7 +751,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 args[0].equalsIgnoreCase("brand") ||
                 args[0].equalsIgnoreCase("check") ||
                 args[0].equalsIgnoreCase("detectmods") ||
-                args[0].equalsIgnoreCase("runcheck")) {
+                args[0].equalsIgnoreCase("runcheck") ||
+                args[0].equalsIgnoreCase("clearcooldowns")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)
                         .filter(name -> name.toLowerCase().startsWith(partialArg))

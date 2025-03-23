@@ -429,7 +429,7 @@ translation-detection:
   discord-alert: true
   
   # Cooldown in seconds between translation key checks for the same player
-  cooldown: 300
+  cooldown: 30
   
   # Maximum number of translation keys to check per detection attempt
   keys-per-check: 4
@@ -497,6 +497,8 @@ translation-detection:
       - "key.stepup.toggle"
       - "key.flighthelper.lockup"
       - "key.do_a_barrel_roll.toggle_enabled"
+      - "key.climbladdersfast.toggle"
+      - "key.vekquickturn.quickturn"
       
     # Auto-related mods detection
     "automation-mods":
@@ -507,6 +509,9 @@ translation-detection:
       - "autoclicker-fabric.hud.holding"
       - "key.autoclicker-rinf.toggleacf"
       - "key.p1x3lc0w.invutil.autoTool"
+      - "key.easierchests.sortchest"
+      - "key.slotswap.swap"
+      - "key.ecs.swap"
       
     # Common hack detection
     "hacks":
@@ -517,40 +522,30 @@ translation-detection:
       - "key.hypnotic-client.open-click-gui"
       - "key.lumina.open_click_gui"
       
-    # The list from Cytooxien's detection
-    "cytooxien-detected":
-      - "tweakeroo.gui.button.config_gui.tweaks"
+    # Additional Utilities
+    "utilities":
       - "key.healthindicators.renderingEnabled"
       - "key.glitchifyed.quick_hotkeys.equip_totem"
-      - "key.climbladdersfast.toggle"
-      - "Restore Screen"
-      - "key.record.desc"
-      - "key.inventory_control_tweaks.drag_out_of_inventory_modifier"
-      - "key.craftingtweaks.rotate"
-      - "config.torohealth.red"
-      - "tweakermore.hotkeys.category.main"
-      - "inventorytabs.key.next_tab"
-      - "key.vekquickturn.quickturn"
-      - "key.slotswap.swap"
-      - "category.antitoolbreak"
-      - "sodium.option_impact.low"
       - "key.playerhighlighter.toggle"
-      - "net.clayborn.accurateblockplacement.togglevanillaplacement"
-      - "key.easierchests.sortchest"
-      - "vivecraft.key.guiLeftClick"
       - "key.itemswapper.itemswitcher"
-      - "key.ecs.swap"
-      - "litematica.gui.button.change_menu.to_main_menu"
-      - "Start Recording"
-      - "inventoryprofiles.gui.config.Tweaks"
-      - "text.autoconfig.steppy.title"
-      - "key.entity-outliner.selector"
-      - "key.mousewheelie.open_config_screen"
-      - "key.healthbarplus.options"
       - "key.antighost.reveal"
       - "of.key.zoom"
-      - "modmenu.summaryTranslation.breakfree"
+      - "key.mousewheelie.open_config_screen"
+      - "key.healthbarplus.options"
+      - "key.entity-outliner.selector"
+      
+    # Additional Tweaks/Mods
+    "tweaks":
+      - "tweakeroo.gui.button.config_gui.tweaks"
+      - "tweakermore.hotkeys.category.main"
+      - "key.inventory_control_tweaks.drag_out_of_inventory_modifier"
+      - "key.craftingtweaks.rotate"
+      - "litematica.gui.button.change_menu.to_main_menu"
+      - "inventoryprofiles.gui.config.Tweaks"
+      - "text.autoconfig.steppy.title"
+      - "config.torohealth.red"
       - "config.inventoryessentials.title"
+      - "inventorytabs.key.next_tab"
+      - "category.antitoolbreak"
       - "descriptions.client.thundergui"
       - "keybind.invmove.toggleMove"
-      - "end.marker"

@@ -9,6 +9,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
 import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
@@ -41,6 +42,9 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     
     // Task for cleaning up old sessions
     private BukkitTask cleanupTask;
+
+    // Track players that have active sign tests
+    private final Set<UUID> activeSignTests = new HashSet<>();
     
     public TranslationKeyDetector(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -108,47 +112,78 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         cleanupTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             long now = System.currentTimeMillis();
             
-            // Remove sessions older than 30 seconds
-            activeSessions.entrySet().removeIf(entry -> 
-                now - entry.getValue().creationTime > 30000);
-                
+            // Remove sessions older than 60 seconds (increased from 30)
+            activeSessions.entrySet().removeIf(entry -> {
+                boolean shouldRemove = now - entry.getValue().creationTime > 60000;
+                if (shouldRemove && config.isDebugMode()) {
+                    UUID playerUuid = entry.getKey();
+                    Player player = Bukkit.getPlayer(playerUuid);
+                    String playerName = player != null ? player.getName() : playerUuid.toString();
+                    plugin.getLogger().info("[Debug] Removing stale detection session for " + playerName);
+                }
+                return shouldRemove;
+            });
+            
             // Clean up cooldowns older than 5 minutes
             lastCheckTimes.entrySet().removeIf(entry -> 
                 now - entry.getValue() > 300000);
+            
+            // Clear any active sign tests that might have been left active
+            activeSignTests.clear();
                 
-        }, 20 * 60, 20 * 60); // Run every minute
+        }, 20 * 30, 20 * 30); // Run every 30 seconds
     }
     
     /**
      * Initiates a detection scan for a player
+     * @param player The player to scan
+     * @param forceScan If true, bypasses cooldown check for manual scans
      */
-    public void scanPlayer(Player player) {
+    public void scanPlayer(Player player, boolean forceScan) {
         if (player == null || !player.isOnline()) {
             return;
         }
         
         UUID playerUuid = player.getUniqueId();
         
-        // Check cooldown
-        long now = System.currentTimeMillis();
-        Long lastCheck = lastCheckTimes.get(playerUuid);
-        if (lastCheck != null && now - lastCheck < config.getTranslationDetectionCooldown() * 1000L) {
+        // Check cooldown (skip if forceScan is true)
+        if (!forceScan) {
+            long now = System.currentTimeMillis();
+            Long lastCheck = lastCheckTimes.get(playerUuid);
+            if (lastCheck != null && now - lastCheck < config.getTranslationDetectionCooldown() * 1000L) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Translation key detection for " + player.getName() + 
+                                         " skipped (on cooldown)");
+                }
+                return;
+            }
+        }
+        
+        // Check if player already has an active session
+        if (activeSessions.containsKey(playerUuid)) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Translation key detection for " + player.getName() + 
-                                     " skipped (on cooldown)");
+                                     " skipped (active session already exists)");
             }
-            return;
+            
+            // If forcing scan, clean up the previous session
+            if (forceScan) {
+                activeSessions.remove(playerUuid);
+            } else {
+                return;
+            }
         }
         
         // Update last check time
-        lastCheckTimes.put(playerUuid, now);
+        lastCheckTimes.put(playerUuid, System.currentTimeMillis());
         
         // Create a new detection session
-        DetectionSession session = new DetectionSession(playerUuid, now);
+        DetectionSession session = new DetectionSession(playerUuid, System.currentTimeMillis());
         activeSessions.put(playerUuid, session);
         
         if (config.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Starting translation key detection for " + player.getName());
+            plugin.getLogger().info("[Debug] Starting translation key detection for " + player.getName() + 
+                                  (forceScan ? " (forced scan)" : ""));
         }
         
         // Use an unobtrusive approach by testing a few keys at a time
@@ -164,6 +199,16 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         
         // Send fake sign data with translation keys
         sendFakeSignWithTranslationKeys(player, batchKeys);
+        
+        // Mark this player as having an active sign test
+        activeSignTests.add(playerUuid);
+    }
+    
+    /**
+     * Backward compatibility - uses default forceScan = false
+     */
+    public void scanPlayer(Player player) {
+        scanPlayer(player, false);
     }
     
     /**
@@ -209,10 +254,43 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Debug] Sent fake sign with " + keyCount + " translation keys to " + player.getName());
+                    for (int i = 0; i < keyCount; i++) {
+                        plugin.getLogger().info("[Debug] Sign line " + i + ": " + translationKeys.get(i));
+                    }
                 }
+                
+                // Schedule a fallback detection after a timeout
+                // This helps in case the client doesn't respond explicitly
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    // If the session still exists and is still pending response
+                    if (activeSessions.containsKey(playerUuid) && 
+                        activeSessions.get(playerUuid).pendingResponse &&
+                        activeSignTests.contains(playerUuid)) {
+                        
+                        // The fact that the client processed our sign and didn't crash is itself
+                        // an indication that they might have modded client capabilities
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] No explicit sign response from " + player.getName() + 
+                                                 " but client processed sign without error - possible mod detection");
+                        }
+                        
+                        // OPTIONAL: You could call processDetection here if you want to flag clients 
+                        // that process the sign but don't send an explicit response
+                        // processDetection(player, "No explicit response but sign was processed");
+                        
+                        // Mark as not pending to avoid duplicate detections
+                        activeSessions.get(playerUuid).pendingResponse = false;
+                        
+                        // Clean up
+                        activeSessions.remove(playerUuid);
+                        activeSignTests.remove(playerUuid);
+                    }
+                }, 100L); // Wait 5 seconds for a response
+                
             } catch (Exception e) {
                 plugin.getLogger().warning("[TranslationKeyDetector] Error sending fake sign: " + e.getMessage());
                 activeSessions.remove(playerUuid);
+                activeSignTests.remove(playerUuid);
             }
         }, 5L); // Short delay to ensure packets are sent in the right order
     }
@@ -225,44 +303,86 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             Player player = (Player) event.getPlayer();
             UUID playerUuid = player.getUniqueId();
             
+            // Additional debug logging for all sign updates
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Received sign update packet from " + player.getName());
+            }
+            
             // Check if we have an active session for this player
             DetectionSession session = activeSessions.get(playerUuid);
-            if (session == null || !session.pendingResponse) return;
+            if (session == null) {
+                if (activeSignTests.contains(playerUuid)) {
+                    // We have an active test but lost the session - recreate basic session
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Session lost but active test found for " + player.getName() + 
+                                             " - processing anyway");
+                    }
+                    processDetection(player, "Sign response received (session recovery)");
+                    activeSignTests.remove(playerUuid);
+                    event.setCancelled(true);
+                }
+                
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Received sign update from " + player.getName() + 
+                                         " but no active session found");
+                }
+                return;
+            }
+
+            if (!session.pendingResponse) {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Received sign update from " + player.getName() + 
+                                         " but session is not pending response");
+                }
+                return;
+            }
             
             // Mark session as processed
             session.pendingResponse = false;
             
-            // SIMPLIFIED IMPLEMENTATION
-            // We don't try to read the packet content at all since different versions
-            // of PacketEvents might have different methods for this.
-            // Instead, we simply detect that the client responded to our fake sign packet.
-            
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Received sign update from " + player.getName() + 
-                                      " in response to translation key test");
-            }
-            
-            // Add a generic detection entry
-            Set<String> detectedModsForPlayer = detectedMods.computeIfAbsent(
-                player.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
-            detectedModsForPlayer.add("Client Mod (Translation Response)");
-            
             // Process the detection
-            if (config.isTranslationDetectionEnabled()) {
-                plugin.getDetectionManager().processViolation(
-                    player,
-                    "TRANSLATION_KEY",
-                    "Client responded to translation key test (potential mod)"
-                );
-            }
+            processDetection(player, "Sign response received");
             
             // Cancel the packet since it's our fake sign
             event.setCancelled(true);
             
             // Cleanup
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                activeSessions.remove(player.getUniqueId());
-            }, 5L);
+            activeSessions.remove(playerUuid);
+            activeSignTests.remove(playerUuid);
+        }
+    }
+    
+    /**
+     * Processes a mod detection for a player
+     */
+    private void processDetection(Player player, String reason) {
+        UUID playerUuid = player.getUniqueId();
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Detected potential mod for " + player.getName() + 
+                                  ": " + reason);
+        }
+        
+        // Add to detected mods
+        Set<String> detectedModsForPlayer = detectedMods.computeIfAbsent(
+            playerUuid, k -> ConcurrentHashMap.newKeySet());
+        detectedModsForPlayer.add("Client Mod (Translation Response)");
+        
+        // Process the detection
+        if (config.isTranslationDetectionEnabled()) {
+            plugin.getDetectionManager().processViolation(
+                player,
+                "TRANSLATION_KEY",
+                "Client responded to translation key test (potential mod)"
+            );
+        }
+        
+        // Notify any online player with antispoof.admin permission
+        for (Player admin : Bukkit.getOnlinePlayers()) {
+            if (admin.hasPermission("antispoof.admin")) {
+                admin.sendMessage(ChatColor.GOLD + "[AntiSpoof] " + ChatColor.GREEN + 
+                               "Mod detection for " + player.getName() + ": " + ChatColor.WHITE + reason);
+            }
         }
     }
     
@@ -274,12 +394,25 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
     
     /**
+     * Clears the cooldown for a specific player
+     */
+    public void clearCooldown(UUID playerUuid) {
+        lastCheckTimes.remove(playerUuid);
+    }
+    
+    /**
+     * Clears cooldowns for all players
+     */
+    public void clearAllCooldowns() {
+        lastCheckTimes.clear();
+    }
+    
+    /**
      * Cleans up data for a player when they quit
      */
     public void handlePlayerQuit(UUID playerUuid) {
         activeSessions.remove(playerUuid);
-        detectedMods.remove(playerUuid);
-        lastCheckTimes.remove(playerUuid);
+        activeSignTests.remove(playerUuid);
     }
     
     /**
