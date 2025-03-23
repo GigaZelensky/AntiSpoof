@@ -203,6 +203,52 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
     }
+
+    /**
+     * Initiates a targeted detection scan for a specific translation key
+     * @param player The player to scan
+     * @param translationKey The specific translation key to test
+     */
+    public void scanPlayerForKey(Player player, String translationKey) {
+        if (player == null || !player.isOnline() || translationKey == null || translationKey.isEmpty()) {
+            return;
+        }
+        
+        UUID playerUuid = player.getUniqueId();
+        
+        // Check if player already has an active session
+        if (activeSessions.containsKey(playerUuid)) {
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Translation key detection for " + player.getName() + 
+                                     " skipped (active session already exists)");
+            }
+            
+            // Clean up the previous session
+            activeSessions.remove(playerUuid);
+        }
+        
+        // Create a new detection session
+        DetectionSession session = new DetectionSession(playerUuid, System.currentTimeMillis());
+        activeSessions.put(playerUuid, session);
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Starting targeted translation key detection for " + player.getName() + 
+                                 " with key: " + translationKey);
+        }
+        
+        // Add the specific key to test
+        session.translationKeysToCheck.add(translationKey);
+        
+        // Create a list with just this key (and pad with empty strings)
+        List<String> keys = new ArrayList<>();
+        keys.add(translationKey);
+        
+        // Send fake sign data with the translation key
+        sendFakeSignWithTranslationKeys(player, keys);
+        
+        // Mark this player as having an active sign test
+        activeSignTests.add(playerUuid);
+    }
     
     /**
      * Backward compatibility - uses default forceScan = false
@@ -391,6 +437,13 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
      */
     public Set<String> getDetectedMods(UUID playerUuid) {
         return detectedMods.getOrDefault(playerUuid, Collections.emptySet());
+    }
+    
+    /**
+     * Gets a set of all translation keys configured for detection
+     */
+    public Set<String> getAllTranslationKeys() {
+        return translationKeyToMod.keySet();
     }
     
     /**

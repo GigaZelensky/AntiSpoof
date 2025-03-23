@@ -22,7 +22,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
         "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", 
-        "runcheck", "detectmods", "clearcooldowns"
+        "runcheck", "detectmods", "clearcooldowns", "translatekey"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -129,6 +129,12 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         
+        // Handle translatekey command
+        if (subCommand.equals("translatekey")) {
+            handleTranslateKeyCommand(sender, args);
+            return true;
+        }
+        
         // Handle clearcooldowns command
         if (subCommand.equals("clearcooldowns")) {
             if (!sender.hasPermission("antispoof.admin")) {
@@ -173,6 +179,45 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
         
         return true;
+    }
+    
+    /**
+     * Handles the translatekey command to test a specific translation key against a player
+     * @param sender The command sender
+     * @param args The command arguments
+     */
+    private void handleTranslateKeyCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("antispoof.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+            return;
+        }
+        
+        if (args.length < 3) {
+            sender.sendMessage(ChatColor.RED + "Usage: /antispoof translatekey <player> <key>");
+            return;
+        }
+        
+        String playerName = args[1];
+        String translationKey = args[2];
+        
+        Player target = Bukkit.getPlayer(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+        
+        // Check if translation detection is enabled
+        if (!plugin.getConfigManager().isTranslationDetectionEnabled()) {
+            sender.sendMessage(ChatColor.RED + "Translation key detection is disabled in the configuration.");
+            return;
+        }
+        
+        sender.sendMessage(ChatColor.AQUA + "Testing translation key '" + translationKey + "' on player " + target.getName() + "...");
+        
+        // Scan the player for the specific translation key
+        plugin.getTranslationKeyDetector().scanPlayerForKey(target, translationKey);
+        
+        sender.sendMessage(ChatColor.GREEN + "Test initialized. Results will be reported via alerts if mod is detected.");
     }
     
     /**
@@ -648,6 +693,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof detectmods <player> " + ChatColor.WHITE + "- Scan player for mods using translation keys");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof translatekey <player> <key> " + ChatColor.WHITE + "- Test a specific translation key on a player");
         sender.sendMessage(ChatColor.GRAY + "/antispoof clearcooldowns <player|*> " + ChatColor.WHITE + "- Clear detection cooldowns");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
@@ -752,11 +798,43 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 args[0].equalsIgnoreCase("check") ||
                 args[0].equalsIgnoreCase("detectmods") ||
                 args[0].equalsIgnoreCase("runcheck") ||
-                args[0].equalsIgnoreCase("clearcooldowns")) {
+                args[0].equalsIgnoreCase("clearcooldowns") ||
+                args[0].equalsIgnoreCase("translatekey")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)
                         .filter(name -> name.toLowerCase().startsWith(partialArg))
                         .collect(Collectors.toList()));
+            }
+        } else if (args.length == 3) {
+            if (args[0].equalsIgnoreCase("translatekey")) {
+                String partialArg = args[2].toLowerCase();
+                // Add some common translation keys for convenience
+                List<String> commonKeys = Arrays.asList(
+                    "sodium.option_impact.low",
+                    "key.wurst.zoom",
+                    "key.freecam.toggle",
+                    "xray.config.toggle",
+                    "key.meteor-client.open-gui",
+                    "litematica.gui.button.change_menu.to_main_menu",
+                    "gui.xaero_open_map",
+                    "tweakeroo.gui.button.config_gui.tweaks"
+                );
+                
+                for (String key : commonKeys) {
+                    if (key.toLowerCase().contains(partialArg)) {
+                        completions.add(key);
+                    }
+                }
+                
+                // Also suggest any translation keys from the config if available
+                Set<String> configKeys = plugin.getTranslationKeyDetector().getAllTranslationKeys();
+                if (configKeys != null) {
+                    for (String key : configKeys) {
+                        if (key.toLowerCase().contains(partialArg)) {
+                            completions.add(key);
+                        }
+                    }
+                }
             }
         }
         
