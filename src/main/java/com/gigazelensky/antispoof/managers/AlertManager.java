@@ -545,4 +545,64 @@ public class AlertManager {
         lastAlerts.remove(playerUUID);
         playersWithAlertPermission.remove(playerUUID);
     }
+    
+    /**
+     * Sends a translation key detection alert
+     * @param player The player who triggered the alert
+     * @param detectedMods The list of detected mods
+     */
+    public void sendTranslationDetectionAlert(Player player, Set<String> detectedMods) {
+        if (!canSendAlert(player.getUniqueId(), "TRANSLATION_DETECTION")) {
+            return;
+        }
+        
+        String modsString = String.join(", ", detectedMods);
+        
+        // Format the player alert message
+        String alertMessage = config.getTranslationDetectionAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%mods%", modsString);
+        
+        // Format the console alert message
+        String consoleAlertMessage = config.getTranslationDetectionConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%mods%", modsString);
+        
+        // Log to console
+        plugin.getLogger().info(consoleAlertMessage);
+        
+        // Notify players with permission
+        sendAlertToRecipients(alertMessage);
+        
+        // Send to Discord if enabled
+        if (config.isDiscordWebhookEnabled() && 
+            config.isTranslationDetectionDiscordAlertEnabled()) {
+            
+            List<String> violations = new ArrayList<>(detectedMods);
+            plugin.getDiscordWebhookHandler().sendAlert(
+                player, 
+                "Translation Key Detection", 
+                plugin.getClientBrand(player), 
+                null, 
+                violations
+            );
+        }
+        
+        // Execute punishment if needed
+        if (config.shouldPunishTranslationDetection()) {
+            String reason = "Detected mods via translation keys: " + modsString;
+            
+            for (String command : config.getTranslationDetectionPunishments()) {
+                String formatted = command.replace("%player%", player.getName())
+                                         .replace("%reason%", reason)
+                                         .replace("%mods%", modsString);
+                
+                // Execute command on the main thread
+                final String finalCommand = formatted;
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), finalCommand);
+                });
+            }
+        }
+    }
 }

@@ -414,3 +414,97 @@ messages:
   multiple-flags: "&8[&cAntiSpoof&8] &e%player% has multiple violations: &c%reasons%"
   # Message for console when multiple violations
   console-multiple-flags: "%player% has multiple violations: %reasons%"
+
+# ──────────────────────────────────────────────────────────
+#              Translation Key Detection Settings
+# ──────────────────────────────────────────────────────────
+# This module detects mods by checking if translation keys are being
+# translated client-side. This exploits a behavior where mods register
+# translation keys that can be detected via sign or anvil interactions.
+translation-detection:
+  # Whether to enable translation key detection
+  enabled: true
+  
+  # Whether to send alerts to Discord for detected mods
+  discord-alert: true
+  
+  # Cooldown in seconds between translation key checks for the same player
+  cooldown: 300
+  
+  # Maximum number of translation keys to check per detection attempt
+  keys-per-check: 4
+  
+  # Whether to check players on join
+  check-on-join: true
+  
+  # Custom alert messages for this specific violation
+  alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cDetected mod(s): &f%mods%"
+  console-alert-message: "%player% flagged! Detected mod(s) via translation keys: %mods%"
+  
+  # Whether to punish the player if detection is positive
+  punish: false
+  
+  # Punishment actions to execute
+  # Available placeholders: %player%, %reason%, %mods%
+  punishments:
+    - "kick %player% &cProhibited mod(s) detected: %mods%"
+    # - "ban %player% &cUsing prohibited mods: %mods%"
+  
+  # List of translation keys to check for each mod
+  # The keys will be used to detect if the mod is installed
+  mod-translation-keys:
+    # Freecam mod detection
+    "freecam":
+      - "freecam.key.toggle"
+      - "freecam.name"
+      - "freecam.category"
+    
+    # Xray mod detection
+    "xray":
+      - "xray.key.toggle"
+      - "xray.config.open"
+      - "x13.mod.xray"
+    
+    # Wurst client detection
+    "wurst":
+      - "key.wurst.zoom"
+      - "wurst.keybind.navigator"
+      - "wurst.settings.wurst_options"
+    
+    # Fabric API (useful to detect mod users in general)
+    "fabric":
+      - "fabric.api.module.missing"
+      - "fabric.category.mods"
+    
+    # Meteor client detection
+    "meteor":
+      - "key.meteor-client.open-gui"
+      - "key.meteor-client.open-commands"
+    
+    # Minimap mods detection
+    "minimap":
+      - "key.minimap.voxelmapmenu"
+      - "gui.xaero_minimap_settings"
+      - "gui.xaero_open_map"
+    
+    # Fly/movement mods detection
+    "movement-mods":
+      - "key.flymod.toggle"
+      - "key.stepup.toggle"
+      - "key.flighthelper.lockup"
+      - "key.do_a_barrel_roll.toggle_enabled"
+      
+    # Auto-related mods detection
+    "automation-mods":
+      - "key.autoswitch.toggle"
+      - "key.autoattack.afkAttack"
+      - "key.autofish.open_gui"
+      - "key.autotools.get_tool"
+      - "autoclicker-fabric.hud.holding"
+      
+    # Common hack detection
+    "hacks":
+      - "key.killaura"
+      - "key.chestesp.toggle"
+      - "key.freecam.toggle"
+      - "liquidbounce.generic.enabled"

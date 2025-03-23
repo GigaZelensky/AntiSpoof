@@ -677,4 +677,98 @@ public class ConfigManager {
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
     }
+
+    /**
+     * Checks if translation key detection is enabled
+     * @return True if translation key detection is enabled, false otherwise
+     */
+    public boolean isTranslationDetectionEnabled() {
+        return config.getBoolean("translation-detection.enabled", true);
+    }
+
+    /**
+     * Gets the cooldown between translation key checks in seconds
+     * @return The cooldown in seconds
+     */
+    public int getTranslationDetectionCooldown() {
+        return config.getInt("translation-detection.cooldown", 300);
+    }
+
+    /**
+     * Gets the maximum number of translation keys to check per detection attempt
+     * @return The maximum number of keys to check
+     */
+    public int getTranslationKeysPerCheck() {
+        return config.getInt("translation-detection.keys-per-check", 4);
+    }
+
+    /**
+     * Checks if players should be checked for translation keys on join
+     * @return True if check on join is enabled, false otherwise
+     */
+    public boolean isTranslationCheckOnJoinEnabled() {
+        return config.getBoolean("translation-detection.check-on-join", true);
+    }
+
+    /**
+     * Checks if Discord alerts are enabled for translation key detection
+     * @return True if Discord alerts are enabled, false otherwise
+     */
+    public boolean isTranslationDetectionDiscordAlertEnabled() {
+        return config.getBoolean("translation-detection.discord-alert", true);
+    }
+
+    /**
+     * Gets the alert message for translation key detection
+     * @return The alert message
+     */
+    public String getTranslationDetectionAlertMessage() {
+        return config.getString("translation-detection.alert-message", 
+            "&8[&cAntiSpoof&8] &e%player% flagged! &cDetected mod(s): &f%mods%");
+    }
+
+    /**
+     * Gets the console alert message for translation key detection
+     * @return The console alert message
+     */
+    public String getTranslationDetectionConsoleAlertMessage() {
+        return config.getString("translation-detection.console-alert-message", 
+            "%player% flagged! Detected mod(s) via translation keys: %mods%");
+    }
+
+    /**
+     * Checks if punishment is enabled for translation key detection
+     * @return True if punishment is enabled, false otherwise
+     */
+    public boolean shouldPunishTranslationDetection() {
+        return config.getBoolean("translation-detection.punish", false);
+    }
+
+    /**
+     * Gets the punishment commands for translation key detection
+     * @return List of punishment commands
+     */
+    public List<String> getTranslationDetectionPunishments() {
+        return config.getStringList("translation-detection.punishments");
+    }
+
+    /**
+     * Gets a map of mod names to their translation keys
+     * @return Map of mod names to lists of translation keys
+     */
+    public Map<String, List<String>> getModTranslationKeys() {
+        Map<String, List<String>> result = new HashMap<>();
+        
+        ConfigurationSection keysSection = config.getConfigurationSection("translation-detection.mod-translation-keys");
+        if (keysSection != null) {
+            for (String modName : keysSection.getKeys(false)) {
+                List<String> keys = keysSection.getStringList(modName);
+                if (!keys.isEmpty()) {
+                    result.put(modName, keys);
+                }
+            }
+        }
+        
+        return result;
+    }
 }
