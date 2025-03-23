@@ -19,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerEventListener extends PacketListenerAbstract implements Listener {
     private final AntiSpoofPlugin plugin;
@@ -129,7 +128,7 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         
-        // Register player for alerts FIRST - this ensures they're in the recipient list
+        // Register player for alerts if they have permission
         plugin.getAlertManager().registerPlayer(player);
         
         // Skip if player has bypass permission
@@ -173,20 +172,6 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         // Then, do a complete check with required channels, but with a longer delay
         // This gives the client more time to register all its channels
         scheduleRequiredChannelsCheck(player, REQUIRED_CHANNEL_CHECK_DELAY);
-        
-        // Add one more check with a longer delay to catch any missed alerts
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline() && plugin.isPlayerSpoofing(player)) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    // Reset violation tracking to force new alerts
-                    Map<String, Boolean> violations = plugin.getDetectionManager()
-                        .getPlayerViolations().getOrDefault(player.getUniqueId(), new ConcurrentHashMap<>());
-                    violations.clear();
-                    // Run check again
-                    plugin.getDetectionManager().checkPlayerAsync(player, false, true);
-                });
-            }
-        }, REQUIRED_CHANNEL_CHECK_DELAY + 40L); // Add 2 seconds after the required channel check
     }
     
     @EventHandler(priority = EventPriority.MONITOR)
