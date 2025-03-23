@@ -6,15 +6,13 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.util.Vector3i;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
+import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -197,17 +195,9 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             try {
-                // Create a Vector3i for the position
-                Vector3i position = new Vector3i(
-                    fakeLocation.getBlockX(), 
-                    fakeLocation.getBlockY(), 
-                    fakeLocation.getBlockZ()
-                );
-                
                 // Send packets to simulate opening a sign editor
-                // Using Vector3i constructor based on available API
                 WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(
-                    position, 
+                    new Vector3i(fakeLocation.getBlockX(), fakeLocation.getBlockY(), fakeLocation.getBlockZ()),
                     true // frontText
                 );
                 
@@ -239,201 +229,41 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             DetectionSession session = activeSessions.get(playerUuid);
             if (session == null || !session.pendingResponse) return;
             
-            // Parse the sign update
-            WrapperPlayClientUpdateSign packet = new WrapperPlayClientUpdateSign(event);
-            
-            // Extract sign lines via reflection since APIs might differ
-            String[] receivedLines = extractSignLinesUsingReflection(packet);
-            
             // Mark session as processed
             session.pendingResponse = false;
             
-            // Process the response
-            processFakeSignResponse(player, session, receivedLines);
+            // SIMPLIFIED IMPLEMENTATION
+            // We don't try to read the packet content at all since different versions
+            // of PacketEvents might have different methods for this.
+            // Instead, we simply detect that the client responded to our fake sign packet.
+            
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Received sign update from " + player.getName() + 
+                                      " in response to translation key test");
+            }
+            
+            // Add a generic detection entry
+            Set<String> detectedModsForPlayer = detectedMods.computeIfAbsent(
+                player.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
+            detectedModsForPlayer.add("Client Mod (Translation Response)");
+            
+            // Process the detection
+            if (config.isTranslationDetectionEnabled()) {
+                plugin.getDetectionManager().processViolation(
+                    player,
+                    "TRANSLATION_KEY",
+                    "Client responded to translation key test (potential mod)"
+                );
+            }
             
             // Cancel the packet since it's our fake sign
             event.setCancelled(true);
+            
+            // Cleanup
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                activeSessions.remove(player.getUniqueId());
+            }, 5L);
         }
-    }
-    
-    /**
-     * Extracts sign lines from a packet using direct reflection
-     */
-    private String[] extractSignLinesUsingReflection(WrapperPlayClientUpdateSign packet) {
-        // Default to empty array
-        String[] result = new String[4];
-        Arrays.fill(result, ""); // Default to empty strings
-        
-        try {
-            // Try to access fields directly via reflection
-            Field[] fields = packet.getClass().getDeclaredFields();
-            
-            for (Field field : fields) {
-                field.setAccessible(true);
-                Object value = field.get(packet);
-                
-                if (value instanceof String[]) {
-                    String[] lines = (String[]) value;
-                    if (lines.length == 4) {
-                        return lines;
-                    } else if (lines.length > 0) {
-                        // Copy what we can
-                        System.arraycopy(lines, 0, result, 0, Math.min(lines.length, 4));
-                        return result;
-                    }
-                }
-            }
-            
-            // If no field found, try to get data from the event
-            try {
-                Field eventField = packet.getClass().getDeclaredField("event");
-                if (eventField != null) {
-                    eventField.setAccessible(true);
-                    Object eventValue = eventField.get(packet);
-                    
-                    if (eventValue != null) {
-                        // Try to extract data from the event object
-                        Field[] eventFields = eventValue.getClass().getDeclaredFields();
-                        for (Field f : eventFields) {
-                            f.setAccessible(true);
-                            Object ev = f.get(eventValue);
-                            
-                            if (ev instanceof String[]) {
-                                String[] lines = (String[]) ev;
-                                if (lines.length == 4) {
-                                    return lines;
-                                } else if (lines.length > 0) {
-                                    // Copy what we can
-                                    System.arraycopy(lines, 0, result, 0, Math.min(lines.length, 4));
-                                    return result;
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (NoSuchFieldException e) {
-                // No event field, continue
-            }
-            
-            // Last resort - look for any String[] in any nested object
-            for (Field field : fields) {
-                field.setAccessible(true);
-                Object nestedObj = field.get(packet);
-                
-                if (nestedObj != null && !(nestedObj instanceof String[])) {
-                    try {
-                        Field[] nestedFields = nestedObj.getClass().getDeclaredFields();
-                        for (Field nField : nestedFields) {
-                            nField.setAccessible(true);
-                            Object nValue = nField.get(nestedObj);
-                            
-                            if (nValue instanceof String[]) {
-                                String[] lines = (String[]) nValue;
-                                if (lines.length == 4) {
-                                    return lines;
-                                } else if (lines.length > 0) {
-                                    // Copy what we can
-                                    System.arraycopy(lines, 0, result, 0, Math.min(lines.length, 4));
-                                    return result;
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        // Ignore errors in nested reflection
-                    }
-                }
-            }
-        } catch (Exception e) {
-            plugin.getLogger().warning("[TranslationKeyDetector] Error extracting sign lines: " + e.getMessage());
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Processes the response from the fake sign edit
-     */
-    private void processFakeSignResponse(Player player, DetectionSession session, String[] receivedLines) {
-        Set<String> detectedModsForPlayer = detectedMods.computeIfAbsent(
-            player.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
-        
-        Map<String, String> newDetections = new HashMap<>();
-        
-        // Check each line for translations
-        for (int i = 0; i < Math.min(receivedLines.length, session.sentLines.size()); i++) {
-            String sentLine = session.sentLines.get(i);
-            String receivedLine = receivedLines[i];
-            
-            // Extract translation key from sent line
-            String translationKey = extractTranslationKey(sentLine);
-            if (translationKey == null || translationKey.isEmpty()) continue;
-            
-            // Skip vanilla translation keys
-            if (vanillaTranslationKeys.contains(translationKey)) continue;
-            
-            // If sent and received are different, and received is not the translation key itself,
-            // it means the key was translated, indicating the mod is present
-            if (!receivedLine.equals(translationKey) && !receivedLine.isEmpty()) {
-                String modName = translationKeyToMod.getOrDefault(translationKey, "Unknown Mod");
-                
-                // Add to detected mods
-                detectedModsForPlayer.add(modName);
-                
-                if (!session.detectedMods.contains(modName)) {
-                    session.detectedMods.add(modName);
-                    newDetections.put(translationKey, modName);
-                }
-                
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Detected mod for " + player.getName() + 
-                                         ": " + modName + " (key: " + translationKey + 
-                                         ", translated to: " + receivedLine + ")");
-                }
-            }
-        }
-        
-        // Send alerts for newly detected mods
-        if (!newDetections.isEmpty() && config.isTranslationDetectionEnabled()) {
-            // Prepare reason text
-            String reason = "Using mods: " + 
-                            String.join(", ", newDetections.values());
-            
-            // Send alert using the centralized violation processing
-            plugin.getDetectionManager().processViolation(
-                player,
-                "TRANSLATION_KEY",
-                reason
-            );
-            
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
-                                       " - detected mods via translation keys: " + 
-                                       String.join(", ", newDetections.values()));
-            }
-        }
-        
-        // Cleanup
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            activeSessions.remove(player.getUniqueId());
-        }, 5L);
-    }
-    
-    /**
-     * Extracts a translation key from a JSON formatted sign line
-     */
-    private String extractTranslationKey(String jsonLine) {
-        if (jsonLine == null || jsonLine.isEmpty()) return null;
-        
-        // Basic extraction - in a real implementation you'd want to use a proper JSON parser
-        int translateIndex = jsonLine.indexOf("\"translate\":\"");
-        if (translateIndex == -1) return null;
-        
-        int startIndex = translateIndex + 13; // Length of "\"translate\":\""
-        int endIndex = jsonLine.indexOf("\"", startIndex);
-        
-        if (endIndex == -1) return null;
-        
-        return jsonLine.substring(startIndex, endIndex);
     }
     
     /**

@@ -2,6 +2,7 @@ package com.gigazelensky.antispoof;
 
 import com.gigazelensky.antispoof.commands.AntiSpoofCommand;
 import com.gigazelensky.antispoof.data.PlayerData;
+import com.gigazelensky.antispoof.detection.TranslationKeyDetector;
 import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
 import com.gigazelensky.antispoof.listeners.PermissionChangeListener;
 import com.gigazelensky.antispoof.listeners.PlayerEventListener;
@@ -10,27 +11,20 @@ import com.gigazelensky.antispoof.managers.ConfigManager;
 import com.gigazelensky.antispoof.managers.DetectionManager;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.gigazelensky.antispoof.utils.VersionChecker;
-import com.gigazelensky.antispoof.detection.TranslationKeyDetector;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.geysermc.floodgate.api.FloodgateApi;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
-import java.util.HashSet;
 
 public class AntiSpoofPlugin extends JavaPlugin {
     
@@ -40,19 +34,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private DetectionManager detectionManager;
     private PlayerEventListener playerEventListener;
     private VersionChecker versionChecker;
+    private TranslationKeyDetector translationKeyDetector;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
     // Track which players have already had a brand alert to prevent duplicates
     private final Set<UUID> brandAlertedPlayers = ConcurrentHashMap.newKeySet();
     private FloodgateApi floodgateApi = null;
-    
-    private TranslationKeyDetector translationKeyDetector;
-    
-    // Update the subcommands list declaration
-    private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck", "detectmods"
-    );
     
     @Override
     public void onEnable() {
@@ -106,6 +94,14 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getCommand("antispoof").setExecutor(commandExecutor);
         getCommand("antispoof").setTabCompleter(commandExecutor);
         
+        // Initialize translation key detector
+        if (configManager.isTranslationDetectionEnabled()) {
+            this.translationKeyDetector = new TranslationKeyDetector(this);
+            getLogger().info("Translation key detection enabled.");
+        } else {
+            getLogger().info("Translation key detection is disabled in config.");
+        }
+        
         PacketEvents.getAPI().init();
         
         // Log Discord webhook status
@@ -131,14 +127,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 getLogger().info("[Debug] Initialized alert recipients list");
             }
         }, 40L); // 2 seconds after server fully starts
-        
-        // Initialize the translation key detector
-        if (configManager.isTranslationDetectionEnabled()) {
-            this.translationKeyDetector = new TranslationKeyDetector(this);
-            getLogger().info("Translation key detection enabled.");
-        } else {
-            getLogger().info("Translation key detection is disabled in config.");
-        }
         
         getLogger().info("AntiSpoof v" + getDescription().getVersion() + " enabled!");
     }
@@ -187,6 +175,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public DetectionManager getDetectionManager() {
         return detectionManager;
+    }
+    
+    public TranslationKeyDetector getTranslationKeyDetector() {
+        return translationKeyDetector;
     }
     
     public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
@@ -397,7 +389,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
-        // NEW: Check for missing required channels for their brand
+        // Check for missing required channels for their brand
         String matchedBrand = configManager.getMatchingClientBrand(brand);
         if (matchedBrand != null && hasChannels) {
             ConfigManager.ClientBrandConfig brandConfig = configManager.getClientBrandConfig(matchedBrand);
@@ -448,6 +440,14 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
+        // Check for detected mods via translation key detection
+        if (translationKeyDetector != null) {
+            Set<String> detectedMods = translationKeyDetector.getDetectedMods(player.getUniqueId());
+            if (!detectedMods.isEmpty()) {
+                return true;
+            }
+        }
+        
         // If we got here and player is a Bedrock player in EXEMPT mode, return false
         if (isBedrockPlayer && configManager.isBedrockExemptMode()) {
             return false;
@@ -492,13 +492,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
         playerDataMap.remove(uuid);
         brandAlertedPlayers.remove(uuid);
         
-        if (configManager.isDebugMode()) {
-            getLogger().info("Cleaned up all data for player with UUID: " + uuid);
-        }
-        
-        // Clean up translation key detector data
+        // Clean up translation key detector data if available
         if (translationKeyDetector != null) {
             translationKeyDetector.handlePlayerQuit(uuid);
+        }
+        
+        if (configManager.isDebugMode()) {
+            getLogger().info("Cleaned up all data for player with UUID: " + uuid);
         }
     }
 
@@ -507,120 +507,15 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (PacketEvents.getAPI() != null) {
             PacketEvents.getAPI().terminate();
         }
-        playerBrands.clear();
-        playerDataMap.clear();
-        brandAlertedPlayers.clear();
-        getLogger().info("AntiSpoof disabled!");
         
         // Shutdown translation key detector
         if (translationKeyDetector != null) {
             translationKeyDetector.shutdown();
         }
-    }
-
-    public TranslationKeyDetector getTranslationKeyDetector() {
-        return translationKeyDetector;
-    }
-
-    /**
-     * Process a translation key violation detection
-     * @param player The player
-     * @param violationType The type of violation
-     * @param reason The reason for the violation
-     */
-    public void processViolation(Player player, String violationType, String reason) {
-        if (!player.isOnline()) return;
         
-        UUID uuid = player.getUniqueId();
-        PlayerData data = playerDataMap.get(uuid);
-        
-        if (data == null) {
-            data = new PlayerData();
-            playerDataMap.put(uuid, data);
-        }
-        
-        if (data.isAlreadyPunished()) return;
-        
-        // Handle translation key detection
-        if (violationType.equals("TRANSLATION_KEY")) {
-            // Extract detected mods from reason
-            Set<String> detectedMods = extractModsFromReason(reason);
-            
-            // Send alert
-            getAlertManager().sendTranslationDetectionAlert(player, detectedMods);
-            
-            // Mark as punished if needed
-            if (getConfigManager().shouldPunishTranslationDetection()) {
-                data.setAlreadyPunished(true);
-            }
-        }
-        // Handle other violation types...
-        else {
-            // Existing violation handling code
-        }
-    }
-
-    /**
-     * Extracts mod names from a reason string
-     * @param reason The reason string (format: "Using mods: mod1, mod2, mod3")
-     * @return Set of mod names
-     */
-    private Set<String> extractModsFromReason(String reason) {
-        Set<String> result = new HashSet<>();
-        
-        if (reason.contains("Using mods: ")) {
-            String modsText = reason.substring("Using mods: ".length());
-            String[] mods = modsText.split(", ");
-            
-            for (String mod : mods) {
-                if (!mod.trim().isEmpty()) {
-                    result.add(mod.trim());
-                }
-            }
-        }
-        
-        return result;
-    }
-
-    /**
-     * Handles the detectmods command to trigger translation key detection
-     * @param sender The command sender
-     * @param args The command arguments
-     */
-    private void handleDetectModsCommand(CommandSender sender, String[] args) {
-        if (!configManager.isTranslationDetectionEnabled()) {
-            sender.sendMessage(ChatColor.RED + "Translation key detection is disabled in the configuration.");
-            return;
-        }
-        
-        if (args.length < 2) {
-            sender.sendMessage(ChatColor.RED + "Usage: /antispoof detectmods <player>");
-            return;
-        }
-        
-        String playerName = args[1];
-        Player target = Bukkit.getPlayer(playerName);
-        
-        if (target == null) {
-            sender.sendMessage(ChatColor.RED + "Player not found!");
-            return;
-        }
-        
-        // Check if already detected mods for this player
-        Set<String> detectedMods = translationKeyDetector.getDetectedMods(target.getUniqueId());
-        
-        if (!detectedMods.isEmpty()) {
-            sender.sendMessage(ChatColor.AQUA + "Previously detected mods for " + target.getName() + ":");
-            for (String mod : detectedMods) {
-                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
-            }
-        } else {
-            sender.sendMessage(ChatColor.YELLOW + "No mods previously detected for " + target.getName() + ".");
-        }
-        
-        // Run a new scan
-        sender.sendMessage(ChatColor.AQUA + "Starting new mod detection scan for " + target.getName() + "...");
-        translationKeyDetector.scanPlayer(target);
-        sender.sendMessage(ChatColor.GREEN + "Detection scan initiated. Results will be reported via alerts if mods are found.");
+        playerBrands.clear();
+        playerDataMap.clear();
+        brandAlertedPlayers.clear();
+        getLogger().info("AntiSpoof disabled!");
     }
 }

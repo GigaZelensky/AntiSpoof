@@ -6,8 +6,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -677,7 +679,9 @@ public class ConfigManager {
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
     }
-
+    
+    // NEW METHODS FOR TRANSLATION KEY DETECTION
+    
     /**
      * Checks if translation key detection is enabled
      * @return True if translation key detection is enabled, false otherwise

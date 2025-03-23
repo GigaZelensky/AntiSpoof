@@ -12,14 +12,18 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.HashSet;
 
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck"
+        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck", "detectmods"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -114,6 +118,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             checkPlayer(sender, target);
             return true;
         }
+
+        // Handle detectmods command
+        if (subCommand.equals("detectmods")) {
+            if (!sender.hasPermission("antispoof.admin")) {
+                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+                return true;
+            }
+            
+            handleDetectModsCommand(sender, args);
+            return true;
+        }
         
         // Commands that require a player argument
         if (args.length < 2) {
@@ -148,6 +163,48 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
         
         return true;
+    }
+    
+    /**
+     * Handles the detectmods command to trigger translation key detection
+     * @param sender The command sender
+     * @param args The command arguments
+     */
+    private void handleDetectModsCommand(CommandSender sender, String[] args) {
+        if (!plugin.getConfigManager().isTranslationDetectionEnabled()) {
+            sender.sendMessage(ChatColor.RED + "Translation key detection is disabled in the configuration.");
+            return;
+        }
+        
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "Usage: /antispoof detectmods <player>");
+            return;
+        }
+        
+        String playerName = args[1];
+        Player target = Bukkit.getPlayer(playerName);
+        
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+        
+        // Check if already detected mods for this player
+        Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
+        
+        if (!detectedMods.isEmpty()) {
+            sender.sendMessage(ChatColor.AQUA + "Previously detected mods for " + target.getName() + ":");
+            for (String mod : detectedMods) {
+                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
+            }
+        } else {
+            sender.sendMessage(ChatColor.YELLOW + "No mods previously detected for " + target.getName() + ".");
+        }
+        
+        // Run a new scan
+        sender.sendMessage(ChatColor.AQUA + "Starting new mod detection scan for " + target.getName() + "...");
+        plugin.getTranslationKeyDetector().scanPlayer(target);
+        sender.sendMessage(ChatColor.GREEN + "Detection scan initiated. Results will be reported via alerts if mods are found.");
     }
     
     private void handleRunCheckCommand(CommandSender sender, String[] args) {
@@ -262,6 +319,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (hasChannels) {
             sender.sendMessage(ChatColor.GRAY + "Channels:");
             data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
+        }
+        
+        // Check for detected mods via translation keys
+        Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
+        if (!detectedMods.isEmpty()) {
+            sender.sendMessage(ChatColor.AQUA + "Detected Mods (via translation keys):");
+            for (String mod : detectedMods) {
+                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
+            }
         }
         
         // Determine all reasons for flagging
@@ -540,6 +606,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof runcheck [player|*] " + ChatColor.WHITE + "- Re-run checks on player(s)");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof detectmods <player> " + ChatColor.WHITE + "- Scan player for mods using translation keys");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
     }
@@ -606,6 +673,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.AQUA + "Client brand for " + target.getName() + ": " + 
                     ChatColor.WHITE + brand);
             }
+            
+            // Show detected mods via translation keys
+            Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
+            if (!detectedMods.isEmpty()) {
+                sender.sendMessage(ChatColor.AQUA + "Detected Mods (via translation keys):");
+                for (String mod : detectedMods) {
+                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
+                }
+            }
         }
     }
     
@@ -631,6 +707,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             if (args[0].equalsIgnoreCase("channels") || 
                 args[0].equalsIgnoreCase("brand") ||
                 args[0].equalsIgnoreCase("check") ||
+                args[0].equalsIgnoreCase("detectmods") ||
                 args[0].equalsIgnoreCase("runcheck")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)

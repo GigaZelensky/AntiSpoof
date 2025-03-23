@@ -458,12 +458,16 @@ translation-detection:
       - "freecam.key.toggle"
       - "freecam.name"
       - "freecam.category"
+      - "key.freecam.toggle"
+      - "key.zergatul.freecam.toggle"
+      - "key.do_a_barrel_roll.toggle_enabled"
     
     # Xray mod detection
     "xray":
       - "xray.key.toggle"
       - "xray.config.open"
       - "x13.mod.xray"
+      - "keybinding.enable_xray"
     
     # Wurst client detection
     "wurst":
@@ -501,10 +505,52 @@ translation-detection:
       - "key.autofish.open_gui"
       - "key.autotools.get_tool"
       - "autoclicker-fabric.hud.holding"
+      - "key.autoclicker-rinf.toggleacf"
+      - "key.p1x3lc0w.invutil.autoTool"
       
     # Common hack detection
     "hacks":
       - "key.killaura"
       - "key.chestesp.toggle"
-      - "key.freecam.toggle"
       - "liquidbounce.generic.enabled"
+      - "jex.name"
+      - "key.hypnotic-client.open-click-gui"
+      - "key.lumina.open_click_gui"
+      
+    # The list from Cytooxien's detection
+    "cytooxien-detected":
+      - "tweakeroo.gui.button.config_gui.tweaks"
+      - "key.healthindicators.renderingEnabled"
+      - "key.glitchifyed.quick_hotkeys.equip_totem"
+      - "key.climbladdersfast.toggle"
+      - "Restore Screen"
+      - "key.record.desc"
+      - "key.inventory_control_tweaks.drag_out_of_inventory_modifier"
+      - "key.craftingtweaks.rotate"
+      - "config.torohealth.red"
+      - "tweakermore.hotkeys.category.main"
+      - "inventorytabs.key.next_tab"
+      - "key.vekquickturn.quickturn"
+      - "key.slotswap.swap"
+      - "category.antitoolbreak"
+      - "sodium.option_impact.low"
+      - "key.playerhighlighter.toggle"
+      - "net.clayborn.accurateblockplacement.togglevanillaplacement"
+      - "key.easierchests.sortchest"
+      - "vivecraft.key.guiLeftClick"
+      - "key.itemswapper.itemswitcher"
+      - "key.ecs.swap"
+      - "litematica.gui.button.change_menu.to_main_menu"
+      - "Start Recording"
+      - "inventoryprofiles.gui.config.Tweaks"
+      - "text.autoconfig.steppy.title"
+      - "key.entity-outliner.selector"
+      - "key.mousewheelie.open_config_screen"
+      - "key.healthbarplus.options"
+      - "key.antighost.reveal"
+      - "of.key.zoom"
+      - "modmenu.summaryTranslation.breakfree"
+      - "config.inventoryessentials.title"
+      - "descriptions.client.thundergui"
+      - "keybind.invmove.toggleMove"
+      - "end.marker"

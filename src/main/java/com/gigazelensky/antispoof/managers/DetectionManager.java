@@ -621,7 +621,7 @@ public class DetectionManager {
     }
     
     /**
-     * Process a single violation for a player
+     * Process a translation key violation detection
      * @param player The player
      * @param violationType The type of violation
      * @param reason The reason for the violation
@@ -632,36 +632,80 @@ public class DetectionManager {
         UUID uuid = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
         
-        if (data == null || data.isAlreadyPunished()) return;
-        
-        // Get player's violation tracking map
-        Map<String, Boolean> violations = playerViolations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
-        
-        // Skip if already alerted for this violation
-        if (violations.getOrDefault(violationType, false)) {
-            return;
+        if (data == null) {
+            data = new PlayerData();
+            plugin.getPlayerDataMap().put(uuid, data);
         }
         
-        // Mark as alerted
-        violations.put(violationType, true);
+        if (data.isAlreadyPunished()) return;
         
-        // Send alert
-        plugin.getAlertManager().sendViolationAlert(
-            player, reason, "unknown", null, violationType);
+        // Handle translation key detection
+        if (violationType.equals("TRANSLATION_KEY")) {
+            // Extract detected mods from reason
+            Set<String> detectedMods = extractModsFromReason(reason);
+            
+            // Send alert
+            plugin.getAlertManager().sendTranslationDetectionAlert(player, detectedMods);
+            
+            // Mark as punished if needed
+            if (plugin.getConfigManager().shouldPunishTranslationDetection()) {
+                data.setAlreadyPunished(true);
+            }
+        }
+        // Handle other violation types...
+        else {
+            // Initialize violations map for this player if not exists
+            playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
+            Map<String, Boolean> violations = playerViolations.get(uuid);
+            
+            // Skip if already alerted for this violation
+            if (violations.getOrDefault(violationType, false)) {
+                return;
+            }
+            
+            // Mark as alerted
+            violations.put(violationType, true);
+            
+            // Send alert
+            plugin.getAlertManager().sendViolationAlert(
+                player, reason, "unknown", null, violationType);
+            
+            // Execute punishment if needed - using "unknown" as brand since we don't know it
+            boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
+            
+            if (shouldPunish) {
+                plugin.getAlertManager().executePunishment(
+                    player, reason, "unknown", violationType, null);
+                data.setAlreadyPunished(true);
+            }
+            
+            if (plugin.getConfigManager().isDebugMode()) {
+                plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
+                                      ": " + violationType + " - " + reason);
+            }
+        }
+    }
+    
+    /**
+     * Extracts mod names from a reason string
+     * @param reason The reason string (format: "Using mods: mod1, mod2, mod3")
+     * @return Set of mod names
+     */
+    private Set<String> extractModsFromReason(String reason) {
+        Set<String> result = new HashSet<>();
         
-        // Execute punishment if needed - using "unknown" as brand since we don't know it
-        boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
-        
-        if (shouldPunish) {
-            plugin.getAlertManager().executePunishment(
-                player, reason, "unknown", violationType, null);
-            data.setAlreadyPunished(true);
+        if (reason.contains("Using mods: ")) {
+            String modsText = reason.substring("Using mods: ".length());
+            String[] mods = modsText.split(", ");
+            
+            for (String mod : mods) {
+                if (!mod.trim().isEmpty()) {
+                    result.add(mod.trim());
+                }
+            }
         }
         
-        if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
-                                  ": " + violationType + " - " + reason);
-        }
+        return result;
     }
     
     /**
@@ -733,6 +777,8 @@ public class DetectionManager {
                 return config.shouldPunishGeyserSpoof();
             case "NO_BRAND":
                 return config.shouldPunishNoBrand();
+            case "TRANSLATION_KEY":
+                return config.shouldPunishTranslationDetection();
             default:
                 return false;
         }
