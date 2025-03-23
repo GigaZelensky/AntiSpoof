@@ -469,7 +469,7 @@ A: AntiSpoof is extremely lightweight. The checks only run when players join and
 
 ### Getting Help
 - **GitHub Issues**: Report bugs or suggest features on our [Issue Tracker](https://github.com/GigaZelensky/AntiSpoof/issues)
-- **Discord**: Join our community for direct support (link in plugin description)
+- **Discord**: Message me on Discord for direct support (GigaZelensky)
 
 ### Contributing
 Contributions are welcome! To contribute:
