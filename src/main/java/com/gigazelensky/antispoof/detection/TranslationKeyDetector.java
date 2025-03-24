@@ -6,6 +6,12 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
+import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCloseWindow;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
 import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
@@ -46,12 +52,33 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     // Track players that have active sign tests
     private final Set<UUID> activeSignTests = new HashSet<>();
     
+    // Well-known translation keys that are likely to be found in mods
+    private final Map<String, String> WELL_KNOWN_KEYS = new HashMap<String, String>() {{
+        put("sodium.option_impact.low", "Sodium");
+        put("of.key.zoom", "OptiFine");
+        put("key.wurst.zoom", "Wurst Client");
+        put("gui.xaero_minimap_settings", "Xaero's Minimap");
+        put("key.xaero_open_map", "Xaero's World Map");
+        put("tweakeroo.gui.button.config_gui.tweaks", "Tweakeroo");
+        put("litematica.gui.button.change_menu.to_main_menu", "Litematica");
+        put("key.freecam.toggle", "Freecam");
+        put("xray.config.toggle", "XRay");
+        put("key.meteor-client.open-gui", "Meteor Client");
+    }};
+    
     public TranslationKeyDetector(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
         
         // Load translation keys from config
         loadTranslationKeys();
+        
+        // Add well-known keys if not already present
+        for (Map.Entry<String, String> entry : WELL_KNOWN_KEYS.entrySet()) {
+            if (!translationKeyToMod.containsKey(entry.getKey())) {
+                translationKeyToMod.put(entry.getKey(), entry.getValue());
+            }
+        }
         
         // Load vanilla translation keys (basic set for demo)
         loadVanillaTranslationKeys();
@@ -101,7 +128,18 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             "block.minecraft.bamboo_sign",
             "container.repair",
             "item.minecraft.stone",
-            "item.minecraft.diamond"
+            "item.minecraft.diamond",
+            "key.forward",
+            "key.left",
+            "key.back",
+            "key.right",
+            "key.jump",
+            "key.sneak",
+            "key.sprint",
+            "key.inventory",
+            "key.drop",
+            "key.chat",
+            "key.command"
         ));
     }
     
@@ -225,6 +263,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             
             // Clean up the previous session
             activeSessions.remove(playerUuid);
+            activeSignTests.remove(playerUuid);
         }
         
         // Create a new detection session
@@ -239,7 +278,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         // Add the specific key to test
         session.translationKeysToCheck.add(translationKey);
         
-        // Create a list with just this key (and pad with empty strings)
+        // Create a list with just this key
         List<String> keys = new ArrayList<>();
         keys.add(translationKey);
         
@@ -258,11 +297,12 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
     
     /**
-     * Sends a fake sign editor with translation keys to test
+     * Sends a fake sign editor with translation keys to test using the complete packet sequence
      */
     private void sendFakeSignWithTranslationKeys(Player player, List<String> translationKeys) {
         // Find an appropriate location near the player (but out of sight)
-        Location fakeLocation = player.getLocation().clone().add(0, -20, 0);
+        Location playerLoc = player.getLocation();
+        Location fakeLocation = playerLoc.clone().add(0, -20, 0);
         
         // Store the original block at this location in the session
         UUID playerUuid = player.getUniqueId();
@@ -271,31 +311,74 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         
         session.originalLocation = fakeLocation.clone();
         
+        // Position vector for the sign
+        Vector3i position = new Vector3i(
+            fakeLocation.getBlockX(),
+            fakeLocation.getBlockY(),
+            fakeLocation.getBlockZ()
+        );
+        
         // Prepare lines with translation keys
-        List<String> lines = new ArrayList<>();
+        List<String> signLines = new ArrayList<>();
         int keyCount = Math.min(translationKeys.size(), 4);
         
         for (int i = 0; i < keyCount; i++) {
-            lines.add("{\"translate\":\"" + translationKeys.get(i) + "\"}");
+            signLines.add("{\"translate\":\"" + translationKeys.get(i) + "\"}");
         }
         
         // Fill remaining lines with empty text if needed
-        while (lines.size() < 4) {
-            lines.add("\"\"");
+        while (signLines.size() < 4) {
+            signLines.add("\"\"");
         }
+        
+        // Store the original translationKeys in the session
+        session.translationKeysToCheck = new ArrayList<>(translationKeys);
         
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             try {
-                // Send packets to simulate opening a sign editor
+                // 1. Send block change packet to create an oak sign
+                WrappedBlockState signState = WrappedBlockState.getByType(StateTypes.OAK_SIGN);
+                WrapperPlayServerBlockChange blockChangePacket = new WrapperPlayServerBlockChange(position, signState);
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockChangePacket);
+                
+                // 2. Send tile entity data packet with the sign text
+                // Prepare the NBT data for the sign
+                Map<String, Object> tagCompound = new HashMap<>();
+                
+                // Add sign lines data
+                Map<String, Object> frontTextCompound = new HashMap<>();
+                List<Object> messages = new ArrayList<>();
+                for (String line : signLines) {
+                    messages.add(line);
+                }
+                frontTextCompound.put("messages", messages);
+                frontTextCompound.put("has_glowing_text", false);
+                frontTextCompound.put("color", "black");
+                
+                tagCompound.put("front_text", frontTextCompound);
+                tagCompound.put("is_waxed", false);
+                
+                // Send the block entity data packet
+                WrapperPlayServerBlockEntityData blockEntityPacket = new WrapperPlayServerBlockEntityData(
+                    position,
+                    9, // Sign block entity ID (9 for sign)
+                    tagCompound
+                );
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockEntityPacket);
+                
+                // 3. Send sign editor packet
                 WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(
-                    new Vector3i(fakeLocation.getBlockX(), fakeLocation.getBlockY(), fakeLocation.getBlockZ()),
+                    position,
                     true // frontText
                 );
-                
                 PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
                 
+                // 4. Immediately close the window to force client to process sign
+                WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1); // Window ID 1
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
+                
                 // Store the sign data in the session
-                session.sentLines = new ArrayList<>(lines);
+                session.sentLines = new ArrayList<>(signLines);
                 session.pendingResponse = true;
                 
                 if (config.isDebugMode()) {
@@ -320,25 +403,21 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                                                  " but client processed sign without error - possible mod detection");
                         }
                         
-                        // OPTIONAL: You could call processDetection here if you want to flag clients 
-                        // that process the sign but don't send an explicit response
-                        // processDetection(player, "No explicit response but sign was processed");
-                        
-                        // Mark as not pending to avoid duplicate detections
-                        activeSessions.get(playerUuid).pendingResponse = false;
-                        
                         // Clean up
                         activeSessions.remove(playerUuid);
                         activeSignTests.remove(playerUuid);
                     }
-                }, 100L); // Wait 5 seconds for a response
+                }, 20L); // Wait 1 second for a response (reduced from 5)
                 
             } catch (Exception e) {
                 plugin.getLogger().warning("[TranslationKeyDetector] Error sending fake sign: " + e.getMessage());
+                if (config.isDebugMode()) {
+                    e.printStackTrace();
+                }
                 activeSessions.remove(playerUuid);
                 activeSignTests.remove(playerUuid);
             }
-        }, 5L); // Short delay to ensure packets are sent in the right order
+        }, 2L); // Short delay to ensure packets are sent in the right order
     }
     
     @Override
@@ -348,6 +427,11 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             
             Player player = (Player) event.getPlayer();
             UUID playerUuid = player.getUniqueId();
+            
+            // Check if this is a response to our test
+            if (!activeSignTests.contains(playerUuid)) {
+                return;
+            }
             
             // Additional debug logging for all sign updates
             if (config.isDebugMode()) {
@@ -383,11 +467,50 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 return;
             }
             
+            // Get the actual content from the packet to check for translations
+            WrapperPlayClientUpdateSign signPacket = new WrapperPlayClientUpdateSign(event);
+            String[] receivedLines = signPacket.getTextLines();
+            
+            // Log the received lines
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Received sign update with content:");
+                for (int i = 0; i < receivedLines.length; i++) {
+                    plugin.getLogger().info("[Debug] Line " + i + ": '" + receivedLines[i] + "'");
+                }
+            }
+            
+            // Check if any lines were translated (compare with the original keys)
+            List<String> translatedKeys = new ArrayList<>();
+            List<String> originalKeys = session.translationKeysToCheck;
+            
+            for (int i = 0; i < Math.min(originalKeys.size(), receivedLines.length); i++) {
+                String originalKey = originalKeys.get(i);
+                String receivedLine = receivedLines[i].trim();
+                
+                // If the received line is different from the original key and not empty,
+                // it was likely translated
+                if (!receivedLine.isEmpty() && !receivedLine.equals(originalKey)) {
+                    String modName = translationKeyToMod.getOrDefault(originalKey, "Unknown Mod");
+                    translatedKeys.add(originalKey + " -> " + modName);
+                    
+                    if (config.isDebugMode()) {
+                        plugin.getLogger().info("[Debug] Detected translation: " + originalKey + 
+                                            " was translated to '" + receivedLine + "', mod: " + modName);
+                    }
+                }
+            }
+            
             // Mark session as processed
             session.pendingResponse = false;
             
-            // Process the detection
-            processDetection(player, "Sign response received");
+            // Process the detection results
+            if (!translatedKeys.isEmpty()) {
+                processDetectionWithSpecificMods(player, translatedKeys);
+            } else {
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] No translation detected in sign response from " + player.getName());
+                }
+            }
             
             // Cancel the packet since it's our fake sign
             event.setCancelled(true);
@@ -399,7 +522,53 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
     
     /**
-     * Processes a mod detection for a player
+     * Processes a mod detection for a player with specific mods detected
+     */
+    private void processDetectionWithSpecificMods(Player player, List<String> translatedKeys) {
+        UUID playerUuid = player.getUniqueId();
+        
+        if (config.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Detected mods for " + player.getName() + ": " + 
+                               String.join(", ", translatedKeys));
+        }
+        
+        // Add to detected mods
+        Set<String> detectedModsForPlayer = detectedMods.computeIfAbsent(
+            playerUuid, k -> ConcurrentHashMap.newKeySet());
+            
+        // Extract mod names from the translations
+        for (String translation : translatedKeys) {
+            // Format is "key -> ModName"
+            String[] parts = translation.split(" -> ", 2);
+            if (parts.length > 1) {
+                detectedModsForPlayer.add(parts[1]);
+            } else {
+                detectedModsForPlayer.add(translation);
+            }
+        }
+        
+        // Process the detection
+        if (config.isTranslationDetectionEnabled()) {
+            String detectedModsString = String.join(", ", detectedModsForPlayer);
+            plugin.getDetectionManager().processViolation(
+                player,
+                "TRANSLATION_KEY",
+                "Detected mod(s): " + detectedModsString
+            );
+        }
+        
+        // Notify any online player with antispoof.admin permission
+        for (Player admin : Bukkit.getOnlinePlayers()) {
+            if (admin.hasPermission("antispoof.admin")) {
+                admin.sendMessage(ChatColor.GOLD + "[AntiSpoof] " + ChatColor.GREEN + 
+                               "Mod detection for " + player.getName() + ": " + 
+                               ChatColor.WHITE + String.join(", ", translatedKeys));
+            }
+        }
+    }
+    
+    /**
+     * Processes a generic mod detection for a player
      */
     private void processDetection(Player player, String reason) {
         UUID playerUuid = player.getUniqueId();
