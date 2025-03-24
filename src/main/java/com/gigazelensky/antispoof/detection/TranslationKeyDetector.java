@@ -5,6 +5,7 @@ import com.gigazelensky.antispoof.managers.ConfigManager;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
@@ -13,6 +14,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
@@ -38,9 +41,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     // Collection of translation keys to check, mapped to their mod names
     private final Map<String, String> translationKeyToMod = new ConcurrentHashMap<>();
     
-    // Collection of vanilla translation keys to exclude
-    private final Set<String> vanillaTranslationKeys = new HashSet<>();
-    
     // Task for cleaning up old sessions
     private BukkitTask cleanupTask;
 
@@ -59,10 +59,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         put("key.freecam.toggle", "Freecam");
         put("xray.config.toggle", "XRay");
         put("key.meteor-client.open-gui", "Meteor Client");
-        put("key.replay-mod.editor", "Replay Mod");
-        put("key.worldeditcui.toggle", "WorldEdit CUI");
-        put("key.minihud.toggle_render", "MiniHUD");
-        put("key.iris.toggle", "Iris Shaders");
     }};
     
     public TranslationKeyDetector(AntiSpoofPlugin plugin) {
@@ -78,9 +74,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 translationKeyToMod.put(entry.getKey(), entry.getValue());
             }
         }
-        
-        // Load vanilla translation keys (basic set for demo)
-        loadVanillaTranslationKeys();
         
         // Register packet listener
         PacketEvents.getAPI().getEventManager().registerListener(this);
@@ -106,40 +99,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 translationKeyToMod.put(key, modName);
             }
         }
-    }
-    
-    /**
-     * Loads a basic set of vanilla translation keys that should be ignored
-     */
-    private void loadVanillaTranslationKeys() {
-        // Basic vanilla keys - in a real implementation, this should be more comprehensive
-        vanillaTranslationKeys.addAll(Arrays.asList(
-            "block.minecraft.oak_sign",
-            "block.minecraft.spruce_sign",
-            "block.minecraft.birch_sign",
-            "block.minecraft.acacia_sign",
-            "block.minecraft.jungle_sign",
-            "block.minecraft.dark_oak_sign",
-            "block.minecraft.crimson_sign",
-            "block.minecraft.warped_sign",
-            "block.minecraft.mangrove_sign",
-            "block.minecraft.cherry_sign",
-            "block.minecraft.bamboo_sign",
-            "container.repair",
-            "item.minecraft.stone",
-            "item.minecraft.diamond",
-            "key.forward",
-            "key.left",
-            "key.back",
-            "key.right",
-            "key.jump",
-            "key.sneak",
-            "key.sprint",
-            "key.inventory",
-            "key.drop",
-            "key.chat",
-            "key.command"
-        ));
     }
     
     /**
@@ -235,7 +194,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         session.translationKeysToCheck.addAll(batchKeys);
         
         // Send fake sign data with translation keys
-        sendFakeSignWithTranslationKeys(player, batchKeys);
+        testTranslationKeyWithAnvil(player, batchKeys.get(0));
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -277,12 +236,8 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         // Add the specific key to test
         session.translationKeysToCheck.add(translationKey);
         
-        // Create a list with just this key
-        List<String> keys = new ArrayList<>();
-        keys.add(translationKey);
-        
-        // Send fake sign data with the translation key
-        sendFakeSignWithTranslationKeys(player, keys);
+        // Use the simplest approach - try sign first, then anvil as fallback
+        testWithSignPacket(player, translationKey);
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -296,90 +251,82 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
     
     /**
-     * Sends a fake sign editor with translation keys to test
+     * Tests a translation key using the anvil method
      */
-    private void sendFakeSignWithTranslationKeys(Player player, List<String> translationKeys) {
-        // Find an appropriate location near the player (but out of sight)
-        Location fakeLocation = player.getLocation().clone().add(0, -20, 0);
-        
-        // Store the original block at this location in the session
+    private void testTranslationKeyWithAnvil(Player player, String translationKey) {
         UUID playerUuid = player.getUniqueId();
         DetectionSession session = activeSessions.get(playerUuid);
         if (session == null) return;
         
-        session.originalLocation = fakeLocation.clone();
+        // First try with sign method
+        testWithSignPacket(player, translationKey);
+    }
+    
+    /**
+     * Tests a translation key using just the sign packet without changing the world
+     */
+    private void testWithSignPacket(Player player, String translationKey) {
+        // Find a location out of the player's view but within packet range
+        Location playerLoc = player.getLocation();
+        // Use the player's position but 10 blocks below them
+        Location fakeSignLoc = playerLoc.clone().add(0, -10, 0);
         
+        // Store the original location in the session
+        UUID playerUuid = player.getUniqueId();
+        DetectionSession session = activeSessions.get(playerUuid);
+        if (session == null) return;
+        
+        session.originalLocation = fakeSignLoc.clone();
+        
+        // Create a Vector3i for the position
         Vector3i position = new Vector3i(
-            fakeLocation.getBlockX(),
-            fakeLocation.getBlockY(),
-            fakeLocation.getBlockZ()
+            fakeSignLoc.getBlockX(),
+            fakeSignLoc.getBlockY(),
+            fakeSignLoc.getBlockZ()
         );
-
-        // Let's use a simpler approach without NBT to avoid API compatibility issues
+        
+        // Directly send the sign editor packet
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             try {
-                // Create the sign using a command
-                String signCmd = String.format(
-                    "setblock %d %d %d oak_sign{front_text:{messages:['[\"\",{\"translate\":\"%s\"}]','[\"\"]','[\"\"]','[\"\"]']}} replace",
-                    position.getX(), position.getY(), position.getZ(), 
-                    translationKeys.get(0)
-                );
+                // Open the sign editor for that position
+                WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
                 
-                // Execute the command to create the sign
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), signCmd);
+                session.pendingResponse = true;
                 
                 if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Created sign with command: " + signCmd);
+                    plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName() + 
+                                         " with position " + position.getX() + ", " + position.getY() + ", " + position.getZ());
                 }
                 
-                // Send the sign editor packet after a short delay to ensure the sign exists
+                // Schedule a cleanup after a short delay
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    // Open the sign editor
-                    WrapperPlayServerOpenSignEditor openSign = new WrapperPlayServerOpenSignEditor(position, true);
-                    PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSign);
-                    
-                    // Store data in session
-                    session.pendingResponse = true;
-                    
-                    if (config.isDebugMode()) {
-                        plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName() + 
-                                            " with key: " + translationKeys.get(0));
-                    }
-                    
-                    // Schedule a fallback to check for response
-                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                        if (activeSessions.containsKey(playerUuid) && 
-                            activeSessions.get(playerUuid).pendingResponse && 
-                            activeSignTests.contains(playerUuid)) {
-                            
-                            if (config.isDebugMode()) {
-                                plugin.getLogger().info("[Debug] No explicit sign response from " + player.getName() + 
-                                                     " - checking sign state directly");
-                            }
-                            
-                            // Check if the sign exists and if the translation was resolved
-                            Bukkit.getScheduler().runTask(plugin, () -> {
-                                // Remove the sign
-                                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), 
-                                    String.format("setblock %d %d %d air", position.getX(), position.getY(), position.getZ()));
-                                
-                                // Clean up
-                                activeSessions.remove(playerUuid);
-                                activeSignTests.remove(playerUuid);
-                            });
+                    if (activeSessions.containsKey(playerUuid) && 
+                        activeSessions.get(playerUuid).pendingResponse &&
+                        activeSignTests.contains(playerUuid)) {
+                        
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] No response received from " + player.getName() + 
+                                                 ", trying another approach");
                         }
-                    }, 20L); // Check after 1 second
-                }, 5L); // Wait 0.25 seconds
+                        
+                        // Clean up
+                        activeSessions.remove(playerUuid);
+                        activeSignTests.remove(playerUuid);
+                    }
+                }, 20L); // 1 second timeout
                 
             } catch (Exception e) {
-                plugin.getLogger().warning("[TranslationKeyDetector] Error with sign test: " + e.getMessage());
+                plugin.getLogger().warning("[TranslationKeyDetector] Error sending sign packet: " + e.getMessage());
                 if (config.isDebugMode()) {
                     e.printStackTrace();
                 }
+                
+                // Clean up
                 activeSessions.remove(playerUuid);
                 activeSignTests.remove(playerUuid);
             }
-        }, 2L);
+        }, 1L);
     }
     
     @Override
@@ -476,18 +423,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             // Cleanup
             activeSessions.remove(playerUuid);
             activeSignTests.remove(playerUuid);
-            
-            // Remove the sign
-            Vector3i pos = new Vector3i(
-                session.originalLocation.getBlockX(),
-                session.originalLocation.getBlockY(),
-                session.originalLocation.getBlockZ()
-            );
-            
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), 
-                    String.format("setblock %d %d %d air", pos.getX(), pos.getY(), pos.getZ()));
-            });
         }
     }
     
