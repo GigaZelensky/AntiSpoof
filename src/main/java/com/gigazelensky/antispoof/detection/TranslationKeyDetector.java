@@ -5,21 +5,22 @@ import com.gigazelensky.antispoof.managers.ConfigManager;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCloseWindow;
 import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 
 /**
  * Detects mods by checking if translation keys are automatically translated by the client.
@@ -47,6 +48,10 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     // Track players that have active sign tests
     private final Set<UUID> activeSignTests = new HashSet<>();
     
+    // Store PacketEvents constructors for reflection-based access
+    private Constructor<?> blockEntityDataConstructor;
+    private boolean useCoordinatesConstructor = false;
+    
     // Well-known translation keys that are likely to be found in mods
     private final Map<String, String> WELL_KNOWN_KEYS = new HashMap<String, String>() {{
         put("sodium.option_impact.low", "Sodium");
@@ -65,6 +70,9 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
         
+        // Initialize constructor reflection for compatibility
+        initPacketEventsReflection();
+        
         // Load translation keys from config
         loadTranslationKeys();
         
@@ -82,6 +90,39 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         startCleanupTask();
         
         plugin.getLogger().info("[TranslationKeyDetector] Initialized with " + translationKeyToMod.size() + " translation keys");
+    }
+    
+    /**
+     * Initialize reflection to find the correct constructors for packet classes
+     */
+    private void initPacketEventsReflection() {
+        try {
+            // Get BlockEntityData class
+            Class<?> blockEntityDataClass = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData");
+            
+            // Try to find Vector3i constructor first (newer versions)
+            try {
+                blockEntityDataConstructor = blockEntityDataClass.getConstructor(Vector3i.class, int.class, Object.class);
+                useCoordinatesConstructor = false;
+                plugin.getLogger().info("[TranslationKeyDetector] Using Vector3i constructor for BlockEntityData");
+            } catch (NoSuchMethodException e) {
+                // Fall back to coordinates constructor (older versions)
+                try {
+                    blockEntityDataConstructor = blockEntityDataClass.getConstructor(int.class, int.class, int.class, int.class, Object.class);
+                    useCoordinatesConstructor = true;
+                    plugin.getLogger().info("[TranslationKeyDetector] Using coordinates constructor for BlockEntityData");
+                } catch (NoSuchMethodException e2) {
+                    // Log available constructors to help diagnose
+                    plugin.getLogger().warning("[TranslationKeyDetector] Could not find a suitable constructor for BlockEntityData packet");
+                    for (Constructor<?> c : blockEntityDataClass.getConstructors()) {
+                        plugin.getLogger().info("Available constructor: " + c);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            plugin.getLogger().severe("[TranslationKeyDetector] Error initializing packet reflection: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
@@ -108,7 +149,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         cleanupTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             long now = System.currentTimeMillis();
             
-            // Remove sessions older than 60 seconds (increased from 30)
+            // Remove sessions older than 60 seconds
             activeSessions.entrySet().removeIf(entry -> {
                 boolean shouldRemove = now - entry.getValue().creationTime > 60000;
                 if (shouldRemove && config.isDebugMode()) {
@@ -182,8 +223,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                                   (forceScan ? " (forced scan)" : ""));
         }
         
-        // Use an unobtrusive approach by testing a few keys at a time
-        // Select a batch of keys to test
+        // Select translation keys to test
         List<String> keysToTest = new ArrayList<>(translationKeyToMod.keySet());
         Collections.shuffle(keysToTest); // Randomize order
         
@@ -194,7 +234,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         session.translationKeysToCheck.addAll(batchKeys);
         
         // Send fake sign data with translation keys
-        testTranslationKeyWithAnvil(player, batchKeys.get(0));
+        testWithVirtualSign(player, batchKeys.get(0));
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -236,8 +276,8 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         // Add the specific key to test
         session.translationKeysToCheck.add(translationKey);
         
-        // Use the simplest approach - try sign first, then anvil as fallback
-        testWithSignPacket(player, translationKey);
+        // Use virtual sign method
+        testWithVirtualSign(player, translationKey);
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -251,73 +291,147 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
     
     /**
-     * Tests a translation key using the anvil method
+     * Create a block entity data packet using the appropriate constructor
      */
-    private void testTranslationKeyWithAnvil(Player player, String translationKey) {
-        UUID playerUuid = player.getUniqueId();
-        DetectionSession session = activeSessions.get(playerUuid);
-        if (session == null) return;
-        
-        // First try with sign method
-        testWithSignPacket(player, translationKey);
+    private Object createBlockEntityDataPacket(Vector3i position, Object nbtData) {
+        try {
+            if (blockEntityDataConstructor == null) {
+                plugin.getLogger().warning("[TranslationKeyDetector] No suitable constructor found for BlockEntityData packet");
+                return null;
+            }
+            
+            // 9 is usually the ID for sign block entity in newer versions, 4 in older
+            int blockEntityType = 9;
+            
+            // Create the packet based on the constructor we found
+            if (useCoordinatesConstructor) {
+                return blockEntityDataConstructor.newInstance(
+                    position.getX(), position.getY(), position.getZ(), 
+                    blockEntityType, 
+                    nbtData
+                );
+            } else {
+                return blockEntityDataConstructor.newInstance(
+                    position, 
+                    blockEntityType, 
+                    nbtData
+                );
+            }
+        } catch (Exception e) {
+            plugin.getLogger().severe("[TranslationKeyDetector] Error creating block entity data packet: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
     }
     
     /**
-     * Tests a translation key using just the sign packet without changing the world
+     * Tests a translation key using a virtual sign
      */
-    private void testWithSignPacket(Player player, String translationKey) {
-        // Find a location out of the player's view but within packet range
+    private void testWithVirtualSign(Player player, String translationKey) {
+        // Find a location near the player but out of view
         Location playerLoc = player.getLocation();
-        // Use the player's position but 10 blocks below them
-        Location fakeSignLoc = playerLoc.clone().add(0, -10, 0);
+        Location signLoc = playerLoc.clone().add(0, -10, 0); // 10 blocks below player
         
-        // Store the original location in the session
         UUID playerUuid = player.getUniqueId();
         DetectionSession session = activeSessions.get(playerUuid);
         if (session == null) return;
         
-        session.originalLocation = fakeSignLoc.clone();
+        // Store the sign location in the session
+        session.originalLocation = signLoc.clone();
         
-        // Create a Vector3i for the position
+        // Create position vector for packets
         Vector3i position = new Vector3i(
-            fakeSignLoc.getBlockX(),
-            fakeSignLoc.getBlockY(),
-            fakeSignLoc.getBlockZ()
+            signLoc.getBlockX(),
+            signLoc.getBlockY(),
+            signLoc.getBlockZ()
         );
         
-        // Directly send the sign editor packet
+        // Send the sequence of packets
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             try {
-                // Open the sign editor for that position
-                WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
-                PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
+                // 1. Create block change packet (oak sign)
+                WrapperPlayServerBlockChange blockChangePacket = new WrapperPlayServerBlockChange(position, 3);
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockChangePacket);
                 
-                session.pendingResponse = true;
-                
-                if (config.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName() + 
-                                         " with position " + position.getX() + ", " + position.getY() + ", " + position.getZ());
-                }
-                
-                // Schedule a cleanup after a short delay
+                // Give a short delay for block change to register
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    if (activeSessions.containsKey(playerUuid) && 
-                        activeSessions.get(playerUuid).pendingResponse &&
-                        activeSignTests.contains(playerUuid)) {
+                    try {
+                        // 2. Create sign NBT data with translation key
+                        Map<String, Object> signData = new HashMap<>();
+                        signData.put("Text1", "{\"translate\":\"" + translationKey + "\"}");
+                        signData.put("Text2", "{\"text\":\"\"}");
+                        signData.put("Text3", "{\"text\":\"\"}");
+                        signData.put("Text4", "{\"text\":\"\"}");
+                        signData.put("id", "minecraft:sign");
+                        signData.put("x", position.getX());
+                        signData.put("y", position.getY());
+                        signData.put("z", position.getZ());
                         
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Debug] No response received from " + player.getName() + 
-                                                 ", trying another approach");
+                        // Create and send block entity data packet
+                        Object blockEntityPacket = createBlockEntityDataPacket(position, signData);
+                        if (blockEntityPacket != null) {
+                            PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockEntityPacket);
+                            
+                            // Give another short delay for the sign data to register
+                            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                                try {
+                                    // 3. Send open sign editor packet
+                                    WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
+                                    PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
+                                    
+                                    session.pendingResponse = true;
+                                    
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName() + 
+                                                             " with position " + position.getX() + ", " + position.getY() + ", " + position.getZ());
+                                    }
+                                    
+                                    // 4. Immediately close the sign editor to force a response
+                                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                                        if (player.isOnline()) {
+                                            WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1);
+                                            PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
+                                            
+                                            if (config.isDebugMode()) {
+                                                plugin.getLogger().info("[Debug] Sent close window packet to " + player.getName());
+                                            }
+                                        }
+                                    }, 1L); // 1 tick delay
+                                    
+                                    // Set timeout to clean up if no response
+                                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                                        if (activeSessions.containsKey(playerUuid) && 
+                                            activeSessions.get(playerUuid).pendingResponse &&
+                                            activeSignTests.contains(playerUuid)) {
+                                            
+                                            if (config.isDebugMode()) {
+                                                plugin.getLogger().info("[Debug] No response received from " + player.getName() + 
+                                                                     ", trying another approach");
+                                            }
+                                            
+                                            // Clean up
+                                            activeSessions.remove(playerUuid);
+                                            activeSignTests.remove(playerUuid);
+                                        }
+                                    }, 20L); // 1 second timeout
+                                } catch (Exception e) {
+                                    plugin.getLogger().warning("[TranslationKeyDetector] Error in sign edit packet: " + e.getMessage());
+                                    if (config.isDebugMode()) {
+                                        e.printStackTrace();
+                                    }
+                                }
+                            }, 2L); // Delay for sign data
                         }
-                        
-                        // Clean up
-                        activeSessions.remove(playerUuid);
-                        activeSignTests.remove(playerUuid);
+                    } catch (Exception e) {
+                        plugin.getLogger().warning("[TranslationKeyDetector] Error in sign data packet: " + e.getMessage());
+                        if (config.isDebugMode()) {
+                            e.printStackTrace();
+                        }
                     }
-                }, 20L); // 1 second timeout
+                }, 2L); // Delay for block change
                 
             } catch (Exception e) {
-                plugin.getLogger().warning("[TranslationKeyDetector] Error sending sign packet: " + e.getMessage());
+                plugin.getLogger().warning("[TranslationKeyDetector] Error sending sign packets: " + e.getMessage());
                 if (config.isDebugMode()) {
                     e.printStackTrace();
                 }
@@ -388,20 +502,35 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             List<String> translatedKeys = new ArrayList<>();
             List<String> originalKeys = session.translationKeysToCheck;
             
-            for (int i = 0; i < Math.min(originalKeys.size(), receivedLines.length); i++) {
-                String originalKey = originalKeys.get(i);
-                String receivedLine = receivedLines[i].trim();
+            // For each original key, check if it was translated in any of the sign lines
+            for (String originalKey : originalKeys) {
+                boolean wasTranslated = false;
                 
-                // If the received line is different from the original key and not empty,
-                // it was likely translated
-                if (!receivedLine.isEmpty() && !receivedLine.contains(originalKey)) {
-                    String modName = translationKeyToMod.getOrDefault(originalKey, "Unknown Mod");
-                    translatedKeys.add(originalKey + " -> " + modName);
+                // Check each line of the sign
+                for (String receivedLine : receivedLines) {
+                    String trimmedLine = receivedLine.trim();
                     
-                    if (config.isDebugMode()) {
-                        plugin.getLogger().info("[Debug] Detected translation: " + originalKey + 
-                                            " was translated to '" + receivedLine + "', mod: " + modName);
+                    // Skip empty lines
+                    if (trimmedLine.isEmpty()) continue;
+                    
+                    // If the key is not present in the line and the line is not empty,
+                    // it likely means the key was translated
+                    if (!trimmedLine.equals(originalKey) && !trimmedLine.contains(originalKey)) {
+                        wasTranslated = true;
+                        
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Potential translation detected! Key: " + 
+                                               originalKey + " → " + trimmedLine);
+                        }
+                        
+                        String modName = translationKeyToMod.getOrDefault(originalKey, "Unknown Mod");
+                        translatedKeys.add(originalKey + " -> " + modName);
+                        break;
                     }
+                }
+                
+                if (!wasTranslated && config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] No translation detected for key: " + originalKey);
                 }
             }
             
