@@ -16,6 +16,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
+import java.lang.reflect.Constructor;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -281,50 +282,104 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 // 2. Wait a moment for client to process the block change
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     try {
-                        // 3. Open the sign editor
-                        WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
-                        PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
+                        // CRITICAL STEP: Send BlockEntityData packet with the translation key
+                        // Create NBT data for the sign
+                        Map<String, Object> nbtData = new HashMap<>();
+                        nbtData.put("Text1", "{\"translate\":\"" + translationKey + "\"}");
+                        nbtData.put("Text2", "{\"text\":\"\"}");
+                        nbtData.put("Text3", "{\"text\":\"\"}");
+                        nbtData.put("Text4", "{\"text\":\"\"}");
+                        nbtData.put("id", "minecraft:sign");
+                        nbtData.put("x", position.getX());
+                        nbtData.put("y", position.getY());
+                        nbtData.put("z", position.getZ());
                         
-                        session.pendingResponse = true;
-                        
-                        if (config.isDebugMode()) {
-                            plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName());
+                        // Use reflection to create and send the packet
+                        try {
+                            // Try to find the constructor for BlockEntityData
+                            Class<?> blockEntityDataClass = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData");
+                            
+                            // Try different constructor patterns
+                            Object blockEntityPacket = null;
+                            
+                            try {
+                                // Try with Vector3i
+                                Constructor<?> constructor = blockEntityDataClass.getConstructor(Vector3i.class, int.class, Object.class);
+                                blockEntityPacket = constructor.newInstance(position, 9, nbtData); // 9 is the type for sign block entity
+                            } catch (NoSuchMethodException e1) {
+                                try {
+                                    // Try with x,y,z coordinates
+                                    Constructor<?> constructor = blockEntityDataClass.getConstructor(int.class, int.class, int.class, int.class, Object.class);
+                                    blockEntityPacket = constructor.newInstance(position.getX(), position.getY(), position.getZ(), 9, nbtData);
+                                } catch (NoSuchMethodException e2) {
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().warning("[Debug] Could not create BlockEntityData packet: " + e2.getMessage());
+                                    }
+                                }
+                            }
+                            
+                            if (blockEntityPacket != null) {
+                                PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockEntityPacket);
+                                
+                                if (config.isDebugMode()) {
+                                    plugin.getLogger().info("[Debug] Sent block entity data packet with translation key to " + player.getName());
+                                }
+                            }
+                        } catch (Exception e) {
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().warning("[Debug] Error creating BlockEntityData packet: " + e.getMessage());
+                                e.printStackTrace();
+                            }
                         }
                         
-                        // 4. Immediately close the sign editor to force client response
+                        // 3. Wait a moment then open the sign editor
                         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                            if (player.isOnline()) {
-                                WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1);
-                                PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
-                                
-                                if (config.isDebugMode()) {
-                                    plugin.getLogger().info("[Debug] Sent close window packet to " + player.getName());
-                                }
+                            // 3. Open the sign editor
+                            WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
+                            PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
+                            
+                            session.pendingResponse = true;
+                            
+                            if (config.isDebugMode()) {
+                                plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName());
                             }
-                        }, 1L); // 1 tick delay
+                            
+                            // 4. Immediately close the sign editor to force client response
+                            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                                if (player.isOnline()) {
+                                    WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1);
+                                    PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
+                                    
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().info("[Debug] Sent close window packet to " + player.getName());
+                                    }
+                                }
+                            }, 1L); // 1 tick delay
+                            
+                            // 5. Set timeout to clean up if no response received
+                            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                                if (activeSessions.containsKey(playerUuid) && 
+                                    activeSessions.get(playerUuid).pendingResponse &&
+                                    activeSignTests.contains(playerUuid)) {
+                                    
+                                    if (config.isDebugMode()) {
+                                        plugin.getLogger().info("[Debug] No response received from " + player.getName());
+                                    }
+                                    
+                                    // Clean up
+                                    activeSessions.remove(playerUuid);
+                                    activeSignTests.remove(playerUuid);
+                                }
+                            }, 20L); // 1 second timeout
+                        }, 2L); // 2 tick delay before opening sign editor
                         
-                        // 5. Set timeout to clean up if no response received
-                        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                            if (activeSessions.containsKey(playerUuid) && 
-                                activeSessions.get(playerUuid).pendingResponse &&
-                                activeSignTests.contains(playerUuid)) {
-                                
-                                if (config.isDebugMode()) {
-                                    plugin.getLogger().info("[Debug] No response received from " + player.getName());
-                                }
-                                
-                                // Clean up
-                                activeSessions.remove(playerUuid);
-                                activeSignTests.remove(playerUuid);
-                            }
-                        }, 20L); // 1 second timeout
                     } catch (Exception e) {
                         plugin.getLogger().warning("[TranslationKeyDetector] Error opening sign editor: " + e.getMessage());
                         // Clean up
                         activeSessions.remove(playerUuid);
                         activeSignTests.remove(playerUuid);
                     }
-                }, 2L); // 2 tick delay
+                }, 2L); // 2 tick delay after block change
                 
             } catch (Exception e) {
                 plugin.getLogger().warning("[TranslationKeyDetector] Error in virtual sign test: " + e.getMessage());
