@@ -14,8 +14,6 @@ import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.block.Sign;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -24,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Detects mods by checking if translation keys are automatically translated by the client.
- * Uses a simplified approach that works across different versions of PacketEvents.
+ * Uses a pure packet-based approach without actual block modifications.
  */
 public class TranslationKeyDetector extends PacketListenerAbstract {
     private final AntiSpoofPlugin plugin;
@@ -47,9 +45,6 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
 
     // Track players that have active sign tests
     private final Set<UUID> activeSignTests = new HashSet<>();
-    
-    // Use a hybrid approach flag (controls whether to use packets or Bukkit API)
-    private boolean useHybridApproach = true;
     
     // Well-known translation keys that are likely to be found in mods
     private final Map<String, String> WELL_KNOWN_KEYS = new HashMap<String, String>() {{
@@ -112,7 +107,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         cleanupTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             long now = System.currentTimeMillis();
             
-            // Remove sessions older than 60 seconds (increased from 30)
+            // Remove sessions older than 60 seconds
             activeSessions.entrySet().removeIf(entry -> {
                 boolean shouldRemove = now - entry.getValue().creationTime > 60000;
                 if (shouldRemove && config.isDebugMode()) {
@@ -192,7 +187,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         session.translationKeysToCheck.addAll(batchKeys);
         
         // Test the first key using our preferred method
-        testWithRealSign(player, batchKeys.get(0));
+        testWithVirtualSignPackets(player, batchKeys.get(0));
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -231,8 +226,8 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
         // Add the specific key to test
         session.translationKeysToCheck.add(translationKey);
         
-        // Use our preferred method
-        testWithRealSign(player, translationKey);
+        // Test with virtual sign packets
+        testWithVirtualSignPackets(player, translationKey);
         
         // Mark this player as having an active sign test
         activeSignTests.add(playerUuid);
@@ -246,10 +241,10 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
     }
 
     /**
-     * Tests a translation key using a real sign
-     * This approach is more reliable than virtual signs as it doesn't depend on complex packets
+     * Tests a translation key using only packets - no actual block changes
+     * This avoids thread safety issues with block manipulation
      */
-    private void testWithRealSign(Player player, String translationKey) {
+    private void testWithVirtualSignPackets(Player player, String translationKey) {
         UUID playerUuid = player.getUniqueId();
         DetectionSession session = activeSessions.get(playerUuid);
         if (session == null) return;
@@ -258,122 +253,87 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
             plugin.getLogger().info("[Debug] Testing translation key for " + player.getName() + ": " + translationKey);
         }
         
-        // Place a real sign at a location near the player
+        // Find a location near the player but out of view
         Location playerLoc = player.getLocation();
         Location signLoc = playerLoc.clone().add(0, -10, 0);
         
-        // Store the location for cleanup
+        // Create position vector for packets
+        Vector3i position = new Vector3i(
+            signLoc.getBlockX(),
+            signLoc.getBlockY(),
+            signLoc.getBlockZ()
+        );
+        
+        // Store the sign location in the session
         session.originalLocation = signLoc.clone();
         
-        // Save original block for restoration
-        Material originalMaterial = signLoc.getBlock().getType();
-        byte originalData = signLoc.getBlock().getData();
-        
-        // Schedule this after a short delay to ensure everything is ready
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        // Run this on the main thread to ensure proper timing
+        Bukkit.getScheduler().runTask(plugin, () -> {
             try {
-                // Place a sign using Bukkit API
-                signLoc.getBlock().setType(Material.OAK_SIGN);
+                // 1. Send block change packet to create a virtual sign
+                WrapperPlayServerBlockChange blockChangePacket = new WrapperPlayServerBlockChange(position, 3); // 3 = oak sign
+                PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockChangePacket);
                 
-                // Add a short delay to ensure the sign is placed
+                if (config.isDebugMode()) {
+                    plugin.getLogger().info("[Debug] Sent virtual sign block change packet to " + player.getName());
+                }
+                
+                // 2. Wait a moment for client to process the block change
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     try {
-                        // Get the sign and set its text
-                        if (signLoc.getBlock().getState() instanceof Sign) {
-                            Sign sign = (Sign) signLoc.getBlock().getState();
-                            sign.setLine(0, translationKey);
-                            sign.update();
-                            
-                            if (config.isDebugMode()) {
-                                plugin.getLogger().info("[Debug] Created sign with translation key: " + translationKey);
-                            }
-                            
-                            // After sign is updated, open the sign editor
-                            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                                try {
-                                    // Create position for packets
-                                    Vector3i position = new Vector3i(
-                                        signLoc.getBlockX(),
-                                        signLoc.getBlockY(),
-                                        signLoc.getBlockZ()
-                                    );
-                                    
-                                    // Open sign editor
-                                    WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
-                                    PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
-                                    
-                                    session.pendingResponse = true;
-                                    
-                                    if (config.isDebugMode()) {
-                                        plugin.getLogger().info("[Debug] Opened sign editor for " + player.getName());
-                                    }
-                                    
-                                    // Immediately close the sign editor
-                                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                                        if (player.isOnline()) {
-                                            WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1);
-                                            PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
-                                            
-                                            if (config.isDebugMode()) {
-                                                plugin.getLogger().info("[Debug] Closed sign editor for " + player.getName());
-                                            }
-                                        }
-                                    }, 2L); // 2 ticks before close
-                                    
-                                    // Set timeout and restore block
-                                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                                        // Restore the original block
-                                        signLoc.getBlock().setType(originalMaterial);
-                                        
-                                        // Check if we received a response
-                                        if (activeSessions.containsKey(playerUuid) && 
-                                            activeSessions.get(playerUuid).pendingResponse) {
-                                            
-                                            if (config.isDebugMode()) {
-                                                plugin.getLogger().info("[Debug] No response received from " + player.getName());
-                                            }
-                                            
-                                            // Clean up session
-                                            activeSessions.remove(playerUuid);
-                                            activeSignTests.remove(playerUuid);
-                                        }
-                                    }, 20L); // 1 second timeout (20 ticks)
-                                    
-                                } catch (Exception e) {
-                                    plugin.getLogger().warning("[TranslationKeyDetector] Error opening sign editor: " + e.getMessage());
-                                    // Restore the original block
-                                    signLoc.getBlock().setType(originalMaterial);
-                                    // Clean up
-                                    activeSessions.remove(playerUuid);
-                                    activeSignTests.remove(playerUuid);
-                                }
-                            }, 2L); // 2 ticks after sign update
-                        } else {
-                            if (config.isDebugMode()) {
-                                plugin.getLogger().info("[Debug] Block at location is not a sign: " + signLoc);
-                            }
-                            // Clean up
-                            signLoc.getBlock().setType(originalMaterial);
-                            activeSessions.remove(playerUuid);
-                            activeSignTests.remove(playerUuid);
+                        // 3. Open the sign editor
+                        WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
+                        PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
+                        
+                        session.pendingResponse = true;
+                        
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName());
                         }
+                        
+                        // 4. Immediately close the sign editor to force client response
+                        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                            if (player.isOnline()) {
+                                WrapperPlayServerCloseWindow closeWindowPacket = new WrapperPlayServerCloseWindow(1);
+                                PacketEvents.getAPI().getPlayerManager().sendPacket(player, closeWindowPacket);
+                                
+                                if (config.isDebugMode()) {
+                                    plugin.getLogger().info("[Debug] Sent close window packet to " + player.getName());
+                                }
+                            }
+                        }, 1L); // 1 tick delay
+                        
+                        // 5. Set timeout to clean up if no response received
+                        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                            if (activeSessions.containsKey(playerUuid) && 
+                                activeSessions.get(playerUuid).pendingResponse &&
+                                activeSignTests.contains(playerUuid)) {
+                                
+                                if (config.isDebugMode()) {
+                                    plugin.getLogger().info("[Debug] No response received from " + player.getName());
+                                }
+                                
+                                // Clean up
+                                activeSessions.remove(playerUuid);
+                                activeSignTests.remove(playerUuid);
+                            }
+                        }, 20L); // 1 second timeout
                     } catch (Exception e) {
-                        plugin.getLogger().warning("[TranslationKeyDetector] Error setting sign text: " + e.getMessage());
-                        // Restore the original block
-                        signLoc.getBlock().setType(originalMaterial);
+                        plugin.getLogger().warning("[TranslationKeyDetector] Error opening sign editor: " + e.getMessage());
                         // Clean up
                         activeSessions.remove(playerUuid);
                         activeSignTests.remove(playerUuid);
                     }
-                }, 2L); // 2 ticks after placing sign
+                }, 2L); // 2 tick delay
                 
             } catch (Exception e) {
-                plugin.getLogger().warning("[TranslationKeyDetector] Error creating sign: " + e.getMessage());
+                plugin.getLogger().warning("[TranslationKeyDetector] Error in virtual sign test: " + e.getMessage());
+                e.printStackTrace();
                 // Clean up
                 activeSessions.remove(playerUuid);
                 activeSignTests.remove(playerUuid);
             }
-        }, 1L); // 1 tick initial delay
+        });
     }
     
     @Override
@@ -479,21 +439,12 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 }
             }
             
-            // Cancel the packet since it's our test sign
+            // Cancel the packet since it's our virtual sign
             event.setCancelled(true);
             
             // Cleanup
             activeSessions.remove(playerUuid);
             activeSignTests.remove(playerUuid);
-            
-            // Restore original block if using real sign approach
-            if (session.originalLocation != null) {
-                Location signLoc = session.originalLocation;
-                if (signLoc.getBlock().getType() == Material.OAK_SIGN ||
-                    signLoc.getBlock().getType().name().contains("SIGN")) {
-                    signLoc.getBlock().setType(Material.AIR);
-                }
-            }
         }
     }
     
