@@ -16,8 +16,8 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
-import java.lang.reflect.Constructor;
 
+import java.lang.reflect.Constructor;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -282,8 +282,8 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                 // 2. Wait a moment for client to process the block change
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     try {
-                        // CRITICAL STEP: Send BlockEntityData packet with the translation key
                         // Create NBT data for the sign
+                        // The key part is to send JSON with a translate component
                         Map<String, Object> nbtData = new HashMap<>();
                         nbtData.put("Text1", "{\"translate\":\"" + translationKey + "\"}");
                         nbtData.put("Text2", "{\"text\":\"\"}");
@@ -294,55 +294,84 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                         nbtData.put("y", position.getY());
                         nbtData.put("z", position.getZ());
                         
-                        // Use reflection to create and send the packet
+                        // Create the sign data with the translation key
+                        Map<String, Object> signData = new HashMap<>();
+                        signData.put("Text1", "{\"translate\":\"" + translationKey + "\"}");
+                        signData.put("Text2", "{\"text\":\"\"}");
+                        signData.put("Text3", "{\"text\":\"\"}");
+                        signData.put("Text4", "{\"text\":\"\"}");
+                        signData.put("id", "minecraft:sign");
+                        signData.put("x", position.getX());
+                        signData.put("y", position.getY());
+                        signData.put("z", position.getZ());
+                        
                         try {
-                            // Try to find the constructor for BlockEntityData
-                            Class<?> blockEntityDataClass = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData");
+                            // In 1.20.2+ the BlockEntityData packet's structure is:
+                            // - Position (as blockPos or Vector3i)
+                            // - Type (9 for sign)
+                            // - NBT data (as Map or CompoundTag)
+                            
+                            // Use reflection to find and call the right constructor or method
+                            Class<?> blockEntityDataClass = Class.forName(
+                                "com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData");
                             
                             // Try different constructor patterns
                             Object blockEntityPacket = null;
                             
                             try {
-                                // Try with Vector3i
-                                Constructor<?> constructor = blockEntityDataClass.getConstructor(Vector3i.class, int.class, Object.class);
-                                blockEntityPacket = constructor.newInstance(position, 9, nbtData); // 9 is the type for sign block entity
+                                // Look for constructor with Vector3i, int, and Object/Map
+                                Constructor<?> constructor = blockEntityDataClass.getConstructor(
+                                    Vector3i.class, int.class, Map.class);
+                                blockEntityPacket = constructor.newInstance(position, 9, signData);
                             } catch (NoSuchMethodException e1) {
                                 try {
-                                    // Try with x,y,z coordinates
-                                    Constructor<?> constructor = blockEntityDataClass.getConstructor(int.class, int.class, int.class, int.class, Object.class);
-                                    blockEntityPacket = constructor.newInstance(position.getX(), position.getY(), position.getZ(), 9, nbtData);
+                                    // Try with x, y, z coordinates instead of Vector3i
+                                    Constructor<?> constructor = blockEntityDataClass.getConstructor(
+                                        int.class, int.class, int.class, int.class, Object.class);
+                                    blockEntityPacket = constructor.newInstance(
+                                        position.getX(), position.getY(), position.getZ(), 9, signData);
                                 } catch (NoSuchMethodException e2) {
+                                    plugin.getLogger().warning("[Debug] Could not find compatible constructor for BlockEntityData packet");
                                     if (config.isDebugMode()) {
-                                        plugin.getLogger().warning("[Debug] Could not create BlockEntityData packet: " + e2.getMessage());
+                                        plugin.getLogger().info("Available constructors:");
+                                        for (Constructor<?> c : blockEntityDataClass.getConstructors()) {
+                                            plugin.getLogger().info("  " + c);
+                                        }
                                     }
                                 }
                             }
                             
+                            // If we found and created a packet, send it
                             if (blockEntityPacket != null) {
                                 PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockEntityPacket);
                                 
                                 if (config.isDebugMode()) {
                                     plugin.getLogger().info("[Debug] Sent block entity data packet with translation key to " + player.getName());
                                 }
+                            } else {
+                                plugin.getLogger().warning("[Debug] Failed to create BlockEntityData packet - could not find compatible constructor");
                             }
                         } catch (Exception e) {
+                            plugin.getLogger().warning("[TranslationKeyDetector] Error creating BlockEntityData packet: " + e.getMessage());
                             if (config.isDebugMode()) {
-                                plugin.getLogger().warning("[Debug] Error creating BlockEntityData packet: " + e.getMessage());
                                 e.printStackTrace();
                             }
                         }
                         
-                        // 3. Wait a moment then open the sign editor
+                        if (config.isDebugMode()) {
+                            plugin.getLogger().info("[Debug] Sent block entity data packet with translation key to " + player.getName());
+                        }
+                        
+                        // 3. Open the sign editor
                         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                            // 3. Open the sign editor
                             WrapperPlayServerOpenSignEditor openSignPacket = new WrapperPlayServerOpenSignEditor(position, true);
                             PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSignPacket);
-                            
-                            session.pendingResponse = true;
                             
                             if (config.isDebugMode()) {
                                 plugin.getLogger().info("[Debug] Sent sign editor packet to " + player.getName());
                             }
+                            
+                            session.pendingResponse = true;
                             
                             // 4. Immediately close the sign editor to force client response
                             Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -375,6 +404,7 @@ public class TranslationKeyDetector extends PacketListenerAbstract {
                         
                     } catch (Exception e) {
                         plugin.getLogger().warning("[TranslationKeyDetector] Error opening sign editor: " + e.getMessage());
+                        e.printStackTrace();
                         // Clean up
                         activeSessions.remove(playerUuid);
                         activeSignTests.remove(playerUuid);
