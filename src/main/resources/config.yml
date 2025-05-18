@@ -308,7 +308,7 @@ client-brands:
       strict-check: true
 
     blankbrand: # When a client sends a blank brand channel
-    enabled: true
+      enabled: true
       values:
         - "^$"   # regex for empty/blank brand
       flag: true
