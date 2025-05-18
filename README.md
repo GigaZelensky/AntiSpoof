@@ -799,6 +799,18 @@ client-brands:
       punishments: []
       strict-check: true
 
+    blankbrand: # When a client sends a blank brand channel
+      enabled: true
+      values:
+        - "^$"   # regex for empty/blank brand
+      flag: true
+      alert: true
+      discord-alert: true
+      alert-message: "&8[&eAntiSpoof&8] &7%player% &eis using a blank brand"
+      console-alert-message: "%player% is using a blank brand"
+      punish: false
+      punishments: []
+
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
 # ──────────────────────────────────────────────────────────
