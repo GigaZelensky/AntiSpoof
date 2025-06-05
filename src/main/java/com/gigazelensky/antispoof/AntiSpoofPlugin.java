@@ -330,7 +330,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
         PlayerData data = playerDataMap.get(uuid);
         if (data == null) return false;
         
-        boolean hasChannels = !data.getChannels().isEmpty();
+        // Exclude ignored channels (like minecraft:brand) from detection logic
+        Set<String> filteredChannels = detectionManager.getFilteredChannels(data.getChannels());
+        boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Check for Geyser spoofing first
@@ -363,12 +365,12 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (configManager.isBlockedChannelsEnabled() && hasChannels) {
             if (configManager.isChannelWhitelistEnabled()) {
                 // Whitelist mode
-                if (!detectionManager.checkChannelWhitelist(data.getChannels())) {
+                if (!detectionManager.checkChannelWhitelist(filteredChannels)) {
                     return true;
                 }
             } else {
                 // Blacklist mode
-                String blockedChannel = detectionManager.findBlockedChannel(data.getChannels());
+                String blockedChannel = detectionManager.findBlockedChannel(filteredChannels);
                 if (blockedChannel != null) {
                     return true;
                 }
@@ -391,7 +393,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
                     boolean patternMatched = false;
                     
                     // Check each player channel against this pattern
-                    for (String channel : data.getChannels()) {
+                    for (String channel : filteredChannels) {
                         try {
                             if (pattern.matcher(channel).matches()) {
                                 patternMatched = true;

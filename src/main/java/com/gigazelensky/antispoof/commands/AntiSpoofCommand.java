@@ -12,6 +12,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Set;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -300,14 +301,15 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 
                 if (!whitelistMode.equals("FALSE")) {
                     // Whitelist mode
-                    boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(data.getChannels());
+                    Set<String> filtered = plugin.getDetectionManager().getFilteredChannels(data.getChannels());
+                    boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(filtered);
                     if (!passesWhitelist) {
                         if (whitelistMode.equals("STRICT")) {
                             // Get missing channels for strict mode
                             List<String> missingChannels = new ArrayList<>();
                             for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
                                 boolean found = false;
-                                for (String playerChannel : data.getChannels()) {
+                                for (String playerChannel : filtered) {
                                     try {
                                         if (playerChannel.matches(whitelistedChannel)) {
                                             found = true;
@@ -338,7 +340,7 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     }
                 } else {
                     // Blacklist mode - check for blocked channels
-                    String blockedChannel = plugin.getDetectionManager().findBlockedChannel(data.getChannels());
+                    String blockedChannel = plugin.getDetectionManager().findBlockedChannel(filtered);
                     if (blockedChannel != null) {
                         flagReasons.add("Using blocked channel: " + blockedChannel);
                     }
