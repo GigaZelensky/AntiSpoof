@@ -641,16 +641,18 @@ public class DetectionManager {
         
         // If we still have violations to process, handle punishment
         if (!newViolations.isEmpty() && !data.isAlreadyPunished()) {
-            // Execute punishment if needed - use the first violation for punishment
-            String primaryViolationType = newViolations.keySet().iterator().next();
-            String primaryReason = newViolations.get(primaryViolationType);
-            
-            boolean shouldPunish = shouldPunishViolation(primaryViolationType, brand);
-            
-            if (shouldPunish) {
-                plugin.getAlertManager().executePunishment(
-                    player, primaryReason, brand, primaryViolationType, violatedChannel);
-                data.setAlreadyPunished(true);
+            // Find the first violation that should trigger a punishment
+            for (Map.Entry<String, String> entry : newViolations.entrySet()) {
+                String violationType = entry.getKey();
+                String reason = entry.getValue();
+
+                if (shouldPunishViolation(violationType, brand)) {
+                    String channelParam = violationType.equals("BLOCKED_CHANNEL") ? violatedChannel : null;
+                    plugin.getAlertManager().executePunishment(
+                        player, reason, brand, violationType, channelParam);
+                    data.setAlreadyPunished(true);
+                    break;
+                }
             }
         }
     }
