@@ -217,39 +217,36 @@ public class DetectionManager {
         String brand = plugin.getClientBrand(player);
         
         // Check for missing brand first
-        if (brand == null && config.isNoBrandCheckEnabled()) {
+        if (brand == null) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] No brand detected for " + player.getName());
             }
-            
+
             // Initialize violations map for this player if not exists
             playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
             Map<String, Boolean> violations = playerViolations.get(uuid);
-            
+
             // Skip if already alerted for this player
-            if (!violations.getOrDefault("NO_BRAND", false)) {
+            if (!violations.getOrDefault("NO_BRAND", false) && config.isNoBrandCheckEnabled()) {
                 violations.put("NO_BRAND", true);
-                
-                // Process it as a violation
+
                 Map<String, String> detectedViolations = new HashMap<>();
                 detectedViolations.put("NO_BRAND", "No client brand detected");
-                
-                // Process detected violations on the main thread
+
                 final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
-                
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    processViolations(player, finalViolations, "unknown");
+                });
+            } else if (config.shouldBlockNonVanillaWithChannels()) {
+                Map<String, String> detectedViolations = new HashMap<>();
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     processViolations(player, finalViolations, "unknown");
                 });
             }
-            
+
             return; // Skip other checks if no brand
-        }
-        
-        if (brand == null) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] No brand available for " + player.getName());
-            }
-            return;
         }
         
         // Check if player is a Bedrock player
