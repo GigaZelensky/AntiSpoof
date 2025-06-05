@@ -444,9 +444,9 @@ public class DetectionManager {
                     detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
                 }
                 
-                // Non-vanilla check if enabled
-                else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
                 }
             }
         } else {
@@ -457,9 +457,9 @@ public class DetectionManager {
                 detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
             }
             
-            // Non-vanilla with channels check
-            else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+            // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+            else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
             }
         }
         

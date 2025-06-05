@@ -277,9 +277,9 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 flagReasons.add("Spoofing Geyser client");
             }
             
-            // Check for non-vanilla with channels
-            if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
-                flagReasons.add("Non-vanilla client with channels");
+            // Check for strict non-vanilla
+            if (plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                flagReasons.add("Non-vanilla client detected");
             }
             
             // Check for blocked brand

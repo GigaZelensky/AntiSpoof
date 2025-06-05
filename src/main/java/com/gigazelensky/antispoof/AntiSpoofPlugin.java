@@ -356,8 +356,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
-        // Non-vanilla with channels check
-        if (configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+        // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+        if (configManager.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
             return true;
         }
         
