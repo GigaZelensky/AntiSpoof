@@ -13,6 +13,9 @@ import java.util.regex.Pattern;
 public class DetectionManager {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
+
+    // Channel that should be ignored during detection (still stored for display)
+    private static final String BRAND_CHANNEL = "minecraft:brand";
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -28,6 +31,31 @@ public class DetectionManager {
     
     // Grace period for channel registrations (milliseconds)
     private static final long CHANNEL_GRACE_PERIOD = 5000;
+
+    /**
+     * Returns a copy of the given channels excluding ones that should be ignored
+     * for detection purposes.
+     */
+    private Set<String> filterIgnoredChannels(Set<String> channels) {
+        if (channels == null || channels.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        Set<String> result = new HashSet<>();
+        for (String ch : channels) {
+            if (!BRAND_CHANNEL.equalsIgnoreCase(ch)) {
+                result.add(ch);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Exposes filtered channels for other classes.
+     */
+    public Set<String> getFilteredChannels(Set<String> channels) {
+        return filterIgnoredChannels(channels);
+    }
     
     public DetectionManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -260,7 +288,9 @@ public class DetectionManager {
             detectedViolations.put("GEYSER_SPOOF", "Spoofing Geyser client");
         }
         
-        boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
+        // Exclude ignored channels like minecraft:brand when evaluating
+        Set<String> filteredChannels = filterIgnoredChannels(data.getChannels());
+        boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Check if client brands system is enabled
@@ -297,9 +327,9 @@ public class DetectionManager {
                     // Log channels in debug mode to help diagnose issues
                     if (config.isDebugMode()) {
                         plugin.getLogger().info("[Debug] Checking required channels for " + player.getName());
-                        plugin.getLogger().info("[Debug] Required patterns for " + matchedBrandKey + ": " + 
+                        plugin.getLogger().info("[Debug] Required patterns for " + matchedBrandKey + ": " +
                                               String.join(", ", brandConfig.getRequiredChannelStrings()));
-                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
+                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", filteredChannels));
                     }
                     
                     // For each required channel pattern, check if any player channel matches it
@@ -309,7 +339,7 @@ public class DetectionManager {
                         boolean patternMatched = false;
                         
                         // Check each player channel against this pattern
-                        for (String channel : data.getChannels()) {
+                        for (String channel : filteredChannels) {
                             try {
                                 if (pattern.matcher(channel).matches()) {
                                     patternMatched = true;
@@ -437,12 +467,12 @@ public class DetectionManager {
         if (config.isBlockedChannelsEnabled() && hasChannels) {
             if (config.isChannelWhitelistEnabled()) {
                 // Whitelist mode
-                boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
+                boolean passesWhitelist = checkChannelWhitelist(filteredChannels);
                 if (!passesWhitelist) {
                     // Use the proper violation type for whitelist
                     if (config.isChannelWhitelistStrict()) {
                         // Get missing channels for detailed message
-                        List<String> missingChannels = findMissingRequiredChannels(data.getChannels());
+                        List<String> missingChannels = findMissingRequiredChannels(filteredChannels);
                         if (!missingChannels.isEmpty()) {
                             detectedViolations.put("CHANNEL_WHITELIST", 
                                 "Missing required channels: " + String.join(", ", missingChannels));
@@ -456,7 +486,7 @@ public class DetectionManager {
                 }
             } else {
                 // Blacklist mode
-                String blockedChannel = findBlockedChannel(data.getChannels());
+                String blockedChannel = findBlockedChannel(filteredChannels);
                 if (blockedChannel != null) {
                     detectedViolations.put("BLOCKED_CHANNEL", "Using blocked channel: " + blockedChannel);
                 }
@@ -514,8 +544,11 @@ public class DetectionManager {
         
         UUID uuid = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
-        
+
         if (data == null || data.isAlreadyPunished() || detectedViolations.isEmpty()) return;
+
+        // Channels without ignored ones for violation processing
+        Set<String> filteredChannels = filterIgnoredChannels(data.getChannels());
         
         // Get player's violation tracking map
         Map<String, Boolean> violations = playerViolations.get(uuid);
@@ -540,7 +573,7 @@ public class DetectionManager {
         // Get violated channel for blacklist mode
         String violatedChannel = null;
         if (newViolations.containsKey("BLOCKED_CHANNEL")) {
-            violatedChannel = findBlockedChannel(data.getChannels());
+            violatedChannel = findBlockedChannel(filteredChannels);
         }
         
         // Special handling for client brand violations
@@ -670,12 +703,13 @@ public class DetectionManager {
      * @return List of missing required channels
      */
     private List<String> findMissingRequiredChannels(Set<String> playerChannels) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
         List<String> missingChannels = new ArrayList<>();
         List<String> requiredChannels = config.getBlockedChannels();
         
         for (String requiredChannel : requiredChannels) {
             boolean found = false;
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 try {
                     if (playerChannel.matches(requiredChannel)) {
                         found = true;
@@ -760,7 +794,8 @@ public class DetectionManager {
      * @return True if the channels pass the whitelist check, false otherwise
      */
     public boolean checkChannelWhitelist(Set<String> playerChannels) {
-        if (playerChannels == null || playerChannels.isEmpty()) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
+        if (filtered.isEmpty()) {
             // Empty channels always pass whitelist check
             return true;
         }
@@ -770,22 +805,22 @@ public class DetectionManager {
         
         // If no channels are whitelisted, then fail if player has any channels
         if (whitelistedChannels.isEmpty()) {
-            return playerChannels.isEmpty();
+            return filtered.isEmpty();
         }
         
         // SIMPLE mode: Player must have at least one of the whitelisted channels
         if (!strictMode) {
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 if (config.matchesChannelPattern(playerChannel)) {
                     return true; // Pass if player has at least one whitelisted channel
                 }
             }
             return false; // Fail if player has no whitelisted channels
-        } 
+        }
         // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
         else {
             // 1. Check if every player channel is whitelisted
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 if (!config.matchesChannelPattern(playerChannel)) {
                     return false; // Fail if any player channel is not whitelisted
                 }
@@ -795,7 +830,7 @@ public class DetectionManager {
             for (String whitelistedChannel : whitelistedChannels) {
                 boolean playerHasChannel = false;
                 
-                for (String playerChannel : playerChannels) {
+                for (String playerChannel : filtered) {
                     try {
                         if (playerChannel.matches(whitelistedChannel)) {
                             playerHasChannel = true;
@@ -826,7 +861,8 @@ public class DetectionManager {
      * @return The blocked channel, or null if none are blocked
      */
     public String findBlockedChannel(Set<String> playerChannels) {
-        if (playerChannels == null || playerChannels.isEmpty()) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
+        if (filtered.isEmpty()) {
             return null;
         }
         
@@ -835,7 +871,7 @@ public class DetectionManager {
             return null;
         }
         
-        for (String playerChannel : playerChannels) {
+        for (String playerChannel : filtered) {
             if (config.matchesChannelPattern(playerChannel)) {
                 return playerChannel;
             }
