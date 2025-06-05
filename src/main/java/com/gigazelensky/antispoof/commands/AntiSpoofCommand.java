@@ -299,9 +299,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             if (hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
                 String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
+                Set<String> filtered = plugin.getDetectionManager().getFilteredChannels(data.getChannels());
+
                 if (!whitelistMode.equals("FALSE")) {
                     // Whitelist mode
-                    Set<String> filtered = plugin.getDetectionManager().getFilteredChannels(data.getChannels());
                     boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(filtered);
                     if (!passesWhitelist) {
                         if (whitelistMode.equals("STRICT")) {
