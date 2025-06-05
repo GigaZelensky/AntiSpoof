@@ -427,6 +427,11 @@ public class DetectionManager {
                         });
                     }
                 }
+
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                }
             } else {
                 // No matching brand found - use default brand config
                 if (config.isDebugMode()) {
