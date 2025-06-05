@@ -251,13 +251,16 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         List<String> flagReasons = new ArrayList<>();
         
         if (brand == null) {
-            sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.YELLOW + " has no client brand information yet.");
-            return;
+            if (!plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
+                sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.YELLOW + " has no client brand information yet.");
+                return;
+            }
+            flagReasons.add("Non-vanilla client detected");
         }
         
         PlayerData data = plugin.getPlayerDataMap().get(target.getUniqueId());
         boolean hasChannels = data != null && !data.getChannels().isEmpty();
-        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
+        boolean claimsVanilla = brand != null && brand.equalsIgnoreCase("vanilla");
         
         // Display channels first regardless of spoof status
         if (hasChannels) {
@@ -277,9 +280,9 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 flagReasons.add("Spoofing Geyser client");
             }
             
-            // Check for non-vanilla with channels
-            if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
-                flagReasons.add("Non-vanilla client with channels");
+            // Check for strict non-vanilla
+            if (plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                flagReasons.add("Non-vanilla client detected");
             }
             
             // Check for blocked brand

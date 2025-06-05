@@ -310,13 +310,17 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         String brand = getClientBrand(player);
         
-        // Check for missing brand first
-        if (brand == null && configManager.isNoBrandCheckEnabled()) {
-            return true;
+        // Handle missing brand first
+        if (brand == null) {
+            if (configManager.isNoBrandCheckEnabled()) {
+                return true;
+            }
+            // Treat missing brand as non-vanilla if strict mode is enabled
+            if (configManager.shouldBlockNonVanillaWithChannels()) {
+                return true;
+            }
+            return false;
         }
-        
-        // Skip other checks if brand is null
-        if (brand == null) return false;
         
         // Check if player is a Bedrock player
         boolean isBedrockPlayer = isBedrockPlayer(player);
@@ -356,8 +360,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
-        // Non-vanilla with channels check
-        if (configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+        // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+        if (configManager.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
             return true;
         }
         

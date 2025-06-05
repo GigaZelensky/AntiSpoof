@@ -217,39 +217,36 @@ public class DetectionManager {
         String brand = plugin.getClientBrand(player);
         
         // Check for missing brand first
-        if (brand == null && config.isNoBrandCheckEnabled()) {
+        if (brand == null) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] No brand detected for " + player.getName());
             }
-            
+
             // Initialize violations map for this player if not exists
             playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
             Map<String, Boolean> violations = playerViolations.get(uuid);
-            
+
             // Skip if already alerted for this player
-            if (!violations.getOrDefault("NO_BRAND", false)) {
+            if (!violations.getOrDefault("NO_BRAND", false) && config.isNoBrandCheckEnabled()) {
                 violations.put("NO_BRAND", true);
-                
-                // Process it as a violation
+
                 Map<String, String> detectedViolations = new HashMap<>();
                 detectedViolations.put("NO_BRAND", "No client brand detected");
-                
-                // Process detected violations on the main thread
+
                 final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
-                
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    processViolations(player, finalViolations, "unknown");
+                });
+            } else if (config.shouldBlockNonVanillaWithChannels()) {
+                Map<String, String> detectedViolations = new HashMap<>();
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     processViolations(player, finalViolations, "unknown");
                 });
             }
-            
+
             return; // Skip other checks if no brand
-        }
-        
-        if (brand == null) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] No brand available for " + player.getName());
-            }
-            return;
         }
         
         // Check if player is a Bedrock player
@@ -427,6 +424,11 @@ public class DetectionManager {
                         });
                     }
                 }
+
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                }
             } else {
                 // No matching brand found - use default brand config
                 if (config.isDebugMode()) {
@@ -444,9 +446,9 @@ public class DetectionManager {
                     detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
                 }
                 
-                // Non-vanilla check if enabled
-                else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
                 }
             }
         } else {
@@ -457,9 +459,9 @@ public class DetectionManager {
                 detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
             }
             
-            // Non-vanilla with channels check
-            else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+            // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+            else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
             }
         }
         
@@ -639,16 +641,18 @@ public class DetectionManager {
         
         // If we still have violations to process, handle punishment
         if (!newViolations.isEmpty() && !data.isAlreadyPunished()) {
-            // Execute punishment if needed - use the first violation for punishment
-            String primaryViolationType = newViolations.keySet().iterator().next();
-            String primaryReason = newViolations.get(primaryViolationType);
-            
-            boolean shouldPunish = shouldPunishViolation(primaryViolationType, brand);
-            
-            if (shouldPunish) {
-                plugin.getAlertManager().executePunishment(
-                    player, primaryReason, brand, primaryViolationType, violatedChannel);
-                data.setAlreadyPunished(true);
+            // Find the first violation that should trigger a punishment
+            for (Map.Entry<String, String> entry : newViolations.entrySet()) {
+                String violationType = entry.getKey();
+                String reason = entry.getValue();
+
+                if (shouldPunishViolation(violationType, brand)) {
+                    String channelParam = violationType.equals("BLOCKED_CHANNEL") ? violatedChannel : null;
+                    plugin.getAlertManager().executePunishment(
+                        player, reason, brand, violationType, channelParam);
+                    data.setAlreadyPunished(true);
+                    break;
+                }
             }
         }
     }
