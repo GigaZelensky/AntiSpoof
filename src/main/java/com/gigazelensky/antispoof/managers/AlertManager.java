@@ -7,6 +7,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.*;
+import com.gigazelensky.antispoof.util.MessageUtil;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class AlertManager {
@@ -72,7 +73,7 @@ public class AlertManager {
         for (UUID uuid : playersWithAlertPermission) {
             Player player = plugin.getServer().getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                player.sendMessage(coloredMessage);
+                player.sendMessage(com.gigazelensky.antispoof.util.MessageUtil.colorize(coloredMessage));
             }
         }
     }
