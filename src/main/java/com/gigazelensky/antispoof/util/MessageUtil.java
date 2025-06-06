@@ -5,11 +5,21 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.ChatColor;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
- * Utility that accepts either MiniMessage <tags>, legacy & colour codes,
- * or already-sectioned (§) strings and always returns a section-colour
- * string Spigot can print.  Hex colours are supported through Adventure’s
- * legacy serializer (requires 1.16+ clients).
+ * Unified colour utility:
+ *  • Accepts MiniMessage tags (<gradient>, <#hex>, </bold>, etc)
+ *  • Accepts legacy & and § colour/format codes (including &x&F&F&0… hex)
+ *  • Returns a §-coloured string ready for Player#sendMessage
+ *
+ *  Strategy:
+ *   1. Unescape common sequences ("\\n" → "\n") for config friendliness.
+ *   2. Translate ampersand codes (&e) to section (§e).
+ *   3. Convert section codes to MiniMessage tags so MiniMessage parser doesn’t scream.
+ *   4. Feed through MiniMessage; if it fails we fall back to legacy-only path.
+ *   5. Serialize back to section-coloured string.
  */
 public class MessageUtil {
 
@@ -17,45 +27,89 @@ public class MessageUtil {
     private static final LegacyComponentSerializer LEGACY_SECTION = LegacyComponentSerializer.builder()
             .character('§')
             .hexColors()
-            .build();
-    private static final LegacyComponentSerializer LEGACY_AMP = LegacyComponentSerializer.builder()
-            .character('&')
-            .hexColors()
+            .useUnusualXRepeatedHexFormat() // §x§A§B§C…
             .build();
 
-    /**
-     * Colours a string for chat output, accepting both MiniMessage and legacy formats.
-     *
-     * @param raw Raw string from config / code.
-     * @return Colourised string with § codes, safe to pass to Player#sendMessage.
-     */
+    // Regex for §x hex format (and &x translated later)
+    private static final Pattern LEGACY_HEX_PATTERN = Pattern.compile("[§&]x([§&][0-9A-Fa-f]){6}");
+    // Regex for &#abcdef format
+    private static final Pattern LEGACY_HASH_HEX_PATTERN = Pattern.compile("[§&]#([0-9A-Fa-f]{6})");
+
     public static String colorize(String raw) {
         if (raw == null || raw.isEmpty()) {
             return "";
         }
 
-        // Unescape typical command-line escapes (e.g. \n)
+        // 1) unescape newline etc
         String msg = raw.replace("\\n", "\n");
 
-        Component component = null;
+        // 2) translate & to § for easier processing
+        msg = ChatColor.translateAlternateColorCodes('&', msg);
 
-        // If it looks like MiniMessage (<...>) try that path first.
-        if (msg.contains("<") && msg.contains(">")) {
-            try {
-                component = MINI.deserialize(msg);
-            } catch (Exception ignored) {
-                // fall through to legacy handling
-            }
+        // 3) convert § colour/format codes into MiniMessage tags so the parser will accept them
+        msg = convertLegacyToMini(msg);
+
+        Component component;
+        try {
+            component = MINI.deserialize(msg);
+        } catch (Exception ex) {
+            // Fallback – just strip MiniMessage angle brackets and do legacy
+            component = LEGACY_SECTION.deserialize(ChatColor.stripColor(msg).replace('<', ' ').replace('>', ' '));
         }
 
-        if (component == null) {
-            // Translate & codes to § so legacySection can parse hex too.
-            String ampersandTranslated = ChatColor.translateAlternateColorCodes('&', msg);
-            // Deserialize via Adventure legacy to support § and §x hex colours.
-            component = LEGACY_SECTION.deserialize(ampersandTranslated);
-        }
-
-        // Re‑serialize to section-colour codes (modern clients understand hex with §x§r…).
+        // 5) serialize back to section colours
         return LEGACY_SECTION.serialize(component);
+    }
+
+    /**
+     * Swap § codes for their MiniMessage equivalents.
+     * Keeps existing MiniMessage tags (<gradient> etc) intact.
+     */
+    private static String convertLegacyToMini(String input) {
+        if (input.indexOf('§') == -1) return input; // nothing to do
+
+        String s = input;
+
+        // Hex §x format → <#abcdef>
+        Matcher m = LEGACY_HEX_PATTERN.matcher(s);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String hex = m.group().replace("§x", "").replace("§", "");
+            String replacement = "<#" + hex + ">";
+            m.appendReplacement(sb, replacement);
+        }
+        m.appendTail(sb);
+        s = sb.toString();
+
+        // §#abcdef format (rare) → <#abcdef>
+        s = LEGACY_HASH_HEX_PATTERN.matcher(s).replaceAll(result -> {
+            String hex = result.group(1);
+            return "<#" + hex + ">";
+        });
+
+        // Simple colour/format codes
+        s = s.replace("§0", "<black>")
+             .replace("§1", "<dark_blue>")
+             .replace("§2", "<dark_green>")
+             .replace("§3", "<dark_aqua>")
+             .replace("§4", "<dark_red>")
+             .replace("§5", "<dark_purple>")
+             .replace("§6", "<gold>")
+             .replace("§7", "<gray>")
+             .replace("§8", "<dark_gray>")
+             .replace("§9", "<blue>")
+             .replace("§a", "<green>")
+             .replace("§b", "<aqua>")
+             .replace("§c", "<red>")
+             .replace("§d", "<light_purple>")
+             .replace("§e", "<yellow>")
+             .replace("§f", "<white>")
+             .replace("§l", "<bold>")
+             .replace("§n", "<underlined>")
+             .replace("§m", "<strikethrough>")
+             .replace("§o", "<italic>")
+             .replace("§k", "<obfuscated>")
+             .replace("§r", "<reset>");
+        return s;
     }
 }
