@@ -27,7 +27,7 @@ public class MessageUtil {
     private static final LegacyComponentSerializer LEGACY_SECTION = LegacyComponentSerializer.builder()
             .character('§')
             .hexColors()
-            .useUnusualXRepeatedHexFormat() // §x§A§B§C…
+            
             .build();
 
     // Regex for §x hex format (and &x translated later)
