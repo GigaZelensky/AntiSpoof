@@ -32,7 +32,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private AlertManager alertManager;
     private DetectionManager detectionManager;
     private PlayerEventListener playerEventListener;
-    private VersionChecker versionChecker;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
@@ -51,7 +50,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize version checker
-        this.versionChecker = new VersionChecker(this);
+        new VersionChecker(this);
         
         // Initialize PacketEvents
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
@@ -393,7 +392,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 // For each required channel pattern, check if any player channel matches it
                 for (int i = 0; i < brandConfig.getRequiredChannels().size(); i++) {
                     Pattern pattern = brandConfig.getRequiredChannels().get(i);
-                    String patternStr = brandConfig.getRequiredChannelStrings().get(i);
                     boolean patternMatched = false;
                     
                     // Check each player channel against this pattern

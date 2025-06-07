@@ -3,8 +3,8 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
+import com.gigazelensky.antispoof.utils.MessageUtil;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,12 +67,12 @@ public class AlertManager {
      * @param message The message to send
      */
     public void sendAlertToRecipients(String message) {
-        String coloredMessage = ChatColor.translateAlternateColorCodes('&', message);
-        
+        String formatted = MessageUtil.miniMessage(message);
+
         for (UUID uuid : playersWithAlertPermission) {
             Player player = plugin.getServer().getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                player.sendMessage(coloredMessage);
+                player.sendMessage(formatted);
             }
         }
     }
