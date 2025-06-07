@@ -168,11 +168,11 @@ public class VersionChecker implements Listener {
      * Sends update notification to a specific player
      */
     private void sendUpdateNotification(Player player) {
-        String msg = "&7=======================================\n" +
+        String msg = "&7=========================================\n" +
                 "&bA new version of &lAntiSpoof&b is available: &av" + latestVersion + "\n" +
                 "&bYou are currently running &ev" + plugin.getDescription().getVersion() + "\n" +
                 "&bDownload from: &agithub.com/GigaZelensky/AntiSpoof/releases/latest\n" +
-                "&7=======================================";
+                "&7=========================================";
         player.sendMessage(MessageUtil.miniMessage(msg));
     }
 
