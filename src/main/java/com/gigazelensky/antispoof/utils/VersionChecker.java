@@ -2,7 +2,7 @@ package com.gigazelensky.antispoof.utils;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
+import com.gigazelensky.antispoof.utils.MessageUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -168,14 +168,12 @@ public class VersionChecker implements Listener {
      * Sends update notification to a specific player
      */
     private void sendUpdateNotification(Player player) {
-        player.sendMessage(ChatColor.GRAY + "=======================================================");
-        player.sendMessage(ChatColor.AQUA + "A new version of " + ChatColor.BOLD + "AntiSpoof" + 
-                          ChatColor.AQUA + " is available: " + ChatColor.GREEN + "v" + latestVersion);
-        player.sendMessage(ChatColor.AQUA + "You are currently running " + 
-                          ChatColor.YELLOW + "v" + plugin.getDescription().getVersion());
-        player.sendMessage(ChatColor.AQUA + "Download from: " + ChatColor.GREEN + 
-                          "github.com/GigaZelensky/AntiSpoof/releases/latest");
-        player.sendMessage(ChatColor.GRAY + "=======================================================");
+        String msg = "&7============================================\n" +
+                "&bA new version of &lAntiSpoof&b is available: &av" + latestVersion + "\n" +
+                "&bYou are currently running &ev" + plugin.getDescription().getVersion() + "\n" +
+                "&bDownload from: &agithub.com/GigaZelensky/AntiSpoof/releases/latest\n" +
+                "&7============================================";
+        player.sendMessage(MessageUtil.miniMessage(msg));
     }
 
     /**
