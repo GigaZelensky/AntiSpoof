@@ -86,7 +86,7 @@ public class VersionChecker implements Listener {
      * Fetches the latest release version from GitHub API
      */
     private String getLatestRelease() throws IOException {
-        URL url = new URL(GITHUB_API_URL);
+        URL url = java.net.URI.create(GITHUB_API_URL).toURL();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
         connection.setRequestProperty("Accept", "application/vnd.github.v3+json");

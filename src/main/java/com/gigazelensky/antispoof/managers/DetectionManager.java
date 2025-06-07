@@ -3,7 +3,6 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.*;
@@ -513,15 +512,6 @@ public class DetectionManager {
                 processViolations(player, finalViolations, finalBrand);
             });
         }
-    }
-    
-    /**
-     * Alias for checking player with checkRequiredChannels parameter
-     * @param player The player to check
-     * @param isJoinCheck Whether this is an initial join check
-     */
-    private void checkPlayer(Player player, boolean isJoinCheck) {
-        checkPlayer(player, isJoinCheck, true);
     }
     
     /**

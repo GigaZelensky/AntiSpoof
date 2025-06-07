@@ -2,6 +2,7 @@ package com.gigazelensky.antispoof.utils;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.ChatColor;
 
 import java.util.regex.Matcher;
@@ -18,16 +19,17 @@ public final class MessageUtil {
             Pattern.compile("([&§]#[A-Fa-f0-9]{6})|([&§]x([&§][A-Fa-f0-9]){6})");
 
     /**
-     * Parses a string containing legacy color codes or MiniMessage markup into a
-     * {@link Component}. Hex color codes using the &#RRGGBB or &x&F&F&F&F&F&F
-     * formats are also supported.
+     * Parses a string containing legacy color codes or MiniMessage markup and
+     * returns a legacy formatted string compatible with older Bukkit
+     * versions. Hex color codes using the &#RRGGBB or &x&F&F&F&F&F&F formats
+     * are also supported.
      *
      * @param input the input string
-     * @return the parsed component
+     * @return the parsed string with legacy colour codes
      */
-    public static Component miniMessage(String input) {
+    public static String miniMessage(String input) {
         if (input == null || input.isEmpty()) {
-            return Component.empty();
+            return "";
         }
 
         // Unescape common sequences when received via commands
@@ -70,6 +72,7 @@ public final class MessageUtil {
                 .replace("§n", "<underlined>")
                 .replace("§o", "<italic>");
 
-        return MiniMessage.miniMessage().deserialize(input).compact();
+        Component component = MiniMessage.miniMessage().deserialize(input).compact();
+        return LegacyComponentSerializer.legacySection().serialize(component);
     }
 }

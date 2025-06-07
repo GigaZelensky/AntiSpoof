@@ -4,7 +4,6 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.awt.Color;
@@ -507,7 +506,7 @@ public class DiscordWebhookHandler {
                                           (isCompactUpdate ? " (modified channel)" : ""));
                 }
                 
-                URL url = new URL(webhookUrl);
+                URL url = java.net.URI.create(webhookUrl).toURL();
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");

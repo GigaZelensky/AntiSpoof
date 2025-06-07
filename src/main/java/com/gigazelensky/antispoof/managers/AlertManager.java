@@ -4,7 +4,6 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import net.kyori.adventure.text.Component;
 import com.gigazelensky.antispoof.utils.MessageUtil;
 
 import java.util.*;
@@ -68,12 +67,12 @@ public class AlertManager {
      * @param message The message to send
      */
     public void sendAlertToRecipients(String message) {
-        Component component = MessageUtil.miniMessage(message);
+        String formatted = MessageUtil.miniMessage(message);
 
         for (UUID uuid : playersWithAlertPermission) {
             Player player = plugin.getServer().getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                player.sendMessage(component);
+                player.sendMessage(formatted);
             }
         }
     }
