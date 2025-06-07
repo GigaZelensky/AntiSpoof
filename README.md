@@ -469,7 +469,7 @@ A: AntiSpoof is extremely lightweight. The checks only run when players join and
 
 ### Getting Help
 - **GitHub Issues**: Report bugs or suggest features on our [Issue Tracker](https://github.com/GigaZelensky/AntiSpoof/issues)
-- **Discord**: Join our community for direct support (link in plugin description)
+- **Discord**: Message me on Discord for direct support (GigaZelensky)
 
 ### Contributing
 Contributions are welcome! To contribute:
@@ -798,6 +798,18 @@ client-brands:
       punish: false
       punishments: []
       strict-check: true
+
+    blankbrand: # When a client sends a blank brand channel
+      enabled: true
+      values:
+        - "^$"   # regex for empty/blank brand
+      flag: true
+      alert: true
+      discord-alert: true
+      alert-message: "&8[&eAntiSpoof&8] &7%player% &eis using a blank brand"
+      console-alert-message: "%player% is using a blank brand"
+      punish: false
+      punishments: []
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

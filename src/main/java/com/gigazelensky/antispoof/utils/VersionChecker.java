@@ -1,11 +1,10 @@
-package com.gigazelensky.antispoof.util;
+package com.gigazelensky.antispoof.utils;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
+import com.gigazelensky.antispoof.utils.MessageUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 
@@ -13,17 +12,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Checks for plugin updates
- */
 public class VersionChecker implements Listener {
     private final AntiSpoofPlugin plugin;
     private final Logger logger;
@@ -38,10 +32,10 @@ public class VersionChecker implements Listener {
         
         // Only initialize if enabled in config
         if (plugin.getConfigManager().isUpdateCheckerEnabled()) {
-            // Register events
+            // Register events to notify admins on join
             plugin.getServer().getPluginManager().registerEvents(this, plugin);
             
-            // Check for updates
+            // Check for updates asynchronously
             checkForUpdates();
         }
     }
@@ -50,10 +44,6 @@ public class VersionChecker implements Listener {
      * Checks GitHub for the latest release version
      */
     public void checkForUpdates() {
-        if (!plugin.getConfigManager().isUpdateCheckerEnabled()) {
-            return;
-        }
-        
         CompletableFuture.runAsync(() -> {
             try {
                 // Get current plugin version
@@ -77,7 +67,7 @@ public class VersionChecker implements Listener {
                         logger.info("https://github.com/GigaZelensky/AntiSpoof/releases/latest");
                         logger.info("=======================================================");
                         
-                        // Notify online admins
+                        // Send notification to all online admins
                         notifyAdmins();
                     } else {
                         logger.info("You are running the latest version of AntiSpoof (v" + currentVersion + ")");
@@ -85,6 +75,9 @@ public class VersionChecker implements Listener {
                 }
             } catch (Exception e) {
                 logger.warning("Failed to check for updates: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugMode()) {
+                    e.printStackTrace();
+                }
             }
         });
     }
@@ -92,8 +85,8 @@ public class VersionChecker implements Listener {
     /**
      * Fetches the latest release version from GitHub API
      */
-    private String getLatestRelease() throws IOException, URISyntaxException {
-        URL url = new URI(GITHUB_API_URL).toURL();
+    private String getLatestRelease() throws IOException {
+        URL url = java.net.URI.create(GITHUB_API_URL).toURL();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
         connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
@@ -101,27 +94,28 @@ public class VersionChecker implements Listener {
         
         int responseCode = connection.getResponseCode();
         if (responseCode == 200) {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                StringBuilder response = new StringBuilder();
-                String line;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            StringBuilder response = new StringBuilder();
+            String line;
+            
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+            reader.close();
+            
+            // Extract tag_name from JSON (simple approach without full JSON parsing)
+            String json = response.toString();
+            int tagNameIndex = json.indexOf("\"tag_name\":");
+            
+            if (tagNameIndex != -1) {
+                // Find beginning and end of version string
+                int startIndex = json.indexOf("\"", tagNameIndex + 11) + 1;
+                int endIndex = json.indexOf("\"", startIndex);
                 
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
-                
-                // Simple JSON parsing to extract tag_name
-                String json = response.toString();
-                int tagNameIndex = json.indexOf("\"tag_name\":");
-                
-                if (tagNameIndex != -1) {
-                    int startIndex = json.indexOf("\"", tagNameIndex + 11) + 1;
-                    int endIndex = json.indexOf("\"", startIndex);
-                    
-                    if (startIndex != -1 && endIndex != -1) {
-                        String version = json.substring(startIndex, endIndex);
-                        // Remove 'v' prefix if present
-                        return version.startsWith("v") ? version.substring(1) : version;
-                    }
+                if (startIndex != -1 && endIndex != -1) {
+                    String version = json.substring(startIndex, endIndex);
+                    // Remove 'v' prefix if present
+                    return version.startsWith("v") ? version.substring(1) : version;
                 }
             }
         }
@@ -161,9 +155,11 @@ public class VersionChecker implements Listener {
      * Notifies all online admins about the update
      */
     private void notifyAdmins() {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (player.hasPermission("antispoof.admin")) {
-                sendUpdateNotification(player);
+        if (plugin.getConfigManager().isUpdateNotifyOnJoinEnabled()) {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (player.hasPermission("antispoof.admin")) {
+                    sendUpdateNotification(player);
+                }
             }
         }
     }
@@ -171,21 +167,19 @@ public class VersionChecker implements Listener {
     /**
      * Sends update notification to a specific player
      */
-    public void sendUpdateNotification(Player player) {
-        player.sendMessage(ChatColor.GRAY + "=======================================================");
-        player.sendMessage(ChatColor.AQUA + "A new version of " + ChatColor.BOLD + "AntiSpoof" + 
-                          ChatColor.AQUA + " is available: " + ChatColor.GREEN + "v" + latestVersion);
-        player.sendMessage(ChatColor.AQUA + "You are currently running " + 
-                          ChatColor.YELLOW + "v" + plugin.getDescription().getVersion());
-        player.sendMessage(ChatColor.AQUA + "Download from: " + ChatColor.GREEN + 
-                          "github.com/GigaZelensky/AntiSpoof/releases/latest");
-        player.sendMessage(ChatColor.GRAY + "=======================================================");
+    private void sendUpdateNotification(Player player) {
+        String msg = "&7=========================================\n" +
+                "&bA new version of &lAntiSpoof&b is available: &av" + latestVersion + "\n" +
+                "&bYou are currently running &ev" + plugin.getDescription().getVersion() + "\n" +
+                "&bDownload from: &agithub.com/GigaZelensky/AntiSpoof/releases/latest\n" +
+                "&7=========================================";
+        player.sendMessage(MessageUtil.miniMessage(msg));
     }
 
     /**
      * Notify admins when they join
      */
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         if (!plugin.getConfigManager().isUpdateNotifyOnJoinEnabled()) {
             return;
@@ -197,24 +191,8 @@ public class VersionChecker implements Listener {
         if (updateAvailable && player.hasPermission("antispoof.admin")) {
             // Delay the message slightly to ensure it's seen after join messages
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline()) {
-                    sendUpdateNotification(player);
-                }
+                sendUpdateNotification(player);
             }, 20L); // 1 second delay
         }
-    }
-    
-    /**
-     * Gets the latest version
-     */
-    public String getLatestVersion() {
-        return latestVersion;
-    }
-    
-    /**
-     * Whether an update is available
-     */
-    public boolean isUpdateAvailable() {
-        return updateAvailable;
     }
 }
