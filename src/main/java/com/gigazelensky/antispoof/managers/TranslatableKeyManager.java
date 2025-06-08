@@ -88,7 +88,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         BlockState state = block.getState();
         if (state instanceof Sign sign) {
             for (int i = 0; i < 4; i++) {
-                sign.setLine(i, lines[i]);
+                sign.setLine(i, "{\"translate\":\"" + keys.get(i) + "\"}");
             }
             sign.update(false, false);
         }
