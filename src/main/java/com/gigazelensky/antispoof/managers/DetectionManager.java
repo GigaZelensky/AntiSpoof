@@ -13,8 +13,9 @@ public class DetectionManager {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
 
-    // Channel that should be ignored during detection (still stored for display)
-    private static final String BRAND_CHANNEL = "minecraft:brand";
+    // Channels that should be ignored during detection (still stored for display)
+    private static final Set<String> BRAND_CHANNELS = new HashSet<>(Arrays.asList(
+            "minecraft:brand", "mc|brand"));
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -42,7 +43,7 @@ public class DetectionManager {
 
         Set<String> result = new HashSet<>();
         for (String ch : channels) {
-            if (!BRAND_CHANNEL.equalsIgnoreCase(ch)) {
+            if (!BRAND_CHANNELS.contains(ch.toLowerCase())) {
                 result.add(ch);
             }
         }
