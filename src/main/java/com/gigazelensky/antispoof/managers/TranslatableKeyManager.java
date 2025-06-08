@@ -22,20 +22,19 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Detects mods by probing translation keys via a temporary sign. */
 public class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     private final AntiSpoofPlugin plugin;
-    private final ConfigManager cfg;
+    private final ConfigManager   cfg;
     private final DetectionManager detectionManager;
     private final Map<UUID, Long> lastProbe = new ConcurrentHashMap<>();
 
     public TranslatableKeyManager(AntiSpoofPlugin plugin,
                                   DetectionManager detectionManager,
                                   ConfigManager cfg) {
-        this.plugin = plugin;
+        this.plugin  = plugin;
         this.detectionManager = detectionManager;
-        this.cfg = cfg;
+        this.cfg     = cfg;
     }
 
     public void register() {
@@ -43,10 +42,6 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         com.github.retrooper.packetevents.PacketEvents.getAPI()
                 .getEventManager().registerListener(this);
     }
-
-    /* --------------------------------------------------------------------- */
-    /*  Join → schedule probe                                                */
-    /* --------------------------------------------------------------------- */
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent e) {
@@ -57,13 +52,9 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         );
     }
 
-    /* --------------------------------------------------------------------- */
-    /*  Probe (only runs if server ≥ 1.20)                                   */
-    /* --------------------------------------------------------------------- */
-
     public void probe(Player player) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-        if (getServerMinor() < 20) return;                             // backend too old
+        if (getServerMinor() < 20)            return;   // backend < 1.20
 
         long now = System.currentTimeMillis();
         if (now - lastProbe.getOrDefault(player.getUniqueId(), 0L)
@@ -74,7 +65,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         if (tests.isEmpty()) return;
 
         List<String> keys = new ArrayList<>(tests.keySet());
-        while (keys.size() < 4) keys.add(keys.get(0));                // pad
+        while (keys.size() < 4) keys.add(keys.get(0));
 
         Material signMat = getMaterial("OAK_SIGN", "SIGN_POST", "SIGN");
         if (signMat == null) return;
@@ -85,10 +76,9 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         Material oldType = block.getType();
         block.setType(signMat, false);
 
-        BlockState state = block.getState();
-        if (state instanceof Sign sign) {
+        BlockState st = block.getState();
+        if (st instanceof Sign sign) {
             for (int i = 0; i < 4; i++) {
-                /* write Adventure component via reflection (works on 1.20+) */
                 try {
                     Class<?> sideEnum  = Class.forName("org.bukkit.block.sign.Side");
                     Class<?> compClass = Class.forName("net.kyori.adventure.text.Component");
@@ -102,19 +92,21 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
                             .getMethod("setLine", int.class, compClass)
                             .invoke(signSide, i, comp);
                 } catch (Throwable t) {
-                    // legacy fallback if adventure APIs absent
                     sign.setLine(i, keys.get(i));
                 }
             }
             sign.update(true, false);
         }
 
-        WrapperPlayServerOpenSignEditor open =
-                new WrapperPlayServerOpenSignEditor(
-                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()),
-                        true); // front side
-        com.github.retrooper.packetevents.PacketEvents.getAPI()
-                .getPlayerManager().sendPacket(player, open);
+        /* send the sign editor one tick later so the tile-entity data arrives first */
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            WrapperPlayServerOpenSignEditor open =
+                    new WrapperPlayServerOpenSignEditor(
+                            new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()),
+                            true); // front
+            com.github.retrooper.packetevents.PacketEvents.getAPI()
+                    .getPlayerManager().sendPacket(player, open);
+        }, 1);
 
         Bukkit.getScheduler().runTaskLater(
                 plugin,
@@ -122,10 +114,6 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
                 cfg.getTranslatableGuiVisibleTicks()
         );
     }
-
-    /* --------------------------------------------------------------------- */
-    /*  Handle client response                                               */
-    /* --------------------------------------------------------------------- */
 
     @Override
     public void onPacketReceive(PacketReceiveEvent ev) {
@@ -157,18 +145,13 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
             detectionManager.handleTranslatable(p, TranslatableEventType.ZERO, "-");
     }
 
-    /* --------------------------------------------------------------------- */
-    /*  Helpers                                                              */
-    /* --------------------------------------------------------------------- */
-
     private int getServerMinor() {
         String[] v = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
         return v.length >= 2 ? Integer.parseInt(v[1]) : 0;
     }
-
     private Material getMaterial(String... ids) {
         for (String id : ids)
-            try { return Material.valueOf(id); } catch (IllegalArgumentException ignore) {}
+            try { return Material.valueOf(id); } catch (IllegalArgumentException ignored) {}
         return null;
     }
 }
