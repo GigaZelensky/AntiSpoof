@@ -94,7 +94,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         }
 
         // Send open sign packet only to player
-        WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(), true);
+        WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()), true);
         com.github.retrooper.packetevents.PacketEvents.getAPI().getPlayerManager().sendPacket(player, open);
 
         // Schedule GUI close
