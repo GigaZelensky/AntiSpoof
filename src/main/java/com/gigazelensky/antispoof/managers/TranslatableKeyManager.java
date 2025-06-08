@@ -1,4 +1,3 @@
-
 package com.gigazelensky.antispoof.managers;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
@@ -58,7 +57,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
     }
 
     /**
-     * Actively probes a player for translatable‑key responses.
+     * Actively probes a player for translatable-key responses.
      */
     public void probe(Player player) {
         if (!cfg.isTranslatableKeysEnabled()) return;
@@ -80,9 +79,9 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
             lines[i] = keys.get(i);
         }
 
-        // Use a block at y = -64 (void) so it never collides with the world
+        // Place the fake sign at y = 0 (always present in legacy worlds)
         Location loc = player.getLocation().clone();
-        loc.setY(-64);
+        loc.setY(0);
         Block block = loc.getBlock();
         block.setType(Material.SIGN_POST, false);
         BlockState state = block.getState();
@@ -90,7 +89,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
             for (int i = 0; i < 4; i++) {
                 sign.setLine(i, "{\"translate\":\"" + keys.get(i) + "\"}");
             }
-            sign.update(false, false);
+            sign.update(true, false);
         }
 
         // Send open sign packet only to player
@@ -112,12 +111,12 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         Player player = (Player) event.getPlayer();
         WrapperPlayClientUpdateSign wrapper = new WrapperPlayClientUpdateSign(event);
         String[] lines;
-try {
-    java.lang.reflect.Method m = wrapper.getClass().getMethod("getLines");
-    lines = (String[]) m.invoke(wrapper);
-} catch (ReflectiveOperationException ex) {
-    lines = new String[0];
-}
+        try {
+            java.lang.reflect.Method m = wrapper.getClass().getMethod("getLines");
+            lines = (String[]) m.invoke(wrapper);
+        } catch (ReflectiveOperationException ex) {
+            lines = new String[0];
+        }
 
         Map<String,String> testKeys = cfg.getTranslatableTestKeys();
         if (testKeys.isEmpty()) return;
