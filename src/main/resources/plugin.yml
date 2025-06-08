@@ -1,7 +1,6 @@
 name: AntiSpoof
 version: ${project.version}
 main: com.gigazelensky.antispoof.AntiSpoofPlugin
-api-version: 1.20
 softdepend: [ProtocolLib, ProtocolSupport, ViaVersion, ViaBackwards, ViaRewind, Geyser-Spigot, PlaceholderAPI, GrimAC, floodgate]
 # Add PacketEvents as an optional dependency for the lite version
 loadbefore: [PacketEvents]
