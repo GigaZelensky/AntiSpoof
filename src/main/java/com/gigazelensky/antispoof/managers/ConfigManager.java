@@ -685,7 +685,7 @@ public boolean isTranslatableKeysEnabled() {
 }
 
 public java.util.Map<String, String> getTranslatableTestKeys() {
-    java.util.Map<String, String> map = new java.util.HashMap<>();
+    java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
     org.bukkit.configuration.ConfigurationSection section = config.getConfigurationSection("translatable-keys.test-keys");
     if (section != null) {
         for (String key : section.getKeys(false)) {
