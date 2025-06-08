@@ -83,6 +83,8 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         Location loc = player.getLocation().clone();
         loc.setY(0);
         Block block = loc.getBlock();
+        final Material oldType = block.getType();
+        final byte oldData = block.getData();
         block.setType(Material.SIGN_POST, false);
         BlockState state = block.getState();
         if (state instanceof Sign sign) {
@@ -96,9 +98,13 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()), true);
         com.github.retrooper.packetevents.PacketEvents.getAPI().getPlayerManager().sendPacket(player, open);
 
-        // Schedule GUI close
+        // Schedule GUI close and block restoration
         int ticksVisible = cfg.getTranslatableGuiVisibleTicks();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> player.closeInventory(), ticksVisible);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            player.closeInventory();
+            block.setType(oldType, false);
+            block.setData(oldData, false);
+        }, ticksVisible);
 
     }
 
