@@ -22,10 +22,6 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Probes clients by opening a fake sign with translatable components and
- * analysing the sign update response to detect mod translations.
- */
 public class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     private final AntiSpoofPlugin plugin;
@@ -41,129 +37,108 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         this.cfg = cfg;
     }
 
-    /**
-     * Registers Bukkit and packet listeners.
-     */
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
-        com.github.retrooper.packetevents.PacketEvents.getAPI().getEventManager().registerListener(this);
+        com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getEventManager().registerListener(this);
     }
 
     @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        int delay = cfg.getTranslatableFirstDelay();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> probe(player), delay);
+    public void onPlayerJoin(PlayerJoinEvent e) {
+        Bukkit.getScheduler().runTaskLater(
+                plugin,
+                () -> probe(e.getPlayer()),
+                cfg.getTranslatableFirstDelay()
+        );
     }
 
-    /**
-     * Actively probes a player for translatable-key responses.
-     */
+    /** Probe runs only if the *server* is 1.20+; otherwise it returns. */
     public void probe(Player player) {
         if (!cfg.isTranslatableKeysEnabled()) return;
+        if (getServerMinor() < 20) return;                    // backend too old
 
         long now = System.currentTimeMillis();
-        long last = lastProbe.getOrDefault(player.getUniqueId(), 0L);
-        if (now - last < cfg.getTranslatableCooldown()) return;
+        if (now - lastProbe.getOrDefault(player.getUniqueId(), 0L)
+                < cfg.getTranslatableCooldown()) return;
         lastProbe.put(player.getUniqueId(), now);
 
-        // Build sign lines
-        Map<String,String> testKeys = cfg.getTranslatableTestKeys();
-        if (testKeys.isEmpty()) return;
+        Map<String,String> test = cfg.getTranslatableTestKeys();
+        if (test.isEmpty()) return;
 
-        List<String> keys = new ArrayList<>(testKeys.keySet());
-        while (keys.size() < 4) keys.add(keys.get(0)); // pad
+        List<String> keys = new ArrayList<>(test.keySet());
+        while (keys.size() < 4) keys.add(keys.get(0));        // pad
 
-        String[] lines = new String[4];
-        for (int i = 0; i < 4; i++) {
-            lines[i] = keys.get(i);
-        }
+        // Pick a sign material that exists on the running server
+        Material signMat = getMaterial("OAK_SIGN", "SIGN_POST", "SIGN");
+        if (signMat == null) return;                          // should never happen
 
-        // Place the fake sign at y = 0 (always present in legacy worlds)
         Location loc = player.getLocation().clone();
-        loc.setY(0);
+        loc.setY(-64);                                        // out of sight
         Block block = loc.getBlock();
-        final Material oldType = block.getType();
-        final byte oldData = block.getData();
-        block.setType(Material.SIGN_POST, false);
-        BlockState state = block.getState();
-        if (state instanceof Sign sign) {
-            for (int i = 0; i < 4; i++) {
+        Material oldType = block.getType();
+        block.setType(signMat, false);
+
+        BlockState st = block.getState();
+        if (st instanceof Sign sign) {
+            for (int i = 0; i < 4; i++)
                 sign.setLine(i, "{\"translate\":\"" + keys.get(i) + "\"}");
-            }
             sign.update(true, false);
         }
 
-        // Send open sign packet only to player
-        WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()), true);
-        com.github.retrooper.packetevents.PacketEvents.getAPI().getPlayerManager().sendPacket(player, open);
+        WrapperPlayServerOpenSignEditor open =
+                new WrapperPlayServerOpenSignEditor(
+                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()),
+                        false);
+        com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getPlayerManager().sendPacket(player, open);
 
-        // Schedule GUI close and block restoration
-        int ticksVisible = cfg.getTranslatableGuiVisibleTicks();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            player.closeInventory();
-            block.setType(oldType, false);
-            block.setData(oldData, false);
-        }, ticksVisible);
-
+        Bukkit.getScheduler().runTaskLater(
+                plugin,
+                () -> { player.closeInventory(); block.setType(oldType, false); },
+                cfg.getTranslatableGuiVisibleTicks()
+        );
     }
 
     @Override
-    public void onPacketReceive(PacketReceiveEvent event) {
-        if (!event.getPacketType().equals(PacketType.Play.Client.UPDATE_SIGN)) {
-            return;
-        }
+    public void onPacketReceive(PacketReceiveEvent ev) {
+        if (ev.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
 
-        Player player = (Player) event.getPlayer();
-        WrapperPlayClientUpdateSign wrapper = new WrapperPlayClientUpdateSign(event);
+        Player p = (Player) ev.getPlayer();
         String[] lines;
         try {
-            java.lang.reflect.Method m = wrapper.getClass().getMethod("getLines");
-            lines = (String[]) m.invoke(wrapper);
-        } catch (ReflectiveOperationException ex) {
-            lines = new String[0];
-        }
+            lines = (String[]) WrapperPlayClientUpdateSign.class
+                    .getMethod("getLines").invoke(new WrapperPlayClientUpdateSign(ev));
+        } catch (Exception ex) { return; }
 
-        Map<String,String> testKeys = cfg.getTranslatableTestKeys();
-        if (testKeys.isEmpty()) return;
+        Map<String,String> tests = cfg.getTranslatableTestKeys();
+        if (tests.isEmpty()) return;
 
-        // Determine translation results
-        boolean anyTranslated = false;
-        Set<String> requiredMissing = new HashSet<>();
-
-        int i = 0;
-        for (String key : testKeys.keySet()) {
-            if (i >= lines.length) break;
-            String originalKey = key;
-            String returned = lines[i];
-            if (!returned.equals(originalKey)) {
-                anyTranslated = true;
-                if (testKeys.containsKey(originalKey)) {
-                    detectionManager.handleTranslatable(player, TranslatableEventType.TRANSLATED, testKeys.get(originalKey));
-                }
+        boolean translated = false;
+        int idx = 0;
+        for (String key : tests.keySet()) {
+            if (idx >= lines.length) break;
+            if (!lines[idx].equals(key)) {
+                translated = true;
+                detectionManager.handleTranslatable(
+                        p, TranslatableEventType.TRANSLATED, tests.get(key));
             }
-            i++;
+            idx++;
         }
+        if (!translated)
+            detectionManager.handleTranslatable(p, TranslatableEventType.ZERO, "-");
+    }
 
-        // Check required keys
-        for (String required : cfg.getTranslatableRequiredKeys()) {
-            int index = new ArrayList<>(testKeys.keySet()).indexOf(required);
-            if (index >= 0 && index < lines.length) {
-                if (lines[index].equals(required)) {
-                    requiredMissing.add(required);
-                }
-            } else {
-                requiredMissing.add(required);
-            }
-        }
+    /* Helpers */
 
-        for (String miss : requiredMissing) {
-            String label = testKeys.getOrDefault(miss, miss);
-            detectionManager.handleTranslatable(player, TranslatableEventType.REQUIRED_MISS, label);
-        }
+    private int getServerMinor() {
+        String[] split = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
+        return split.length >= 2 ? Integer.parseInt(split[1]) : 0;
+    }
 
-        if (!anyTranslated) {
-            detectionManager.handleTranslatable(player, TranslatableEventType.ZERO, "-");
+    private Material getMaterial(String... candidates) {
+        for (String s : candidates) {
+            try { return Material.valueOf(s); } catch (IllegalArgumentException ignored) {}
         }
+        return null;
     }
 }
