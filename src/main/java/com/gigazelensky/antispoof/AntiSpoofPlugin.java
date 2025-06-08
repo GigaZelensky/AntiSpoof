@@ -333,7 +333,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         PlayerData data = playerDataMap.get(uuid);
         if (data == null) return false;
         
-        // Exclude ignored channels (like minecraft:brand) from detection logic
+        // Exclude ignored channels (like minecraft:brand or MC|Brand) from detection logic
         Set<String> filteredChannels = detectionManager.getFilteredChannels(data.getChannels());
         boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");

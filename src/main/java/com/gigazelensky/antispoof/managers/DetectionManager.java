@@ -13,8 +13,10 @@ public class DetectionManager {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
 
-    // Channel that should be ignored during detection (still stored for display)
-    private static final String BRAND_CHANNEL = "minecraft:brand";
+    // Channels that should be ignored during detection (still stored for display)
+    // MC|Brand is case sensitive on legacy versions
+    private static final String MODERN_BRAND_CHANNEL = "minecraft:brand";
+    private static final String LEGACY_BRAND_CHANNEL = "MC|Brand";
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -42,7 +44,7 @@ public class DetectionManager {
 
         Set<String> result = new HashSet<>();
         for (String ch : channels) {
-            if (!BRAND_CHANNEL.equalsIgnoreCase(ch)) {
+            if (!ch.equalsIgnoreCase(MODERN_BRAND_CHANNEL) && !ch.equals(LEGACY_BRAND_CHANNEL)) {
                 result.add(ch);
             }
         }

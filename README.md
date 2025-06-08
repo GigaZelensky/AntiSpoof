@@ -6,7 +6,7 @@
   **Advanced, customizable Minecraft plugin for detecting client spoofing through brand analysis and channel monitoring**
   
   ![Java](https://img.shields.io/badge/Java-21%2B-orange)
-  ![Minecraft](https://img.shields.io/badge/Minecraft-1.20.4%2B-brightgreen)
+  ![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9-1.21.5-brightgreen)
   ![License](https://img.shields.io/badge/License-GPL%20v3-blue)
 </div>
 
@@ -204,7 +204,7 @@ This transparency helps administrators understand exactly how the plugin is work
 
 ### Requirements
 - Java 21 or higher
-- Spigot, Paper, or compatible fork (1.20.4+)
+- Spigot, Paper, or compatible fork (1.8.9-1.21.5)
 - Appropriate server permissions to install plugins
 
 ### Optional Dependencies
