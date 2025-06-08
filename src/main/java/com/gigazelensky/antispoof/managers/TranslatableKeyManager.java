@@ -22,6 +22,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/** Detects mods by probing translation keys via a temporary sign. */
 public class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     private final AntiSpoofPlugin plugin;
@@ -43,6 +44,10 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
                 .getEventManager().registerListener(this);
     }
 
+    /* --------------------------------------------------------------------- */
+    /*  Join → schedule probe                                                */
+    /* --------------------------------------------------------------------- */
+
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent e) {
         Bukkit.getScheduler().runTaskLater(
@@ -52,43 +57,65 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         );
     }
 
-    /** Probe runs only if the *server* is 1.20+; otherwise it returns. */
+    /* --------------------------------------------------------------------- */
+    /*  Probe (runs only if server ≥ 1.20)                                   */
+    /* --------------------------------------------------------------------- */
+
     public void probe(Player player) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-        if (getServerMinor() < 20) return;                    // backend too old
+        if (getServerMinor() < 20) return;                             // old backend
 
         long now = System.currentTimeMillis();
         if (now - lastProbe.getOrDefault(player.getUniqueId(), 0L)
                 < cfg.getTranslatableCooldown()) return;
         lastProbe.put(player.getUniqueId(), now);
 
-        Map<String,String> test = cfg.getTranslatableTestKeys();
-        if (test.isEmpty()) return;
+        Map<String,String> tests = cfg.getTranslatableTestKeys();
+        if (tests.isEmpty()) return;
 
-        List<String> keys = new ArrayList<>(test.keySet());
-        while (keys.size() < 4) keys.add(keys.get(0));        // pad
+        List<String> keys = new ArrayList<>(tests.keySet());
+        while (keys.size() < 4) keys.add(keys.get(0));                // pad
 
-        // Pick a sign material that exists on the running server
         Material signMat = getMaterial("OAK_SIGN", "SIGN_POST", "SIGN");
-        if (signMat == null) return;                          // should never happen
+        if (signMat == null) return;
 
         Location loc = player.getLocation().clone();
-        loc.setY(-64);                                        // out of sight
+        loc.setY(-64);
         Block block = loc.getBlock();
         Material oldType = block.getType();
         block.setType(signMat, false);
 
-        BlockState st = block.getState();
-        if (st instanceof Sign sign) {
-            for (int i = 0; i < 4; i++)
-                sign.setLine(i, "{\"translate\":\"" + keys.get(i) + "\"}");
+        BlockState state = block.getState();
+        if (state instanceof Sign sign) {
+            for (int i = 0; i < 4; i++) {
+                /* ---------------------------------------------------------
+                   Use Adventure sign API via reflection so the code still
+                   compiles against 1.8 but writes components on 1.20+.
+                   --------------------------------------------------------- */
+                try {
+                    Class<?> sideEnum  = Class.forName("org.bukkit.block.sign.Side");
+                    Class<?> compClass = Class.forName(
+                            "net.kyori.adventure.text.Component");
+                    Object front = Enum.valueOf((Class<Enum>) sideEnum, "FRONT");
+                    Object signSide = sign.getClass()
+                            .getMethod("getSide", sideEnum).invoke(sign, front);
+                    Object comp = compClass
+                            .getMethod("translatable", String.class)
+                            .invoke(null, keys.get(i));
+                    signSide.getClass()
+                            .getMethod("setLine", int.class, compClass)
+                            .invoke(signSide, i, comp);
+                } catch (Throwable t) {
+                    // fallback (never translates, but keeps legacy compile)
+                    sign.setLine(i, keys.get(i));
+                }
+            }
             sign.update(true, false);
         }
 
         WrapperPlayServerOpenSignEditor open =
                 new WrapperPlayServerOpenSignEditor(
-                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()),
-                        false);
+                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()), false);
         com.github.retrooper.packetevents.PacketEvents.getAPI()
                 .getPlayerManager().sendPacket(player, open);
 
@@ -99,17 +126,22 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         );
     }
 
+    /* --------------------------------------------------------------------- */
+    /*  Handle client response                                               */
+    /* --------------------------------------------------------------------- */
+
     @Override
     public void onPacketReceive(PacketReceiveEvent ev) {
         if (ev.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
 
-        Player p = (Player) ev.getPlayer();
         String[] lines;
         try {
             lines = (String[]) WrapperPlayClientUpdateSign.class
-                    .getMethod("getLines").invoke(new WrapperPlayClientUpdateSign(ev));
-        } catch (Exception ex) { return; }
+                    .getMethod("getLines")
+                    .invoke(new WrapperPlayClientUpdateSign(ev));
+        } catch (Exception ignore) { return; }
 
+        Player p = (Player) ev.getPlayer();
         Map<String,String> tests = cfg.getTranslatableTestKeys();
         if (tests.isEmpty()) return;
 
@@ -128,17 +160,18 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
             detectionManager.handleTranslatable(p, TranslatableEventType.ZERO, "-");
     }
 
-    /* Helpers */
+    /* --------------------------------------------------------------------- */
+    /*  Helpers                                                              */
+    /* --------------------------------------------------------------------- */
 
     private int getServerMinor() {
-        String[] split = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
-        return split.length >= 2 ? Integer.parseInt(split[1]) : 0;
+        String[] v = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
+        return v.length >= 2 ? Integer.parseInt(v[1]) : 0;
     }
 
-    private Material getMaterial(String... candidates) {
-        for (String s : candidates) {
-            try { return Material.valueOf(s); } catch (IllegalArgumentException ignored) {}
-        }
+    private Material getMaterial(String... ids) {
+        for (String id : ids)
+            try { return Material.valueOf(id); } catch (IllegalArgumentException ignore) {}
         return null;
     }
 }
