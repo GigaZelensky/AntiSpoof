@@ -58,12 +58,12 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
     }
 
     /* --------------------------------------------------------------------- */
-    /*  Probe (runs only if server ≥ 1.20)                                   */
+    /*  Probe (only runs if server ≥ 1.20)                                   */
     /* --------------------------------------------------------------------- */
 
     public void probe(Player player) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-        if (getServerMinor() < 20) return;                             // old backend
+        if (getServerMinor() < 20) return;                             // backend too old
 
         long now = System.currentTimeMillis();
         if (now - lastProbe.getOrDefault(player.getUniqueId(), 0L)
@@ -88,15 +88,11 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         BlockState state = block.getState();
         if (state instanceof Sign sign) {
             for (int i = 0; i < 4; i++) {
-                /* ---------------------------------------------------------
-                   Use Adventure sign API via reflection so the code still
-                   compiles against 1.8 but writes components on 1.20+.
-                   --------------------------------------------------------- */
+                /* write Adventure component via reflection (works on 1.20+) */
                 try {
                     Class<?> sideEnum  = Class.forName("org.bukkit.block.sign.Side");
-                    Class<?> compClass = Class.forName(
-                            "net.kyori.adventure.text.Component");
-                    Object front = Enum.valueOf((Class<Enum>) sideEnum, "FRONT");
+                    Class<?> compClass = Class.forName("net.kyori.adventure.text.Component");
+                    Object front = Enum.valueOf((Class) sideEnum, "FRONT");
                     Object signSide = sign.getClass()
                             .getMethod("getSide", sideEnum).invoke(sign, front);
                     Object comp = compClass
@@ -106,7 +102,7 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
                             .getMethod("setLine", int.class, compClass)
                             .invoke(signSide, i, comp);
                 } catch (Throwable t) {
-                    // fallback (never translates, but keeps legacy compile)
+                    // legacy fallback if adventure APIs absent
                     sign.setLine(i, keys.get(i));
                 }
             }
@@ -115,7 +111,8 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
 
         WrapperPlayServerOpenSignEditor open =
                 new WrapperPlayServerOpenSignEditor(
-                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()), false);
+                        new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()),
+                        true); // front side
         com.github.retrooper.packetevents.PacketEvents.getAPI()
                 .getPlayerManager().sendPacket(player, open);
 
