@@ -70,6 +70,15 @@
 - **Detection Status**: Check if players are using modified clients
 - **Bedrock Integration**: Verify Bedrock player status
 
+### Rich Color Messaging
+
+* **Hybrid formatting engine** – one string can mix
+
+  * MiniMessage tags `<gradient:#ff7f00:#ffd700><bold>Hello</bold></gradient>`
+  * Legacy `&` color/style codes `&aGreen &lBold`
+  * Hex colours `&#FFAA00` or `&x&F&F&A&A&0&0`
+* Powered by the new `MessageUtil.miniMessage()` helper, so every configurable alert, Discord embed, or command output can use gradients, bold, italics, obfuscated text, etc.
+
 ---
 
 ## 📦 Download Options
