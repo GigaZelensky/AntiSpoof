@@ -14,8 +14,9 @@ public class DetectionManager {
     private final ConfigManager config;
 
     // Channels that should be ignored during detection (still stored for display)
-    private static final Set<String> BRAND_CHANNELS = new HashSet<>(Arrays.asList(
-            "minecraft:brand", "mc|brand"));
+    // MC|Brand is case sensitive on legacy versions
+    private static final String MODERN_BRAND_CHANNEL = "minecraft:brand";
+    private static final String LEGACY_BRAND_CHANNEL = "MC|Brand";
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -43,7 +44,7 @@ public class DetectionManager {
 
         Set<String> result = new HashSet<>();
         for (String ch : channels) {
-            if (!BRAND_CHANNELS.contains(ch.toLowerCase())) {
+            if (!ch.equalsIgnoreCase(MODERN_BRAND_CHANNEL) && !ch.equals(LEGACY_BRAND_CHANNEL)) {
                 result.add(ch);
             }
         }
