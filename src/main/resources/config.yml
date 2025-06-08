@@ -160,8 +160,6 @@ client-brands:
     # Lunar Client Configuration
     lunar:
       enabled: true
-      # Verify using the Apollo Lunar Client API
-      lunar-api-check: true
       values:
         - "^lunarclient:v\\d+\\.\\d+\\.\\d+-\\d{4}$"
       # Whether to count the player as flagged by AntiSpoof
@@ -428,3 +426,37 @@ messages:
   multiple-flags: "&8[&cAntiSpoof&8] &e%player% has multiple violations: &c%reasons%"
   # Message for console when multiple violations
   console-multiple-flags: "%player% has multiple violations: %reasons%"
+
+
+# ──────────────────────────────────────────────────────────
+#        Translatable Key Detector (AntiSpoof v2)
+# ──────────────────────────────────────────────────────────
+translatable-keys:
+  enabled: true                # master switch for this whole detector
+
+  # ← key sent to the client  : ← label used in alerts/placeholders
+  test-keys:
+    sodium.option_impact.low: Sodium
+    lithium.options.category: Lithium
+    modmenu.mods:             ModMenu
+
+  required-keys: [ ]          # if any of these *fails* to translate ⇒ REQUIRED_MISS
+
+  check:
+    first-delay:       40     # ticks after PlayerJoin before probing
+    gui-visible-ticks: 1      # how long the sign GUI is open
+    cooldown:          600    # ms between probes per player
+
+  punish:                     # console commands per event-type
+    enabled: true             # ← add this switch
+    translated:
+      - "kick %player% Unallowed mod: %label%"
+    required-miss:
+      - "kick %player% Missing translation: %label%"
+    zero:
+      - "kick %player% Blocked translation probe"
+
+  messages:                   # chat sent to player (Adventure colors supported)
+    translated:    "&cUnallowed mod detected: &e%label%"
+    required-miss: "&cMissing required component: &e%label%"
+    zero:          "&cYour client blocked the translation probe."

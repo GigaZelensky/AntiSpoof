@@ -41,7 +41,6 @@ public class ConfigManager {
         // Added fields for required channels punishment
         private boolean requiredChannelsPunish;
         private List<String> requiredChannelsPunishments = new ArrayList<>();
-        private boolean lunarApiCheck;
         
         public boolean isEnabled() { return enabled; }
         public List<Pattern> getPatterns() { return patterns; }
@@ -59,15 +58,7 @@ public class ConfigManager {
         // Added getters for required channels punishment
         public boolean shouldPunishRequiredChannels() { return requiredChannelsPunish; }
         public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
-    
-/**
- * Checks if Lunar API check is enabled for this brand.
- * @return true if enabled, false otherwise
- */
-public boolean isLunarApiCheckEnabled() {
-    return lunarApiCheck;
-}
-}
+    }
 
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -168,10 +159,6 @@ public boolean isLunarApiCheckEnabled() {
         
         // Added loading for required channels punishment fields
         brandConfig.requiredChannelsPunish = section.getBoolean("required-channels-punish", false);
-
-// Load Lunar API check
-brandConfig.lunarApiCheck = brandSection.getBoolean("lunar-api-check", false);
-
         brandConfig.requiredChannelsPunishments = section.getStringList("required-channels-punishments");
         
         // Load and compile pattern strings
@@ -690,4 +677,52 @@ brandConfig.lunarApiCheck = brandSection.getBoolean("lunar-api-check", false);
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
     }
+
+// --- Translatable Keys Support ---
+// These methods provide access to the new 'translatable-keys' section added in AntiSpoof 2.0.0.
+public boolean isTranslatableKeysEnabled() {
+    return config.getBoolean("translatable-keys.enabled", true);
+}
+
+public java.util.Map<String, String> getTranslatableTestKeys() {
+    java.util.Map<String, String> map = new java.util.HashMap<>();
+    org.bukkit.configuration.ConfigurationSection section = config.getConfigurationSection("translatable-keys.test-keys");
+    if (section != null) {
+        for (String key : section.getKeys(false)) {
+            map.put(key, section.getString(key, key));
+        }
+    }
+    return map;
+}
+
+public java.util.List<String> getTranslatableRequiredKeys() {
+    return config.getStringList("translatable-keys.required-keys");
+}
+
+public int getTranslatableFirstDelay() {
+    return config.getInt("translatable-keys.check.first-delay", 40);
+}
+
+public int getTranslatableGuiVisibleTicks() {
+    return config.getInt("translatable-keys.check.gui-visible-ticks", 1);
+}
+
+public long getTranslatableCooldown() {
+    return config.getLong("translatable-keys.check.cooldown", 600);
+}
+
+public boolean isTranslatePunishEnabled() {
+    return config.getBoolean("translatable-keys.punish.enabled", true);
+}
+
+public java.util.List<String> getTranslatablePunishCommands(com.gigazelensky.antispoof.enums.TranslatableEventType type) {
+    String path = "translatable-keys.punish." + type.name().toLowerCase().replace('_', '-');
+    return config.getStringList(path);
+}
+
+public String getTranslatablePlayerMessage(com.gigazelensky.antispoof.enums.TranslatableEventType type) {
+    String path = "translatable-keys.messages." + type.name().toLowerCase().replace('_', '-');
+    return config.getString(path, "");
+}
+
 }

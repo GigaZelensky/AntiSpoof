@@ -6,7 +6,7 @@
   **Advanced, customizable Minecraft plugin for detecting client spoofing through brand analysis and channel monitoring**
   
   ![Java](https://img.shields.io/badge/Java-21%2B-orange)
-  ![Minecraft](https://img.shields.io/badge/Minecraft-1.20.4%2B-brightgreen)
+  ![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9-1.21.5-brightgreen)
   ![License](https://img.shields.io/badge/License-GPL%20v3-blue)
 </div>
 
@@ -69,6 +69,15 @@
 - **Client Information**: Access player client details from other plugins
 - **Detection Status**: Check if players are using modified clients
 - **Bedrock Integration**: Verify Bedrock player status
+
+### Rich Color Messaging
+
+* **Hybrid formatting engine** – one string can mix
+
+  * MiniMessage tags `<gradient:#ff7f00:#ffd700><bold>Hello</bold></gradient>`
+  * Legacy `&` color/style codes `&aGreen &lBold`
+  * Hex colours `&#FFAA00` or `&x&F&F&A&A&0&0`
+* Powered by the new `MessageUtil.miniMessage()` helper, so every configurable alert, Discord embed, or command output can use gradients, bold, italics, obfuscated text, etc.
 
 ---
 
@@ -195,7 +204,7 @@ This transparency helps administrators understand exactly how the plugin is work
 
 ### Requirements
 - Java 21 or higher
-- Spigot, Paper, or compatible fork (1.20.4+)
+- Spigot, Paper, or compatible fork (1.8.9-1.21.5)
 - Appropriate server permissions to install plugins
 
 ### Optional Dependencies

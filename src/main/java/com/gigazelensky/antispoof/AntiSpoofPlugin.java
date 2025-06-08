@@ -31,6 +31,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private DiscordWebhookHandler discordWebhookHandler;
     private AlertManager alertManager;
     private DetectionManager detectionManager;
+
+// --- Translatable Key Manager ---
+private com.gigazelensky.antispoof.managers.TranslatableKeyManager translatableKeyManager;
+
     private PlayerEventListener playerEventListener;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
@@ -47,6 +51,11 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.configManager = new ConfigManager(this);
         this.alertManager = new AlertManager(this);
         this.detectionManager = new DetectionManager(this);
+
+// Instantiate translatable key manager
+this.translatableKeyManager = new com.gigazelensky.antispoof.managers.TranslatableKeyManager(this, this.detectionManager, this.configManager);
+this.translatableKeyManager.register();
+
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize version checker
@@ -333,7 +342,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         PlayerData data = playerDataMap.get(uuid);
         if (data == null) return false;
         
-        // Exclude ignored channels (like minecraft:brand) from detection logic
+        // Exclude ignored channels (like minecraft:brand or MC|Brand) from detection logic
         Set<String> filteredChannels = detectionManager.getFilteredChannels(data.getChannels());
         boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");

@@ -4,7 +4,6 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import com.lunarclient.apollo.Apollo;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,8 +13,10 @@ public class DetectionManager {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
 
-    // Channel that should be ignored during detection (still stored for display)
-    private static final String BRAND_CHANNEL = "minecraft:brand";
+    // Channels that should be ignored during detection (still stored for display)
+    // MC|Brand is case sensitive on legacy versions
+    private static final String MODERN_BRAND_CHANNEL = "minecraft:brand";
+    private static final String LEGACY_BRAND_CHANNEL = "MC|Brand";
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -43,7 +44,7 @@ public class DetectionManager {
 
         Set<String> result = new HashSet<>();
         for (String ch : channels) {
-            if (!BRAND_CHANNEL.equalsIgnoreCase(ch)) {
+            if (!ch.equalsIgnoreCase(MODERN_BRAND_CHANNEL) && !ch.equals(LEGACY_BRAND_CHANNEL)) {
                 result.add(ch);
             }
         }
@@ -298,27 +299,6 @@ public class DetectionManager {
             if (matchedBrandKey != null) {
                 // We found a matching brand configuration
                 ConfigManager.ClientBrandConfig brandConfig = config.getClientBrandConfig(matchedBrandKey);
-
-// Apollo Lunar Client spoof detection
-if ("lunar".equalsIgnoreCase(matchedBrandKey) && brandConfig.isLunarApiCheckEnabled()) {
-    boolean hasApollo = false;
-    try {
-        hasApollo = Apollo.getPlayerManager() != null && Apollo.getPlayerManager().hasSupport(uuid);
-    } catch (IllegalStateException e) {
-        // Apollo platform might not be initialized
-        if (config.isDebugMode()) {
-            plugin.getLogger().warning("[Debug] Apollo platform not initialized: " + e.getMessage());
-        }
-    } catch (Throwable t) {
-        if (config.isDebugMode()) {
-            plugin.getLogger().warning("[Debug] Error checking Apollo support: " + t.getMessage());
-        }
-    }
-    if (!hasApollo) {
-        detectedViolations.put("LUNAR_API_SPOOF", "Lunar brand present without Apollo handshake");
-    }
-}
-
                 
                 if (config.isDebugMode()) {
                     plugin.getLogger().info("[Debug] Matched brand for " + player.getName() + 
@@ -907,4 +887,41 @@ if ("lunar".equalsIgnoreCase(matchedBrandKey) && brandConfig.isLunarApiCheckEnab
         recentlyCheckedPlayers.remove(playerUUID);
         requiredChannelCheckedPlayers.remove(playerUUID);
     }
+
+// --- Translatable Detection ---
+/**
+ * Handle a translatable-key detection event.
+ *
+ * @param player the player involved
+ * @param eventType the translatable event type
+ * @param label human‑readable label for the key
+ */
+public void handleTranslatable(org.bukkit.entity.Player player,
+                               com.gigazelensky.antispoof.enums.TranslatableEventType eventType,
+                               String label) {
+    String msg = config.getTranslatablePlayerMessage(eventType);
+    if (msg != null && !msg.isEmpty()) {
+        player.sendMessage(net.kyori.adventure.text.Component.text(apply(msg, player, label)));
+    }
+
+    if (config.isTranslatePunishEnabled()) {
+        java.util.List<String> commands = config.getTranslatablePunishCommands(eventType);
+        org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
+            for (String cmd : commands) {
+                org.bukkit.Bukkit.dispatchCommand(org.bukkit.Bukkit.getConsoleSender(), apply(cmd, player, label));
+            }
+        });
+    }
+
+    // Console / staff log
+    plugin.getLogger().info("[AntiSpoof] Player " + player.getName() + " triggered " + eventType +
+            " for label '" + label + "'.");
+}
+
+private static String apply(String template, org.bukkit.entity.Player p, String label) {
+    return template
+            .replace("%player%", p.getName())
+            .replace("%label%", label);
+}
+
 }
