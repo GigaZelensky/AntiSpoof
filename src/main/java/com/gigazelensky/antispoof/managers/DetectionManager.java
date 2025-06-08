@@ -4,6 +4,7 @@ import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.ChatColor;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -901,7 +902,7 @@ public void handleTranslatable(org.bukkit.entity.Player player,
                                String label) {
     String msg = config.getTranslatablePlayerMessage(eventType);
     if (msg != null && !msg.isEmpty()) {
-        player.sendMessage(net.kyori.adventure.text.Component.text(apply(msg, player, label)));
+        player.sendMessage(ChatColor.translateAlternateColorCodes('&', apply(msg, player, label)));
     }
 
     if (config.isTranslatePunishEnabled()) {

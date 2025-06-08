@@ -8,7 +8,7 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
-import net.kyori.adventure.text.Component;
+import com.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -75,20 +75,20 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         List<String> keys = new ArrayList<>(testKeys.keySet());
         while (keys.size() < 4) keys.add(keys.get(0)); // pad
 
-        Component[] lines = new Component[4];
+        String[] lines = new String[4];
         for (int i = 0; i < 4; i++) {
-            lines[i] = Component.translatable(keys.get(i));
+            lines[i] = keys.get(i);
         }
 
         // Use a block at y = -64 (void) so it never collides with the world
         Location loc = player.getLocation().clone();
         loc.setY(-64);
         Block block = loc.getBlock();
-        block.setType(Material.OAK_SIGN, false);
+        block.setType(Material.SIGN_POST, false);
         BlockState state = block.getState();
         if (state instanceof Sign sign) {
             for (int i = 0; i < 4; i++) {
-                sign.line(i, lines[i]);
+                sign.setLine(i, lines[i]);
             }
             sign.update(false, false);
         }
@@ -111,7 +111,13 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
 
         Player player = (Player) event.getPlayer();
         WrapperPlayClientUpdateSign wrapper = new WrapperPlayClientUpdateSign(event);
-        String[] lines = wrapper.getLines();
+        String[] lines;
+try {
+    java.lang.reflect.Method m = wrapper.getClass().getMethod("getLines");
+    lines = (String[]) m.invoke(wrapper);
+} catch (ReflectiveOperationException ex) {
+    lines = new String[0];
+}
 
         Map<String,String> testKeys = cfg.getTranslatableTestKeys();
         if (testKeys.isEmpty()) return;
