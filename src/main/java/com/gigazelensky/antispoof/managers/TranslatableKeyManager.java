@@ -24,21 +24,23 @@ import java.lang.reflect.Method;
 import java.util.*;
 
 /**
- * Hidden-sign probe for client translatable-key detection.
+ * Minimal-dependency translatable-key probe.
  *
- * Compile-time safe against Spigot-1.8.8; all 1.20+ methods are invoked
- * through reflection so the project still builds on the legacy API.
+ * • Places a temporary editable sign at y=-64
+ * • Writes JSON translatable components
+ * • Opens the editor, closes it after N ticks
+ * • Reads UpdateSign and compares with raw keys
+ *
+ * Uses only PE 2.8.1 classes present in AntiSpoof’s current POM.
  */
-public class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
+public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     private final AntiSpoofPlugin  plugin;
     private final DetectionManager detection;
     private final ConfigManager    cfg;
-    private final Map<UUID, Long>  lastProbe = new HashMap<>();
 
-    private void log(Player p, String msg) {
-        plugin.getLogger().info("[Translatable] " + p.getName() + ": " + msg);
-    }
+    /** last probe per player (ms) */
+    private final Map<UUID, Long> lastProbe = new HashMap<>();
 
     public TranslatableKeyManager(AntiSpoofPlugin plugin,
                                   DetectionManager detectionManager,
@@ -46,16 +48,55 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
         this.plugin   = plugin;
         this.detection = detectionManager;
         this.cfg      = cfg;
-    }
 
-    public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
-    /* ------------------------------------------------------------------ */
-    /*  Join → delayed probe                                              */
-    /* ------------------------------------------------------------------ */
+    /* --------------------------------------------------------------------- */
+    /*  utilities                                                            */
+    /* --------------------------------------------------------------------- */
+
+    private void log(Player p, String msg) {
+        plugin.getLogger().info("[Translatable] " + p.getName() + " – " + msg);
+    }
+
+    private boolean enabled() {
+        try { return (boolean) cfg.getClass().getMethod("isTranslatableEnabled").invoke(cfg); }
+        catch (Throwable t) { return true; }
+    }
+
+    private int minor() {
+        String[] v = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
+        return v.length > 1 ? Integer.parseInt(v[1]) : 0;
+    }
+
+    private Material findMat(String... ids) {
+        for (String id : ids)
+            try { return Material.valueOf(id); } catch (IllegalArgumentException ignored) {}
+        return Material.SIGN;            // available in 1.8-compile
+    }
+
+    private String[] getLines(Object wrapper) {
+        /* PE 2.8.1 → getTextLines(); fallback to others reflectively         */
+        for (String m : new String[]{"getTextLines", "getLines", "getText"}) {
+            try { return (String[]) wrapper.getClass().getMethod(m).invoke(wrapper); }
+            catch (Throwable ignored) {}
+        }
+        /* try individual getters                                            */
+        List<String> tmp = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            try {
+                Method g = wrapper.getClass().getMethod("getLine" + i);
+                tmp.add((String) g.invoke(wrapper));
+            } catch (Throwable ignored) {}
+        }
+        return tmp.toArray(new String[0]);
+    }
+
+    /* --------------------------------------------------------------------- */
+    /*  join → schedule probe                                                */
+    /* --------------------------------------------------------------------- */
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         Bukkit.getScheduler().runTaskLater(
@@ -64,141 +105,92 @@ public class TranslatableKeyManager extends PacketListenerAbstract implements Li
                 cfg.getTranslatableFirstDelay());
     }
 
-    /* ------------------------------------------------------------------ */
-    /*  Probe                                                             */
-    /* ------------------------------------------------------------------ */
+    /* --------------------------------------------------------------------- */
+    /*  sign probe                                                           */
+    /* --------------------------------------------------------------------- */
     private void probe(Player p) {
 
-        /* 0) master switch */
-        boolean enabled;
-        try { enabled = (boolean) cfg.getClass()
-                                     .getMethod("isTranslatableEnabled")
-                                     .invoke(cfg);
-        } catch (Throwable t) { enabled = true; }
-        if (!enabled) return;
+        if (!enabled()) return;
+        if (minor() < 20) { log(p, "skipped (server <1.20)"); return; }
 
-        /* 1) needs 1.20+ back-end (UpdateSign JSON) */
-        if (getMinor() < 20) { log(p, "skipped – server <1.20"); return; }
-
-        /* 2) per-player cooldown */
         long now = System.currentTimeMillis();
-        if (now - lastProbe.getOrDefault(p.getUniqueId(), 0L) < cfg.getTranslatableCooldown()) {
-            log(p, "cool-down active");
-            return;
-        }
+        long last = lastProbe.getOrDefault(p.getUniqueId(), 0L);
+        if (now - last < cfg.getTranslatableCooldown()) { log(p,"cool-down"); return; }
         lastProbe.put(p.getUniqueId(), now);
 
-        /* 3) keys */
-        LinkedHashMap<String,String> tests = new LinkedHashMap<>(cfg.getTranslatableTestKeys());
-        if (tests.isEmpty()) { log(p, "no keys configured"); return; }
-        List<String> keyList = new ArrayList<>(tests.keySet());
-        while (keyList.size() < 4) keyList.add(keyList.get(0));   // pad
+        LinkedHashMap<String,String> map = new LinkedHashMap<>(cfg.getTranslatableTestKeys());
+        if (map.isEmpty()) { log(p,"no keys"); return; }
 
-        /* 4) hidden sign position */
+        /* pick up to 4 keys */
+        List<String> keys = new ArrayList<>(map.keySet());
+        while (keys.size() < 4) keys.add(keys.get(0));
+
+        /* hidden location */
         Location loc = p.getLocation().clone();
         loc.setY(-64);
-        Block block   = loc.getBlock();
-        Material prev = block.getType();
-        Material signMat = getMaterial("OAK_SIGN", "SIGN_POST", "SIGN");
-        if (signMat == null) { log(p, "no sign material found"); return; }
+        Block block    = loc.getBlock();
+        Material prev  = block.getType();
+        Material signM = findMat("OAK_SIGN","SIGN_POST");
 
-        /* 5) place sign + write JSON lines */
-        block.setType(signMat, false);
+        block.setType(signM, false);
         BlockState state = block.getState();
-        if (!(state instanceof Sign)) { log(p, "state !sign"); return; }
+        if (!(state instanceof Sign)) { log(p,"no sign state"); return; }
+
         Sign sign = (Sign) state;
         for (int i = 0; i < 4; i++)
-            sign.setLine(i, "{\"translate\":\"" + keyList.get(i) + "\"}");
-        /* editable/waxed flags on 1.20+: reflected so build succeeds */
-        try { sign.getClass().getMethod("setWaxed", boolean.class).invoke(sign, false); } catch (Throwable ignored) {}
-        try { sign.getClass().getMethod("setEditable", boolean.class).invoke(sign, true); } catch (Throwable ignored) {}
-        sign.update(true, false);
-        log(p, "sign placed");
+            sign.setLine(i, "{\"translate\":\"" + keys.get(i) + "\"}");
 
-        /* 6) open editor (1 tick later so TE data already sent) */
+        /* editable & unwaxed (1.20+) via reflection                          */
+        try { sign.getClass().getMethod("setEditable", boolean.class).invoke(sign, true); } catch (Throwable ignored) {}
+        try { sign.getClass().getMethod("setWaxed",    boolean.class).invoke(sign, false);} catch (Throwable ignored) {}
+
+        sign.update(true, false);
+        log(p,"sign placed");
+
+        /* open GUI next tick                                                 */
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             Vector3i pos = new Vector3i(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
-            WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(pos, true);
+            WrapperPlayServerOpenSignEditor open = new WrapperPlayServerOpenSignEditor(pos,true);
             PacketEvents.getAPI().getPlayerManager().sendPacket(p, open);
-            log(p, "editor opened");
+            log(p,"editor opened");
         }, 1);
 
-        /* 7) close GUI & restore */
+        /* close GUI + restore world                                          */
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             p.closeInventory();
             block.setType(prev, false);
-            log(p, "sign restored");
+            log(p,"restored");
         }, cfg.getTranslatableGuiVisibleTicks());
     }
 
-    /* ------------------------------------------------------------------ */
-    /*  Packet listener                                                   */
-    /* ------------------------------------------------------------------ */
+    /* --------------------------------------------------------------------- */
+    /*  Packet listener                                                      */
+    /* --------------------------------------------------------------------- */
     @Override
     public void onPacketReceive(PacketReceiveEvent e) {
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
 
         Player p = (Player) e.getPlayer();
-        String[] lines = extractLines(new WrapperPlayClientUpdateSign(e));
+        String[] lines = getLines(new WrapperPlayClientUpdateSign(e));
         if (lines.length == 0) return;
 
         LinkedHashMap<String,String> tests = new LinkedHashMap<>(cfg.getTranslatableTestKeys());
-        if (tests.isEmpty()) return;
-
         boolean translated = false;
-        int idx = 0;
+        int i = 0;
         for (Map.Entry<String,String> en : tests.entrySet()) {
-            if (idx >= lines.length) break;
-            if (!lines[idx].equals(en.getKey())) {
+            if (i >= lines.length) break;
+            String raw = en.getKey();
+            String lab = en.getValue();
+            if (!lines[i].equals(raw)) {
                 translated = true;
-                log(p, "TRANSLATED → " + en.getValue());
-                detection.handleTranslatable(p, TranslatableEventType.TRANSLATED, en.getValue());
+                detection.handleTranslatable(p, TranslatableEventType.TRANSLATED, lab);
+                log(p,"TRANSLATED " + lab);
             }
-            idx++;
+            i++;
         }
         if (!translated) {
-            log(p, "ZERO (no translation)");
             detection.handleTranslatable(p, TranslatableEventType.ZERO, "-");
+            log(p,"ZERO");
         }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*  Helpers                                                           */
-    /* ------------------------------------------------------------------ */
-
-    private int getMinor() {
-        String[] v = Bukkit.getBukkitVersion().split("-")[0].split("\\.");
-        return v.length > 1 ? Integer.parseInt(v[1]) : 0;
-    }
-
-    private Material getMaterial(String... ids) {
-        for (String id : ids)
-            try { return Material.valueOf(id); } catch (IllegalArgumentException ignored) {}
-        return null;
-    }
-
-    /** reflect over WrapperPlayClientUpdateSign to stay API-safe */
-    private String[] extractLines(Object wrapper) {
-        try {
-            Method m = wrapper.getClass().getMethod("getTextLines"); // PE 2.8.1
-            return (String[]) m.invoke(wrapper);
-        } catch (Throwable ignored) {}
-        try {
-            Method m = wrapper.getClass().getMethod("getLines");
-            return (String[]) m.invoke(wrapper);
-        } catch (Throwable ignored) {}
-        try {
-            Method m = wrapper.getClass().getMethod("getText");
-            return (String[]) m.invoke(wrapper);
-        } catch (Throwable ignored) {}
-        /* fallback: try individual getters */
-        List<String> tmp = new ArrayList<>();
-        for (int i = 1; i <= 4; i++) {
-            try {
-                Method m = wrapper.getClass().getMethod("getLine" + i);
-                tmp.add((String) m.invoke(wrapper));
-            } catch (Throwable ignored) {}
-        }
-        return tmp.toArray(new String[0]);
     }
 }
