@@ -14,8 +14,6 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Sign;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -61,29 +59,18 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         cooldown.put(p.getUniqueId(),now);
 
         /* load keys from translatable-keys.mods.(*) -------------- */
-        LinkedHashMap<String,String> map=new LinkedHashMap<>();
-        try{
-            Method getCfg = cfg.getClass().getMethod("getConfig");
-            FileConfiguration root = (FileConfiguration) getCfg.invoke(cfg);
-            ConfigurationSection mods = root.getConfigurationSection("translatable-keys.mods");
-            if(mods!=null) recurse(mods,"",map);
-        }catch(Throwable t){ debug("config access err: "+t.getMessage()); }
+        // CORRECTED: Replaced reflection with a direct, safe method call
+        LinkedHashMap<String, String> map = new LinkedHashMap<>(cfg.getTranslatableModsWithLabels());
 
-        if(map.isEmpty()){ debug("no keys configured"); return; }
+        if(map.isEmpty()){ 
+            debug("no keys configured"); 
+            return; 
+        }
 
         ProbeInfo info=new ProbeInfo(map);
         probes.put(p.getUniqueId(),info);
 
         if(!sendBundleReflectively(p,info)) fallbackRealSign(p,info);
-    }
-    private void recurse(ConfigurationSection sec,String path,Map<String,String> out){
-        for(String k:sec.getKeys(false)){
-            String full=path.isEmpty()?k:path+"."+k;
-            ConfigurationSection child=sec.getConfigurationSection(k);
-            if(child!=null && child.contains("label")){
-                out.put(full, child.getString("label",full));
-            }else if(child!=null) recurse(child,full,out);
-        }
     }
 
     /* ───────────────── UpdateSign listener ─────────────────── */

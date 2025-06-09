@@ -751,6 +751,22 @@ public class ConfigManager {
     public TranslatableModConfig getTranslatableModConfig(String key) {
         return translatableMods.getOrDefault(key, defaultTranslatableConfig);
     }
+    
+    // New public method to be called from TranslatableKeyManager
+    public Map<String, String> getTranslatableModsWithLabels() {
+        Map<String, String> modsWithLabels = new LinkedHashMap<>(); // Use LinkedHashMap to preserve order
+        ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
+        if (modsSection != null) {
+            // This now correctly handles both flat and nested structures.
+            for (String key : modsSection.getKeys(false)) {
+                ConfigurationSection modSection = modsSection.getConfigurationSection(key);
+                if (modSection != null && modSection.contains("label")) {
+                    modsWithLabels.put(key, modSection.getString("label", key));
+                }
+            }
+        }
+        return modsWithLabels;
+    }
 
     public List<String> getTranslatableRequiredKeys() {
         return config.getStringList("translatable-keys.required");
