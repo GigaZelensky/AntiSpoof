@@ -37,9 +37,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     public TranslatableKeyManager(AntiSpoofPlugin pl, DetectionManager dm, ConfigManager cfg){
         this.plugin=pl; this.detect=dm; this.cfg=cfg;
-        // Register both Bukkit events and this class as a global packet listener
         Bukkit.getPluginManager().registerEvents(this,pl);
-        PacketEvents.getAPI().getEventManager().registerListener(this);
     }
     public void register(){}
 
@@ -65,28 +63,23 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
 
         ProbeInfo info=new ProbeInfo(map);
-        // Add the player to the map of players we are currently probing
         probes.put(p.getUniqueId(),info);
         
-        // Schedule a timeout to remove them if they don't respond
         Bukkit.getScheduler().runTaskLater(plugin, () -> probes.remove(p.getUniqueId()), 60L);
 
-        // Send the packets
         if(!sendBundleReflectively(p,info)) fallbackRealSign(p,info);
     }
 
     @Override
     public void onPacketReceive(PacketReceiveEvent e){
-        // We only care about sign updates
         if(e.getPacketType()!=PacketType.Play.Client.UPDATE_SIGN) return;
 
         Player p = (Player)e.getPlayer();
         if (p == null) return;
 
-        // **THE KEY LOGIC**: Only process this packet if it came from a player we are currently probing.
         ProbeInfo pi = probes.remove(p.getUniqueId());
         if (pi == null) {
-            return; // Not a player we are probing, so we ignore the packet completely.
+            return;
         }
 
         String[] lines=new WrapperPlayClientUpdateSign(e).getTextLines();
