@@ -59,7 +59,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         cooldown.put(p.getUniqueId(),now);
 
         /* load keys from translatable-keys.mods.(*) -------------- */
-        // CORRECTED: Replaced reflection with a direct, safe method call
         LinkedHashMap<String, String> map = new LinkedHashMap<>(cfg.getTranslatableModsWithLabels());
 
         if(map.isEmpty()){ 
@@ -83,7 +82,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean any=false; int idx=0;
         for(Map.Entry<String,String> en:pi.keys.entrySet()){
             if(idx>=lines.length) break;
-            if(!lines[idx].equals(en.getKey())){
+            
+            // THE FIX IS HERE: Added "&& !lines[idx].isEmpty()"
+            // This prevents empty lines (from oversized text) from being counted as a valid translation.
+            if(!lines[idx].equals(en.getKey()) && !lines[idx].isEmpty()){
                 any=true;
                 detect.handleTranslatable(p,TranslatableEventType.TRANSLATED,en.getValue());
             }
