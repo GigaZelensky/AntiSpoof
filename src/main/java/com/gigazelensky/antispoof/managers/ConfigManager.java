@@ -754,18 +754,33 @@ public class ConfigManager {
     
     // New public method to be called from TranslatableKeyManager
     public Map<String, String> getTranslatableModsWithLabels() {
-        Map<String, String> modsWithLabels = new LinkedHashMap<>(); // Use LinkedHashMap to preserve order
+        Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection != null) {
-            // This now correctly handles both flat and nested structures.
-            for (String key : modsSection.getKeys(false)) {
-                ConfigurationSection modSection = modsSection.getConfigurationSection(key);
-                if (modSection != null && modSection.contains("label")) {
-                    modsWithLabels.put(key, modSection.getString("label", key));
-                }
-            }
+            findTranslatableKeysRecursive(modsSection, "", modsWithLabels);
         }
         return modsWithLabels;
+    }
+
+    /**
+     * Helper method to recursively find all keys that have a 'label' defined,
+     * handling both flat (quoted) and nested (unquoted) YAML structures.
+     */
+    private void findTranslatableKeysRecursive(ConfigurationSection section, String currentPath, Map<String, String> outputMap) {
+        for (String key : section.getKeys(false)) {
+            String newPath = currentPath.isEmpty() ? key : currentPath + "." + key;
+
+            // Check if the value at 'key' is a section AND that section contains a 'label'.
+            // This is the condition for a final mod entry.
+            if (section.isConfigurationSection(key) && section.getConfigurationSection(key).contains("label")) {
+                ConfigurationSection modConfigSection = section.getConfigurationSection(key);
+                outputMap.put(newPath, modConfigSection.getString("label", newPath));
+            }
+            // Otherwise, if it's just a section (a category), go deeper.
+            else if (section.isConfigurationSection(key)) {
+                findTranslatableKeysRecursive(section.getConfigurationSection(key), newPath, outputMap);
+            }
+        }
     }
 
     public List<String> getTranslatableRequiredKeys() {
