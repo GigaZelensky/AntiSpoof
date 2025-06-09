@@ -5,6 +5,7 @@ import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -874,6 +875,32 @@ public class DetectionManager {
         }
         
         return null; // No blocked channels found
+    }
+
+    // Handle translatable key events with per-mod config
+    public void handleTranslatable(Player player, com.gigazelensky.antispoof.enums.TranslatableEventType type, String key) {
+        ConfigManager.TranslatableModConfig modConfig = config.getTranslatableModConfig(key);
+        String label = modConfig.getLabel() != null && !modConfig.getLabel().isEmpty() ? modConfig.getLabel() : key;
+
+        if (type == TranslatableEventType.TRANSLATED) {
+            if (modConfig.shouldAlert()) {
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
+            }
+            if (modConfig.shouldPunish()) {
+                plugin.getAlertManager().executeTranslatablePunishment(player, label, "TRANSLATED_KEY", modConfig);
+                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                if (data != null) data.setAlreadyPunished(true);
+            }
+        } else if (type == TranslatableEventType.REQUIRED_MISS) {
+            if (modConfig.shouldAlert()) {
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
+            }
+            if (modConfig.shouldPunish()) {
+                plugin.getAlertManager().executeTranslatablePunishment(player, label, "REQUIRED_KEY_MISS", modConfig);
+                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                if (data != null) data.setAlreadyPunished(true);
+            }
+        }
     }
     
     /**

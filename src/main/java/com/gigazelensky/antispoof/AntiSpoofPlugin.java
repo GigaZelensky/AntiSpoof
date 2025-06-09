@@ -8,6 +8,7 @@ import com.gigazelensky.antispoof.listeners.PlayerEventListener;
 import com.gigazelensky.antispoof.managers.AlertManager;
 import com.gigazelensky.antispoof.managers.ConfigManager;
 import com.gigazelensky.antispoof.managers.DetectionManager;
+import com.gigazelensky.antispoof.managers.TranslatableKeyManager;
 import com.gigazelensky.antispoof.utils.DiscordWebhookHandler;
 import com.gigazelensky.antispoof.utils.VersionChecker;
 import com.github.retrooper.packetevents.PacketEvents;
@@ -31,6 +32,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private DiscordWebhookHandler discordWebhookHandler;
     private AlertManager alertManager;
     private DetectionManager detectionManager;
+    private TranslatableKeyManager translatableKeyManager;
     private PlayerEventListener playerEventListener;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
@@ -47,6 +49,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.configManager = new ConfigManager(this);
         this.alertManager = new AlertManager(this);
         this.detectionManager = new DetectionManager(this);
+        this.translatableKeyManager = new TranslatableKeyManager(this, detectionManager, configManager);
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize version checker
@@ -164,6 +167,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public DetectionManager getDetectionManager() {
         return detectionManager;
+    }
+
+    public TranslatableKeyManager getTranslatableKeyManager() {
+        return translatableKeyManager;
     }
     
     public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
@@ -468,6 +475,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public void handlePlayerQuit(UUID uuid) {
         // Clean up all tracked data for this player
         getDetectionManager().handlePlayerQuit(uuid);
+        if (translatableKeyManager != null) {
+            // cleanup placeholder
+        }
         getAlertManager().handlePlayerQuit(uuid);
         getDiscordWebhookHandler().handlePlayerQuit(uuid);
         playerBrands.remove(uuid);

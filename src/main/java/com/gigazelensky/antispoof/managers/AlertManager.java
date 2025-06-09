@@ -5,6 +5,7 @@ import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import com.gigazelensky.antispoof.utils.MessageUtil;
+import com.gigazelensky.antispoof.managers.ConfigManager.TranslatableModConfig;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -250,7 +251,7 @@ public class AlertManager {
      * @param violationType The type of violation
      * @param brandConfig The brand configuration
      */
-    public void sendBrandViolationAlert(Player player, String reason, String brand, 
+    public void sendBrandViolationAlert(Player player, String reason, String brand,
                                       String violatedChannel, String violationType,
                                       ConfigManager.ClientBrandConfig brandConfig) {
         if (!canSendAlert(player.getUniqueId(), violationType)) {
@@ -285,6 +286,53 @@ public class AlertManager {
             List<String> singleViolation = new ArrayList<>();
             singleViolation.add(reason);
             plugin.getDiscordWebhookHandler().sendAlert(player, reason, brand, violatedChannel, singleViolation);
+        }
+    }
+
+    /**
+     * Sends a translatable key violation alert using per-mod settings
+     */
+    public void sendTranslatableViolationAlert(Player player, String label, String violationType,
+                                               ConfigManager.TranslatableModConfig modConfig) {
+        if (!canSendAlert(player.getUniqueId(), violationType)) {
+            return;
+        }
+
+        String alertMessage = modConfig.getAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%label%", label);
+
+        String consoleMessage = modConfig.getConsoleAlertMessage()
+                .replace("%player%", player.getName())
+                .replace("%label%", label);
+
+        plugin.getLogger().info(consoleMessage);
+        sendAlertToRecipients(alertMessage);
+
+        if (config.isDiscordWebhookEnabled() && modConfig.shouldDiscordAlert()) {
+            List<String> single = new ArrayList<>();
+            single.add(label);
+            plugin.getDiscordWebhookHandler().sendAlert(player, label, null, null, single);
+        }
+    }
+
+    /**
+     * Executes punishment for a translatable key violation
+     */
+    public void executeTranslatablePunishment(Player player, String label, String violationType,
+                                              ConfigManager.TranslatableModConfig modConfig) {
+        List<String> punishments = modConfig.getPunishments();
+        if (punishments.isEmpty()) {
+            return;
+        }
+
+        for (String command : punishments) {
+            String formatted = command.replace("%player%", player.getName())
+                                     .replace("%label%", label);
+
+            final String cmd = formatted;
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), cmd));
         }
     }
     
