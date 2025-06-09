@@ -23,7 +23,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
-    /* one probe per player */
     private static final class ProbeInfo {
         final LinkedHashMap<String,String> keys;
         ProbeInfo(LinkedHashMap<String,String> k){keys=k;}
@@ -38,18 +37,20 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     public TranslatableKeyManager(AntiSpoofPlugin pl, DetectionManager dm, ConfigManager cfg){
         this.plugin=pl; this.detect=dm; this.cfg=cfg;
+        // Register both Bukkit events and this class as a global packet listener
         Bukkit.getPluginManager().registerEvents(this,pl);
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
-    public void register(){}                  /* bootstrap NOP */
+    public void register(){}
 
-    /* ───────────────── join → schedule probe ───────────────── */
-    @EventHandler public void onJoin(PlayerJoinEvent e){
+    @EventHandler
+    public void onJoin(PlayerJoinEvent e){
         Bukkit.getScheduler().runTaskLater(plugin,()->probe(e.getPlayer()),
                 cfg.getTranslatableFirstDelay());
     }
 
     public void probe(Player p){
+        if(p == null || !p.isOnline()) return;
         if(!cfg.isTranslatableKeysEnabled() || minor()<20) return;
 
         long now=System.currentTimeMillis();
@@ -64,20 +65,33 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
 
         ProbeInfo info=new ProbeInfo(map);
+        // Add the player to the map of players we are currently probing
         probes.put(p.getUniqueId(),info);
+        
+        // Schedule a timeout to remove them if they don't respond
+        Bukkit.getScheduler().runTaskLater(plugin, () -> probes.remove(p.getUniqueId()), 60L);
 
-        // Attempt to use the bundle method first. If it fails, use the fallback.
+        // Send the packets
         if(!sendBundleReflectively(p,info)) fallbackRealSign(p,info);
     }
 
-    /* ───────────────── UpdateSign listener ─────────────────── */
-    @Override public void onPacketReceive(PacketReceiveEvent e){
+    @Override
+    public void onPacketReceive(PacketReceiveEvent e){
+        // We only care about sign updates
         if(e.getPacketType()!=PacketType.Play.Client.UPDATE_SIGN) return;
-        Player p=(Player)e.getPlayer();
-        ProbeInfo pi=probes.remove(p.getUniqueId()); if(pi==null) return;
+
+        Player p = (Player)e.getPlayer();
+        if (p == null) return;
+
+        // **THE KEY LOGIC**: Only process this packet if it came from a player we are currently probing.
+        ProbeInfo pi = probes.remove(p.getUniqueId());
+        if (pi == null) {
+            return; // Not a player we are probing, so we ignore the packet completely.
+        }
 
         String[] lines=new WrapperPlayClientUpdateSign(e).getTextLines();
-        boolean any=false; int idx=0;
+        boolean any=false;
+        int idx=0;
         for(Map.Entry<String,String> en:pi.keys.entrySet()){
             if(idx>=lines.length) break;
             if(!lines[idx].equals(en.getKey())){
@@ -86,10 +100,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             }
             idx++;
         }
-        if(!any) detect.handleTranslatable(p,TranslatableEventType.ZERO,"-");
+        if(!any) {
+            detect.handleTranslatable(p,TranslatableEventType.ZERO,"-");
+        }
     }
 
-    /* ───────────── BUNDLE METHOD - REWRITTEN FOR COMPATIBILITY ──────────────── */
     @SuppressWarnings("deprecation")
     private boolean sendBundleReflectively(Player player, ProbeInfo info) {
         try {
@@ -102,20 +117,16 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     ThreadLocalRandom.current().nextInt(-64, -59),
                     player.getLocation().getBlockZ());
 
-            // Create BlockChange Packet
             Object blockChangePacket = bcCls.getConstructor(Vector3i.class, int.class).newInstance(pos, findSign().getId());
 
-            // Create BlockEntityData Packet
             Object blockEntityPacket = beCls.getConstructor().newInstance();
             beCls.getMethod("setPosition", Vector3i.class).invoke(blockEntityPacket, pos);
             beCls.getMethod("setAction", byte.class).invoke(blockEntityPacket, (byte) 9);
             beCls.getMethod("setNbtData", Object.class).invoke(blockEntityPacket, buildNBT(pos, new ArrayList<>(info.keys.keySet())));
 
-            // Create Open and Close Packets
             Object openSignPacket = new WrapperPlayServerOpenSignEditor(pos, true);
             Object closeWindowPacket = cwCls.getConstructor(int.class).newInstance(0);
 
-            // Create the bundle with an Object array
             Object bundle = buCls.getConstructor(Object[].class)
                     .newInstance((Object) new Object[]{blockChangePacket, blockEntityPacket, openSignPacket, closeWindowPacket});
 
@@ -128,7 +139,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
-    /* ───────────── FALLBACK METHOD - REWRITTEN FOR COMPATIBILITY (NMS) ──────────────── */
     @SuppressWarnings("deprecation")
     private void fallbackRealSign(Player p, ProbeInfo info) {
         debug("fallback sign (NMS method)");
@@ -137,12 +147,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             int y = ThreadLocalRandom.current().nextInt(-64, -59);
             int z = p.getLocation().getBlockZ();
 
-            // Send a fake block change to the player to make them think a sign is there
             Class<?> blockChangeClass = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange");
             Object blockChange = blockChangeClass.getConstructor(Vector3i.class, int.class).newInstance(new Vector3i(x, y, z), findSign().getId());
             PacketEvents.getAPI().getPlayerManager().sendPacket(p, blockChange);
 
-            // Use reflection to send an UpdateSign packet with raw JSON, bypassing Bukkit API
             Class<?> nmsBlockPosClass = Class.forName("net.minecraft.server." + nmsVersion + ".BlockPosition");
             Object nmsBlockPos = nmsBlockPosClass.getConstructor(int.class, int.class, int.class).newInstance(x, y, z);
             
@@ -163,35 +171,30 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             }
 
             Class<?> packetUpdateSignClass = Class.forName("net.minecraft.server." + nmsVersion + ".PacketPlayOutUpdateSign");
-            Class<?> linesArrayClass = Array.newInstance(iChatBaseComponent, 0).getClass(); // Get the class of IChatBaseComponent[]
+            Class<?> linesArrayClass = Array.newInstance(iChatBaseComponent, 0).getClass();
             Constructor<?> packetConstructor = packetUpdateSignClass.getConstructor(nmsBlockPosClass, linesArrayClass);
             Object updateSignPacket = packetConstructor.newInstance(nmsBlockPos, lines);
             
             PacketEvents.getAPI().getPlayerManager().sendPacket(p, updateSignPacket);
-
-            // Finally, tell the client to open the (now updated) sign editor
             PacketEvents.getAPI().getPlayerManager().sendPacket(p, new WrapperPlayServerOpenSignEditor(new Vector3i(x, y, z), true));
         } catch (Throwable t) {
             debug("NMS fallback sign method FAILED: " + t.getClass().getName() + " " + t.getMessage());
-            t.printStackTrace(); // Print stack trace for debugging if it fails
         }
     }
 
-    /* Build sign NBT for BlockEntityData ---------------------- */
     private Object buildNBT(Vector3i pos,List<String> raw)throws Exception{
         while(raw.size()<4) raw.add("");
         Class<?> tag=Class.forName("net.minecraft.server." + nmsVersion + ".NBTTagCompound");
         Object n=tag.getConstructor().newInstance();
         Method sS=tag.getMethod("setString",String.class,String.class),
                sI=tag.getMethod("setInt",String.class,int.class);
-        sS.invoke(n,"id","Sign"); // Legacy sign ID
+        sS.invoke(n,"id","Sign");
         sI.invoke(n,"x",pos.getX()); sI.invoke(n,"y",pos.getY()); sI.invoke(n,"z",pos.getZ());
         for(int i=0;i<4;i++) sS.invoke(n,"Text"+(i+1),"{\"translate\":\""+raw.get(i)+"\"}");
         sS.invoke(n,"is_waxed","0b"); sS.invoke(n,"is_editable","1b");
         return n;
     }
 
-    /* helpers ----------------------------------------------------------- */
     private Material findSign(){ for(String id:new String[]{"OAK_SIGN","SIGN_POST","SIGN"})
         try{return Material.valueOf(id);}catch(IllegalArgumentException ignored){} return Material.SIGN;}
     private int minor(){ String[] v=Bukkit.getBukkitVersion().split("-")[0].split("\\."); return v.length>1?Integer.parseInt(v[1]):0; }
