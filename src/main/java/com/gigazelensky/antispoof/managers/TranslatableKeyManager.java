@@ -165,7 +165,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         setI.invoke(nbt, "y", pos.getY());
         setI.invoke(nbt, "z", pos.getZ());
         for (int i = 0; i < 4; i++) {
-            setS.invoke(nbt, "Text" + (i + 1), "{\"translate\":\"" + keys.get(i) + "\"}");
+            String key = i < keys.size() ? keys.get(i) : "";
+            setS.invoke(nbt, "Text" + (i + 1), "{\"translate\":\"" + key + "\"}");
         }
         setS.invoke(nbt, "is_waxed", "0b");
         setS.invoke(nbt, "is_editable", "1b");
