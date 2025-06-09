@@ -25,26 +25,23 @@ import java.lang.reflect.Method;
 import java.util.*;
 
 /**
- * Translatable-key probe (uses only PacketEvents 2.8.1 classes).
+ * Translatable-key probe that compiles on Spigot-1.8.8 & PacketEvents 2.8.1.
  *
- * • Puts a temporary editable sign at y = -64  
- * • Writes four JSON {@code {"translate":"key"}} lines  
- * • Opens the editor (brief flash) then closes it after N ticks  
- * • Compares {@code UpdateSign} reply with the raw keys
+ * – writes JSON {@code {"translate": "<key>"}} to a hidden sign  
+ * – opens the editor for a single tick, then restores the block  
+ * – compares {@code UpdateSign} reply with raw keys
+ *
+ * The YAML “MemorySection” leak is fixed: any non-string value now falls
+ * back to the map-key itself (so at worst you see the key name).
  */
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     private final AntiSpoofPlugin  plugin;
     private final DetectionManager detection;
     private final ConfigManager    cfg;
-
-    /** player → last-probe timestamp (ms) */
-    private final Map<UUID, Long> lastProbe = new HashMap<>();
+    private final Map<UUID, Long>  lastProbe = new HashMap<>();
 
     /* ------------------------------------------------------------------ */
-    /*  ctor & legacy register()                                          */
-    /* ------------------------------------------------------------------ */
-
     public TranslatableKeyManager(AntiSpoofPlugin plugin,
                                   DetectionManager detectionManager,
                                   ConfigManager cfg) {
@@ -55,47 +52,42 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Bukkit.getPluginManager().registerEvents(this, plugin);
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
-
-    /** kept for older bootstrap code */
-    public void register() {/* already wired in ctor */}
+    /** legacy bootstrap hook (safe NOP if already registered) */
+    public void register() {/* already done in ctor */}
 
     /* ------------------------------------------------------------------ */
     /*  helpers                                                           */
     /* ------------------------------------------------------------------ */
-    private void log(Player p, String m) { plugin.getLogger().info("[Translatable] "+p.getName()+": "+m); }
-
-    private boolean enabled() {
-        try { return (boolean) cfg.getClass().getMethod("isTranslatableEnabled").invoke(cfg); }
-        catch (Throwable ignored) { return true; }
-    }
-    private int minor() {
-        String[] v=Bukkit.getBukkitVersion().split("-")[0].split("\\.");
-        return v.length>1?Integer.parseInt(v[1]):0;
-    }
-    private Material mat(String... ids){
-        for(String id:ids) try{ return Material.valueOf(id);}catch(IllegalArgumentException ignored){}
-        return Material.SIGN;
-    }
-    private String[] linesOf(Object wrapper){
+    private void log(Player p,String m){plugin.getLogger().info("[Translatable] "+p.getName()+": "+m);}
+    private boolean enabled(){try{return (boolean)cfg.getClass().getMethod("isTranslatableEnabled").invoke(cfg);}catch(Throwable t){return true;}}
+    private int minor(){String[]v=Bukkit.getBukkitVersion().split("-")[0].split("\\.");return v.length>1?Integer.parseInt(v[1]):0;}
+    private Material mat(String...ids){for(String id:ids)try{return Material.valueOf(id);}catch(Exception ignored){}return Material.SIGN;}
+    private String[] extract(Object w){
         for(String m:new String[]{"getTextLines","getLines","getText"})
-            try{ return (String[])wrapper.getClass().getMethod(m).invoke(wrapper);}catch(Throwable ignored){}
+            try{return (String[])w.getClass().getMethod(m).invoke(w);}catch(Throwable ignored){}
         List<String> tmp=new ArrayList<>();
         for(int i=1;i<=4;i++)
-            try{ Method g=wrapper.getClass().getMethod("getLine"+i); tmp.add((String)g.invoke(wrapper)); }catch(Throwable ignored){}
+            try{tmp.add((String)w.getClass().getMethod("getLine"+i).invoke(w));}catch(Throwable ignored){}
         return tmp.toArray(new String[0]);
     }
 
-    /** convert config values → plain String (avoids MemorySection leak) */
+    /** flatten YAML section → key ⇒ label (String) */
     private LinkedHashMap<String,String> loadKeys(){
         LinkedHashMap<String,String> out=new LinkedHashMap<>();
         try{
             Object raw=cfg.getClass().getMethod("getTranslatableTestKeys").invoke(cfg);
             if(raw instanceof Map){
-                for(Map.Entry<?,?> e:((Map<?,?>)raw).entrySet())
-                    out.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                for(Map.Entry<?,?> e:((Map<?,?>)raw).entrySet()){
+                    String k=String.valueOf(e.getKey());
+                    Object v=e.getValue();
+                    String label=(v instanceof String)?(String)v:
+                                 (v instanceof ConfigurationSection)?((ConfigurationSection)v).getName():k;
+                    out.put(k,label);
+                }
             }else if(raw instanceof ConfigurationSection){
-                ConfigurationSection cs=(ConfigurationSection) raw;
-                for(String k:cs.getKeys(false)) out.put(k,cs.getString(k,k));
+                ConfigurationSection cs=(ConfigurationSection)raw;
+                for(String k:cs.getKeys(false))
+                    out.put(k,cs.getString(k,k));
             }
         }catch(Throwable ignored){}
         return out;
@@ -116,30 +108,28 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     /* ------------------------------------------------------------------ */
     private void probe(Player p){
         if(!enabled()) return;
-        if(minor()<20){ log(p,"skip <1.20"); return; }
+        if(minor()<20){log(p,"skip <1.20");return;}
 
         long now=System.currentTimeMillis();
-        if(now-lastProbe.getOrDefault(p.getUniqueId(),0L)<cfg.getTranslatableCooldown()){
-            log(p,"cooldown"); return;
-        }
+        if(now-lastProbe.getOrDefault(p.getUniqueId(),0L)<cfg.getTranslatableCooldown()){log(p,"cooldown");return;}
         lastProbe.put(p.getUniqueId(),now);
 
         LinkedHashMap<String,String> tests=loadKeys();
-        if(tests.isEmpty()){ log(p,"no keys"); return; }
+        if(tests.isEmpty()){log(p,"no keys");return;}
 
         List<String> keys=new ArrayList<>(tests.keySet());
         while(keys.size()<4) keys.add(keys.get(0));
 
-        Location loc=p.getLocation().clone(); loc.setY(-64);
-        Block b=loc.getBlock(); Material prev=b.getType();
+        Location loc=p.getLocation().clone();loc.setY(-64);
+        Block b=loc.getBlock();Material prev=b.getType();
         b.setType(mat("OAK_SIGN","SIGN_POST"),false);
 
         BlockState st=b.getState();
-        if(!(st instanceof Sign)){ log(p,"no sign state"); return; }
+        if(!(st instanceof Sign)){log(p,"state !sign");return;}
         Sign sg=(Sign)st;
         for(int i=0;i<4;i++) sg.setLine(i,"{\"translate\":\""+keys.get(i)+"\"}");
-        try{ sg.getClass().getMethod("setEditable",boolean.class).invoke(sg,true);}catch(Throwable ignored){}
-        try{ sg.getClass().getMethod("setWaxed",boolean.class).invoke(sg,false);}catch(Throwable ignored){}
+        try{sg.getClass().getMethod("setEditable",boolean.class).invoke(sg,true);}catch(Throwable ignored){}
+        try{sg.getClass().getMethod("setWaxed",boolean.class).invoke(sg,false);}catch(Throwable ignored){}
         sg.update(true,false);
         log(p,"placed");
 
@@ -151,7 +141,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         },1);
 
         Bukkit.getScheduler().runTaskLater(plugin,()->{
-            p.closeInventory(); b.setType(prev,false); log(p,"restore");
+            p.closeInventory();b.setType(prev,false);log(p,"restore");
         },cfg.getTranslatableGuiVisibleTicks());
     }
 
@@ -163,18 +153,16 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if(e.getPacketType()!=PacketType.Play.Client.UPDATE_SIGN) return;
 
         Player p=(Player)e.getPlayer();
-        String[] lines=linesOf(new WrapperPlayClientUpdateSign(e));
+        String[] lines=extract(new WrapperPlayClientUpdateSign(e));
         if(lines.length==0) return;
 
         LinkedHashMap<String,String> tests=loadKeys();
         boolean any=false; int i=0;
         for(Map.Entry<String,String> en:tests.entrySet()){
             if(i>=lines.length) break;
-            String raw=en.getKey();
-            String label=en.getValue();
-            if(!lines[i].equals(raw)){
-                any=true; log(p,"TRANSLATED "+label);
-                detection.handleTranslatable(p,TranslatableEventType.TRANSLATED,label);
+            if(!lines[i].equals(en.getKey())){
+                any=true;log(p,"TRANSLATED "+en.getValue());
+                detection.handleTranslatable(p,TranslatableEventType.TRANSLATED,en.getValue());
             }
             i++;
         }
