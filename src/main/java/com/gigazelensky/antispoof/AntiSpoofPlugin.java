@@ -45,16 +45,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         
-        // --- CORRECT INITIALIZATION ORDER ---
-        
-        // 1. Initialize PacketEvents FIRST
-        PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
-        PacketEvents.getAPI().getSettings()
-            .reEncodeByDefault(false)
-            .checkForUpdates(false);
-        PacketEvents.getAPI().load();
-        
-        // 2. Initialize all your managers
+        // Initialize managers
         this.configManager = new ConfigManager(this);
         this.alertManager = new AlertManager(this);
         this.detectionManager = new DetectionManager(this);
@@ -63,6 +54,13 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         // Initialize version checker
         new VersionChecker(this);
+        
+        // Initialize PacketEvents
+        PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
+        PacketEvents.getAPI().getSettings()
+            .reEncodeByDefault(false)
+            .checkForUpdates(false);
+        PacketEvents.getAPI().load();
         
         // Try to initialize FloodgateApi
         if (getServer().getPluginManager().isPluginEnabled("floodgate")) {
@@ -96,13 +94,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getCommand("antispoof").setExecutor(commandExecutor);
         getCommand("antispoof").setTabCompleter(commandExecutor);
         
-        // 3. Finish PacketEvents full initialization
         PacketEvents.getAPI().init();
-        
-        // 4. NOW it is safe to register our custom packet listeners
-        PacketEvents.getAPI().getEventManager().registerListener(this.translatableKeyManager);
-
-        // --- END OF CORRECTED INITIALIZATION ---
         
         // Log Discord webhook status
         if (configManager.isDiscordWebhookEnabled()) {

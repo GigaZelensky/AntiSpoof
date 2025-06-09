@@ -3,11 +3,7 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.event.PacketListenerAbstract;
-import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.util.Vector3i;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -21,7 +17,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
-public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
+// THIS CLASS IS NO LONGER A PACKET LISTENER. IT'S A PURE MANAGER.
+public final class TranslatableKeyManager implements Listener {
 
     private static final class ProbeInfo {
         final LinkedHashMap<String,String> keys;
@@ -64,25 +61,21 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         ProbeInfo info=new ProbeInfo(map);
         probes.put(p.getUniqueId(),info);
-        
+
         Bukkit.getScheduler().runTaskLater(plugin, () -> probes.remove(p.getUniqueId()), 60L);
 
         if(!sendBundleReflectively(p,info)) fallbackRealSign(p,info);
     }
 
-    @Override
-    public void onPacketReceive(PacketReceiveEvent e){
-        if(e.getPacketType()!=PacketType.Play.Client.UPDATE_SIGN) return;
-
-        Player p = (Player)e.getPlayer();
+    // THIS IS THE NEW PUBLIC METHOD CALLED BY THE REAL LISTENER
+    public void handleSignUpdate(Player p, String[] lines) {
         if (p == null) return;
-
+        
         ProbeInfo pi = probes.remove(p.getUniqueId());
         if (pi == null) {
             return;
         }
 
-        String[] lines=new WrapperPlayClientUpdateSign(e).getTextLines();
         boolean any=false;
         int idx=0;
         for(Map.Entry<String,String> en:pi.keys.entrySet()){
@@ -97,7 +90,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             detect.handleTranslatable(p,TranslatableEventType.ZERO,"-");
         }
     }
-
+    
     @SuppressWarnings("deprecation")
     private boolean sendBundleReflectively(Player player, ProbeInfo info) {
         try {
