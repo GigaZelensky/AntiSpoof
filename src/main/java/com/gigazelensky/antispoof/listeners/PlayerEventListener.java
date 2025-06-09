@@ -10,7 +10,7 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.configuration.client.WrapperConfigClientPluginMessage;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPluginMessage;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign; // ADDED IMPORT
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -59,7 +59,9 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         } else if (event.getPacketType() == PacketType.Play.Client.UPDATE_SIGN) {
             // If it's a sign update, delegate to the TranslatableKeyManager
             WrapperPlayClientUpdateSign packet = new WrapperPlayClientUpdateSign(event);
-            translatableKeyManager.handleSignUpdate(player, packet.getTextLines());
+            if (plugin.getTranslatableKeyManager() != null) {
+                plugin.getTranslatableKeyManager().handleSignUpdate(player, packet.getTextLines());
+            }
         }
     }
     
@@ -153,13 +155,15 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         
         scheduleRequiredChannelsCheck(player, REQUIRED_CHANNEL_CHECK_DELAY);
 
-        int tDelay = config.getTranslatableFirstDelay();
-        if (tDelay >= 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline()) {
-                    translatableKeyManager.probe(player);
-                }
-            }, tDelay);
+        if (translatableKeyManager != null) {
+            int tDelay = config.getTranslatableFirstDelay();
+            if (tDelay >= 0) {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isOnline()) {
+                        translatableKeyManager.probe(player);
+                    }
+                }, tDelay);
+            }
         }
     }
     
