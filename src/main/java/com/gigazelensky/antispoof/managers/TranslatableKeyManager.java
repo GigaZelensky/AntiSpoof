@@ -9,7 +9,6 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
-import io.github.retrooper.packetevents.util.Vector3i;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -54,6 +53,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             this.required = required;
             this.timestamp = System.currentTimeMillis();
         }
+    }
+
+    /** Simple integer vector for block positions. */
+    private static class Vector3i {
+        private final int x, y, z;
+        Vector3i(int x, int y, int z) { this.x = x; this.y = y; this.z = z; }
+        int getX() { return x; }
+        int getY() { return y; }
+        int getZ() { return z; }
     }
 
     public void probe(Player player) {
@@ -193,7 +201,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             out.write(varInt(packets.size()));
             for (byte[] b : packets) out.write(b);
 
-            PacketEvents.getAPI().getPlayerManager().sendRawPacket(player, out.toByteArray());
+            Object pm = PacketEvents.getAPI().getPlayerManager();
+            try {
+                pm.getClass().getMethod("sendRawPacket", Player.class, byte[].class)
+                        .invoke(pm, player, out.toByteArray());
+            } catch (NoSuchMethodException ex) {
+                // Fallback for older PacketEvents versions
+                pm.getClass().getMethod("sendPacket", Player.class, byte[].class)
+                        .invoke(pm, player, out.toByteArray());
+            }
         } catch (Exception ex) {
             if (config.isDebugMode()) {
                 plugin.getLogger().warning("[Debug] Failed to send translatable probe: " + ex.getMessage());
