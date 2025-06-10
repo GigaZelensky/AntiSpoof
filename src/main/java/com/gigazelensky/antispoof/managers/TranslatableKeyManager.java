@@ -16,6 +16,7 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUp
 import com.github.retrooper.packetevents.wrapper.play.server.*;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -53,12 +54,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         final Map<String, String> failedForNext = new LinkedHashMap<>();
         int retriesLeft;
         /* per-round state */
-        final List<String> currentKeys = new ArrayList<>(); // The batch of up to 3 keys
-        String  uid   = null;      // Single UID for the entire sign
+        String  key   = null;
+        String  uid   = null;
         Vector3i sign = null;      // last fake sign position
         BukkitTask timeoutTask;
         boolean waitingForMove = false;
-        boolean isAwaitingResponse = false; // The fix: new state flag
         org.bukkit.command.CommandSender debug;
         long sendTime;
     }
@@ -134,10 +134,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
 
         Probe p = probes.get(e.getPlayer().getUniqueId());
-        // The fix: Don't do anything if we're already waiting for a response
-        if (p != null && p.waitingForMove && !p.isAwaitingResponse) {
+        if (p != null && p.waitingForMove) {
             p.waitingForMove = false;
             placeNextSign(e.getPlayer(), p);                  // now!
+            if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Player moved, sending next key to " + e.getPlayer().getName());
+            }
         }
     }
 
@@ -191,36 +193,28 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /** Advance to next key (or finish) */
     private void advance(Player player, Probe probe) {
-        // cancel stale timeout and reset state
+        // cancel stale timeout
         if (probe.timeoutTask != null) probe.timeoutTask.cancel();
-
-        // revert previous sign (if any)
-        if (probe.sign != null) {
-            sendAir(player, probe.sign);
-            probe.sign = null;
-        }
 
         // finished?
         if (!probe.iterator.hasNext()) {
             finishRound(player, probe);
             return;
         }
-        
-        probe.currentKeys.clear();
 
-        // Create a batch of up to 3 keys
-        for (int i = 0; i < 3 && probe.iterator.hasNext(); i++) {
-            probe.currentKeys.add(probe.iterator.next().getKey());
-        }
+        // revert previous sign (if any)
+        if (probe.sign != null) sendAir(player, probe.sign);
+
+        Map.Entry<String,String> nxt = probe.iterator.next();
+        probe.key = nxt.getKey();  // current key
         probe.uid = randomUID();
 
         // place the sign immediately or wait for movement depending on config
         if (cfg.isTranslatableOnlyOnMove()) {
             probe.waitingForMove = true;
-            probe.isAwaitingResponse = false; // Ready to accept a move event
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Waiting for movement to send keys " +
-                        probe.currentKeys + " to " + player.getName());
+                plugin.getLogger().info("[Debug] Waiting for movement to send key '" +
+                        probe.key + "' to " + player.getName());
             }
         } else {
             placeNextSign(player, probe);
@@ -228,40 +222,20 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void placeNextSign(Player player, Probe probe) {
-        // The fix: Set the flag to true before sending the packet
-        probe.isAwaitingResponse = true;
-        Vector3i pos = buildFakeSign(player, probe.currentKeys, probe.uid);
+        Vector3i pos = buildFakeSign(player, probe.key, probe.uid);
         probe.sign = pos;
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Sent keys " + probe.currentKeys + " to " +
+            plugin.getLogger().info("[Debug] Sent key '" + probe.key + "' to " +
                     player.getName());
         }
 
         // timeout
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            // This lambda runs if a response is not received in time.
-            // Check if we were indeed waiting for a response for this probe.
-            if (!probe.isAwaitingResponse) {
-                return; // Response was likely received just before timeout, do nothing.
-            }
-
-            // Since it's a timeout, we are no longer awaiting a response.
-            probe.isAwaitingResponse = false;
-
-            // Handle the timeout for all keys in the current batch.
-            for(String key : probe.currentKeys) {
-                handleResult(player, probe, false, null, key);
-            }
-            
-            // Schedule the advance() call to run on the main thread in the next tick.
-            // This breaks the potential event-loop race condition.
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if(probes.containsKey(player.getUniqueId()) && probes.get(player.getUniqueId()) == probe) {
-                    advance(player, probe);
-                }
-            });
+            // no translation
+            handleResult(player, probe, false, null);
+            advance(player, probe);
         }, TIMEOUT_TICKS);
     }
 
@@ -273,46 +247,29 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player  p = (Player) e.getPlayer();
         Probe probe = probes.get(p.getUniqueId());
-        // Also check the flag here to prevent processing a late response after a timeout.
-        if (probe == null || probe.uid == null || !probe.isAwaitingResponse) return;
+        if (probe == null || probe.key == null) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
         if (recv.length < 4) return;
         if (!probe.uid.equals(recv[3])) return;          // not for current probe
 
-        // Response received, so we are no longer waiting.
-        probe.isAwaitingResponse = false;
         probe.timeoutTask.cancel();
-        
-        // Process each line for the corresponding key
-        for (int i = 0; i < probe.currentKeys.size(); i++) {
-            String originalKey = probe.currentKeys.get(i);
-            String responseLine = recv[i];
-            
-            boolean translated =
-                !responseLine.isEmpty() &&
-                !responseLine.equals(originalKey) &&
-                !responseLine.startsWith("{\"translate\"");
-            handleResult(p, probe, translated, responseLine, originalKey);
-        }
-        
-        // Schedule the advance() call to run on the main thread in the next tick.
-        // This breaks the potential event-loop race condition.
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if(probes.containsKey(p.getUniqueId()) && probes.get(p.getUniqueId()) == probe) {
-                advance(p, probe);
-            }
-        });
+
+        boolean translated =
+                !recv[0].isEmpty() &&
+                !recv[0].equals(probe.key) &&
+                !recv[0].startsWith("{\"translate\"");
+        handleResult(p, probe, translated, recv[0]);
+        advance(p, probe);
     }
 
-    private void handleResult(Player p, Probe probe, boolean translated, String response, String key) {
+    private void handleResult(Player p, Probe probe, boolean translated, String response) {
         long ms = System.currentTimeMillis() - probe.sendTime;
         if (probe.debug != null) {
             String text = translated ? response : "";
             probe.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
                     org.bukkit.ChatColor.DARK_GRAY + " | " +
-                    org.bukkit.ChatColor.GRAY + "Key: " + org.bukkit.ChatColor.YELLOW + key +
-                    org.bukkit.ChatColor.GRAY + " Response: \"" +
+                    org.bukkit.ChatColor.GRAY + "Response: \"" +
                     org.bukkit.ChatColor.AQUA + text +
                     org.bukkit.ChatColor.GRAY + "\" Time: " +
                     org.bukkit.ChatColor.AQUA + ms + "ms");
@@ -320,27 +277,24 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         if (cfg.isDebugMode()) {
             String res = translated ? ("\"" + response + "\"") : "<no translation>";
-            plugin.getLogger().info("[Debug] Key " + key + " for " + p.getName() +
+            plugin.getLogger().info("[Debug] Key " + probe.key + " for " + p.getName() +
                     " => " + res + " in " + ms + "ms");
         }
 
         if (translated) {
-            probe.translated.add(key);
-            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+            probe.translated.add(probe.key);
+            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.key);
         } else {
-            probe.failedForNext.put(key, key);
+            probe.failedForNext.put(probe.key, probe.key);
         }
+        // tidy sign
+        if (probe.sign != null) sendAir(p, probe.sign);
     }
 
     /* ======================================================================
      *  ROUND FINISHED
      * ==================================================================== */
     private void finishRound(Player p, Probe probe) {
-        // Clean up final sign
-        if (probe.sign != null) {
-            sendAir(p, probe.sign);
-        }
-
         // Required keys that failed
         for (String req : cfg.getTranslatableRequiredKeys()) {
             if (!probe.translated.contains(req))
@@ -368,7 +322,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     /* ======================================================================
      *  LOW-LEVEL sign building / cleanup
      * ==================================================================== */
-    private Vector3i buildFakeSign(Player target, List<String> keys, String uid) {
+    private Vector3i buildFakeSign(Player target, String key, String uid) {
         ClientVersion cv   = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
         boolean modern     = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos       = signPos(target);
@@ -389,28 +343,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         nbt.setTag("id", new NBTString("minecraft:sign"));
         if (modern) {
             NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
-            for (int i = 0; i < 3; i++) {
-                if (i < keys.size()) {
-                    msgs.addTag(new NBTString("{\"translate\":\"" + keys.get(i) + "\"}"));
-                } else {
-                    msgs.addTag(new NBTString("{\"text\":\"\"}"));
-                }
-            }
+            msgs.addTag(new NBTString("{\"translate\":\"" + key + "\"}"));
+            msgs.addTag(new NBTString("{\"text\":\"\"}"));
+            msgs.addTag(new NBTString("{\"text\":\"\"}"));
             msgs.addTag(new NBTString("{\"text\":\"" + uid + "\"}"));
-            
             NBTCompound front = new NBTCompound();
             front.setTag("messages", msgs);
             front.setTag("color", new NBTString("black"));
             front.setTag("has_glowing_text", new NBTByte((byte)0));
             nbt.setTag("front_text", front);
         } else {
-            for (int i = 0; i < 3; i++) {
-                if (i < keys.size()) {
-                    nbt.setTag("Text" + (i + 1), new NBTString("{\"translate\":\"" + keys.get(i) + "\"}"));
-                } else {
-                    nbt.setTag("Text" + (i + 1), new NBTString(""));
-                }
-            }
+            nbt.setTag("Text1", new NBTString("{\"translate\":\"" + key + "\"}"));
+            nbt.setTag("Text2", new NBTString(""));
+            nbt.setTag("Text3", new NBTString(""));
             nbt.setTag("Text4", new NBTString(uid));
         }
         PacketEvents.getAPI().getPlayerManager()
