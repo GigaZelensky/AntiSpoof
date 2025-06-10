@@ -138,9 +138,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (p != null && p.waitingForMove && !p.isAwaitingResponse) {
             p.waitingForMove = false;
             placeNextSign(e.getPlayer(), p);                  // now!
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Player moved, sending current keys to " + e.getPlayer().getName());
-            }
         }
     }
 
@@ -196,7 +193,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private void advance(Player player, Probe probe) {
         // cancel stale timeout and reset state
         if (probe.timeoutTask != null) probe.timeoutTask.cancel();
-        probe.isAwaitingResponse = false; // The fix: reset the flag
 
         // revert previous sign (if any)
         if (probe.sign != null) {
@@ -221,6 +217,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // place the sign immediately or wait for movement depending on config
         if (cfg.isTranslatableOnlyOnMove()) {
             probe.waitingForMove = true;
+            probe.isAwaitingResponse = false; // Ready to accept a move event
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Waiting for movement to send keys " +
                         probe.currentKeys + " to " + player.getName());
@@ -244,11 +241,27 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // timeout
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            // no translation for any key in the batch
+            // This lambda runs if a response is not received in time.
+            // Check if we were indeed waiting for a response for this probe.
+            if (!probe.isAwaitingResponse) {
+                return; // Response was likely received just before timeout, do nothing.
+            }
+
+            // Since it's a timeout, we are no longer awaiting a response.
+            probe.isAwaitingResponse = false;
+
+            // Handle the timeout for all keys in the current batch.
             for(String key : probe.currentKeys) {
                 handleResult(player, probe, false, null, key);
             }
-            advance(player, probe);
+            
+            // Schedule the advance() call to run on the main thread in the next tick.
+            // This breaks the potential event-loop race condition.
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if(probes.containsKey(player.getUniqueId()) && probes.get(player.getUniqueId()) == probe) {
+                    advance(player, probe);
+                }
+            });
         }, TIMEOUT_TICKS);
     }
 
@@ -260,12 +273,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player  p = (Player) e.getPlayer();
         Probe probe = probes.get(p.getUniqueId());
+        // Also check the flag here to prevent processing a late response after a timeout.
         if (probe == null || probe.uid == null || !probe.isAwaitingResponse) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
         if (recv.length < 4) return;
         if (!probe.uid.equals(recv[3])) return;          // not for current probe
 
+        // Response received, so we are no longer waiting.
+        probe.isAwaitingResponse = false;
         probe.timeoutTask.cancel();
         
         // Process each line for the corresponding key
@@ -280,7 +296,13 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             handleResult(p, probe, translated, responseLine, originalKey);
         }
         
-        advance(p, probe);
+        // Schedule the advance() call to run on the main thread in the next tick.
+        // This breaks the potential event-loop race condition.
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if(probes.containsKey(p.getUniqueId()) && probes.get(p.getUniqueId()) == probe) {
+                advance(p, probe);
+            }
+        });
     }
 
     private void handleResult(Player p, Probe probe, boolean translated, String response, String key) {
