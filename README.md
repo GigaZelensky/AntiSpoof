@@ -847,6 +847,10 @@ translatable-keys:
     first-delay: 40
     gui-visible-ticks: 1
     cooldown: 600
+    key-delay: 2
+    retry-count: 0
+    retry-interval: 60
+    only-on-move: false
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

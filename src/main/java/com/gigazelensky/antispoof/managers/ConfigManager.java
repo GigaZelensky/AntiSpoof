@@ -851,6 +851,10 @@ public class ConfigManager {
     public int getTranslatableRetryInterval() {
         return config.getInt("translatable-keys.check.retry-interval", 60);
     }
+
+    public boolean isTranslatableOnlyOnMove() {
+        return config.getBoolean("translatable-keys.check.only-on-move", false);
+    }
     
     /**
      * Checks if update checking is enabled

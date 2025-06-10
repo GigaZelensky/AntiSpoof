@@ -46,9 +46,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /* ACTIVE PROBES ******************************************************** */
     private static final class Probe {
-        Iterator<Map.Entry<String,String>> iterator;          // remaining keys → label
+        Iterator<Map.Entry<String, String>> iterator; // remaining keys → label
         final Set<String> translated = new HashSet<>();
-        final Map<String,String> failedForNext = new LinkedHashMap<>();
+        final Map<String, String> failedForNext = new LinkedHashMap<>();
         int retriesLeft;
         /* per-round state */
         String  key   = null;
@@ -56,9 +56,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Vector3i sign = null;      // last fake sign position
         BukkitTask timeoutTask;
         boolean waitingForMove = false;
+        org.bukkit.command.CommandSender debug;
+        long sendTime;
     }
     private final Map<UUID, Probe> probes   = new HashMap<>();
     private final Map<UUID, Long>  cooldown = new HashMap<>();
+    private final Set<UUID> pendingStart = new HashSet<>();
 
     /* --------------------------------------------------------------------- */
     public TranslatableKeyManager(AntiSpoofPlugin pl,
@@ -79,13 +82,17 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-        int delay = cfg.getTranslatableFirstDelay();
-        Bukkit.getScheduler().runTaskLater(plugin,
-               () -> beginProbe(e.getPlayer(),
-                                cfg.getTranslatableModsWithLabels(),
-                                cfg.getTranslatableRetryCount(),
-                                false),
-               delay);
+        if (cfg.isTranslatableOnlyOnMove()) {
+            pendingStart.add(e.getPlayer().getUniqueId());
+        } else {
+            int delay = cfg.getTranslatableFirstDelay();
+            Bukkit.getScheduler().runTaskLater(plugin,
+                   () -> beginProbe(e.getPlayer(),
+                                    cfg.getTranslatableModsWithLabels(),
+                                    cfg.getTranslatableRetryCount(),
+                                    false),
+                   delay);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -95,6 +102,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             sendAir(e.getPlayer(), p.sign);          // tidy just in case
         if (p != null && p.timeoutTask != null) p.timeoutTask.cancel();
         cooldown.remove(e.getPlayer().getUniqueId());
+        pendingStart.remove(e.getPlayer().getUniqueId());
     }
 
     /* ======================================================================
@@ -104,6 +112,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     public void onMove(PlayerMoveEvent e) {
         if (e.getFrom().getX() == e.getTo().getX() &&
             e.getFrom().getZ() == e.getTo().getZ()) return;   // no horizontal move
+
+        if (cfg.isTranslatableOnlyOnMove()) {
+            UUID id = e.getPlayer().getUniqueId();
+            if (pendingStart.remove(id)) {
+                int delay = cfg.getTranslatableFirstDelay();
+                Bukkit.getScheduler().runTaskLater(plugin,
+                        () -> beginProbe(e.getPlayer(),
+                                         cfg.getTranslatableModsWithLabels(),
+                                         cfg.getTranslatableRetryCount(),
+                                         false),
+                        delay);
+            }
+        }
 
         Probe p = probes.get(e.getPlayer().getUniqueId());
         if (p != null && p.waitingForMove) {
@@ -119,19 +140,17 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             org.bukkit.command.CommandSender dbg)
     {
         Map<String,String> single = Collections.singletonMap(key, key);
-        beginProbe(target, single, 0, true);      // ignore cooldown
-
-        // quick debug feedback
-        dbg.sendMessage("Sent probe for " + key + " to " + target.getName());
+        beginProbe(target, single, 0, true, dbg);      // ignore cooldown
     }
 
     /* ======================================================================
      *  MAIN PROBE LIFECYCLE
      * ==================================================================== */
     private void beginProbe(Player p,
-                            Map<String,String> keys,
+                            Map<String, String> keys,
                             int retries,
-                            boolean ignoreCooldown)
+                            boolean ignoreCooldown,
+                            org.bukkit.command.CommandSender dbg)
     {
         if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
 
@@ -143,9 +162,17 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Probe probe = new Probe();
         probe.iterator    = keys.entrySet().iterator();
         probe.retriesLeft = retries;
+        probe.debug       = dbg;
         probes.put(p.getUniqueId(), probe);
 
         advance(p, probe);
+    }
+
+    private void beginProbe(Player p,
+                            Map<String, String> keys,
+                            int retries,
+                            boolean ignoreCooldown) {
+        beginProbe(p, keys, retries, ignoreCooldown, null);
     }
 
     /** Advance to next key (or finish) */
@@ -179,9 +206,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.sign = pos;
 
         // timeout
+        probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             // no translation
-            handleResult(player, probe, false);
+            handleResult(player, probe, false, null);
             advance(player, probe);
         }, TIMEOUT_TICKS);
     }
@@ -206,11 +234,22 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 !recv[0].isEmpty() &&
                 !recv[0].equals(probe.key) &&
                 !recv[0].startsWith("{\"translate\"");
-        handleResult(p, probe, translated);
+        handleResult(p, probe, translated, recv[0]);
         advance(p, probe);
     }
 
-    private void handleResult(Player p, Probe probe, boolean translated) {
+    private void handleResult(Player p, Probe probe, boolean translated, String response) {
+        long ms = System.currentTimeMillis() - probe.sendTime;
+        if (probe.debug != null) {
+            String text = translated ? response : "";
+            probe.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
+                    org.bukkit.ChatColor.DARK_GRAY + " | " +
+                    org.bukkit.ChatColor.GRAY + "Response: \"" +
+                    org.bukkit.ChatColor.AQUA + text +
+                    org.bukkit.ChatColor.GRAY + "\" Time: " +
+                    org.bukkit.ChatColor.AQUA + ms + "ms");
+        }
+
         if (translated) {
             probe.translated.add(probe.key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.key);
@@ -235,7 +274,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
             Bukkit.getScheduler().runTaskLater(plugin, () ->
-                    beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true),
+                    beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true, probe.debug),
                     interval);
         } else {
             probes.remove(p.getUniqueId());
