@@ -60,6 +60,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String  uid   = null;
         Vector3i sign = null;      // last fake sign position
         BukkitTask timeoutTask;
+        BukkitTask closeTask;
         boolean waitingForMove = false;
         org.bukkit.command.CommandSender debug;
         long sendTime;
@@ -109,6 +110,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (p != null && p.sign != null)
             sendAir(e.getPlayer(), p.sign);          // tidy just in case
         if (p != null && p.timeoutTask != null) p.timeoutTask.cancel();
+        if (p != null && p.closeTask != null) p.closeTask.cancel();
         cooldown.remove(e.getPlayer().getUniqueId());
         pendingStart.remove(e.getPlayer().getUniqueId());
     }
@@ -203,8 +205,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /** Advance to next key (or finish) */
     private void advance(Player player, Probe probe) {
-        // cancel stale timeout
+        // cancel stale timeout / close tasks
         if (probe.timeoutTask != null) probe.timeoutTask.cancel();
+        if (probe.closeTask != null) probe.closeTask.cancel();
 
         // finished?
         if (!probe.iterator.hasNext()) {
@@ -236,7 +239,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void placeNextSign(Player player, Probe probe) {
-        Vector3i pos = buildFakeSign(player, probe.keys, probe.uid);
+        if (probe.closeTask != null) {
+            probe.closeTask.cancel();
+        }
+        Vector3i pos = buildFakeSign(player, probe.keys, probe.uid, probe);
         probe.sign = pos;
 
         if (cfg.isDebugMode()) {
@@ -309,6 +315,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
         // tidy sign
         if (probe.sign != null) sendAir(p, probe.sign);
+        if (probe.closeTask != null) probe.closeTask.cancel();
     }
 
     /* ======================================================================
@@ -339,13 +346,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
             }
+            if (probe.closeTask != null) probe.closeTask.cancel();
         }
     }
 
     /* ======================================================================
      *  LOW-LEVEL sign building / cleanup
      * ==================================================================== */
-    private Vector3i buildFakeSign(Player target, List<String> keys, String uid) {
+    private Vector3i buildFakeSign(Player target, List<String> keys, String uid, Probe probe) {
         ClientVersion cv   = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
         boolean modern     = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos       = signPos(target);
@@ -390,8 +398,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         BlockEntityTypes.SIGN, nbt));
 
         // GUI open/close
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerOpenSignEditor(pos, true));
+
+        int ticks = cfg.getTranslatableGuiTicks();
+        if (ticks <= 0) {
+            PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                    new WrapperPlayServerCloseWindow(0));
+        } else {
+            probe.closeTask = Bukkit.getScheduler().runTaskLater(plugin,
+                    () -> PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                            new WrapperPlayServerCloseWindow(0)),
+                    ticks);
+        }
 
         return pos;
     }
