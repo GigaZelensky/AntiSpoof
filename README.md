@@ -855,6 +855,8 @@ translatable-keys:
     # they keep moving. This helps hide the sign GUI during the check.
     # Keys that share the same label are probed one at a time in a round-robin
     # order so every mod gets checked quickly without spamming the player.
+    # Up to three keys are packed into each sign using the first three lines to
+    # reduce the total number of sign flashes needed.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
