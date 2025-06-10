@@ -38,10 +38,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     /* --------------------------------------------------------------------- */
     private static final int   TIMEOUT_TICKS   = 20;  // 1 s
     private static final int   AIR_ID          = 0;   // block id for air
-    // minimal horizontal movement (squared distance) to consider that the player
-    // actually moved. Using a small threshold avoids treating tiny coordinate
-    // changes from head rotation as movement events.
-    private static final double MOVE_EPSILON    = 0.0001; // ~1cm^2
+    private static final float MOVE_EPSILON    = 0.001f; // minimal x-z motion to count as “moving”
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
@@ -113,9 +110,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
      * ==================================================================== */
     @EventHandler
     public void onMove(PlayerMoveEvent e) {
-        double dx = e.getTo().getX() - e.getFrom().getX();
-        double dz = e.getTo().getZ() - e.getFrom().getZ();
-        if (dx * dx + dz * dz < MOVE_EPSILON) return; // ignore tiny head movements
+        if (e.getFrom().getX() == e.getTo().getX() &&
+            e.getFrom().getZ() == e.getTo().getZ()) return;   // no horizontal move
 
         if (cfg.isTranslatableOnlyOnMove()) {
             UUID id = e.getPlayer().getUniqueId();
@@ -127,9 +123,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                                          cfg.getTranslatableRetryCount(),
                                          false),
                         delay);
-                if (cfg.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Movement detected, starting probe for " + e.getPlayer().getName());
-                }
             }
         }
 
@@ -137,9 +130,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (p != null && p.waitingForMove) {
             p.waitingForMove = false;
             placeNextSign(e.getPlayer(), p);                  // now!
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Player moved, sending next key to " + e.getPlayer().getName());
-            }
         }
     }
 
@@ -175,12 +165,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.debug       = dbg;
         probes.put(p.getUniqueId(), probe);
 
-        if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Starting translatable probe for " +
-                    p.getName() + " with " + keys.size() + " keys (retries=" +
-                    retries + ")");
-        }
-
         advance(p, probe);
     }
 
@@ -209,13 +193,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.key = nxt.getKey();  // current key
         probe.uid = randomUID();
 
-        // place the sign immediately or wait for movement depending on config
-        if (cfg.isTranslatableOnlyOnMove()) {
+        // we’ll place the sign only when player is moving
+        if (player.getVelocity().lengthSquared() < MOVE_EPSILON) {
             probe.waitingForMove = true;
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Waiting for movement to send key '" +
-                        probe.key + "' to " + player.getName());
-            }
         } else {
             placeNextSign(player, probe);
         }
@@ -224,11 +204,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private void placeNextSign(Player player, Probe probe) {
         Vector3i pos = buildFakeSign(player, probe.key, probe.uid);
         probe.sign = pos;
-
-        if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Sent key '" + probe.key + "' to " +
-                    player.getName());
-        }
 
         // timeout
         probe.sendTime = System.currentTimeMillis();
@@ -275,12 +250,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     org.bukkit.ChatColor.AQUA + ms + "ms");
         }
 
-        if (cfg.isDebugMode()) {
-            String res = translated ? ("\"" + response + "\"") : "<no translation>";
-            plugin.getLogger().info("[Debug] Key " + probe.key + " for " + p.getName() +
-                    " => " + res + " in " + ms + "ms");
-        }
-
         if (translated) {
             probe.translated.add(probe.key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.key);
@@ -304,18 +273,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // schedule retry of ONLY failed keys
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Scheduling retry for " + p.getName() +
-                        " in " + interval + " ticks with " + probe.failedForNext.size() + " keys");
-            }
             Bukkit.getScheduler().runTaskLater(plugin, () ->
                     beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true, probe.debug),
                     interval);
         } else {
             probes.remove(p.getUniqueId());
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
-            }
         }
     }
 
