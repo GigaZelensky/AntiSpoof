@@ -3,7 +3,9 @@ package com.gigazelensky.antispoof.keybind;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.nbt.NBTByte;
 import com.github.retrooper.packetevents.protocol.nbt.NBTCompound;
+import com.github.retrooper.packetevents.protocol.nbt.NBTList;
 import com.github.retrooper.packetevents.protocol.nbt.NBTString;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
@@ -13,70 +15,120 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
 import org.bukkit.entity.Player;
-import java.lang.reflect.Method;
+
+import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 public final class KeybindDebugManager extends PacketListenerAbstract {
     private final Map<UUID, Request> pending = new HashMap<>();
-    private record Request(Player executor, String[] originalLines, long sentAt) {}
+    private record Request(Player executor, String[] sent, long sentAt) {}
 
     public KeybindDebugManager() {
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
     public void request(Player executor, Player target, String key) {
-        Vector3i pos = new Vector3i(target.getLocation().getBlockX(), -64, target.getLocation().getBlockZ());
-        String json = "{\"translate\":\"" + key + "\"}";
-        String[] lines = { json, "", "", "" };
+        Vector3i pos = new Vector3i(
+                target.getLocation().getBlockX(),
+                target.getLocation().getBlockY() + 3,
+                target.getLocation().getBlockZ());
+
+        ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+        boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
+
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        nbt.setTag("Text1", new NBTString(json));
-        nbt.setTag("Text2", new NBTString(""));
-        nbt.setTag("Text3", new NBTString(""));
-        nbt.setTag("Text4", new NBTString(""));
+        String[] sentLines;
+
+        if (modern) {
+            NBTList messages = createList();
+            messages.addTag(new NBTString("{\"translate\":\"" + key + "\"}"));
+            messages.addTag(new NBTString("{\"text\":\"\"}"));
+            messages.addTag(new NBTString("{\"text\":\"\"}"));
+            messages.addTag(new NBTString("{\"text\":\"\"}"));
+
+            NBTCompound front = new NBTCompound();
+            front.setTag("messages", messages);
+            front.setTag("color", new NBTString("black"));
+            front.setTag("has_glowing_text", new NBTByte((byte) 0));
+            nbt.setTag("front_text", front);
+
+            sentLines = new String[]{
+                    "{\"translate\":\"" + key + "\"}",
+                    "{\"text\":\"\"}",
+                    "{\"text\":\"\"}",
+                    "{\"text\":\"\"}"
+            };
+        } else {
+            String json = "{\"translate\":\"" + key + "\"}";
+            nbt.setTag("Text1", new NBTString(json));
+            nbt.setTag("Text2", new NBTString(""));
+            nbt.setTag("Text3", new NBTString(""));
+            nbt.setTag("Text4", new NBTString(""));
+            sentLines = new String[]{json, "", "", ""};
+        }
 
         WrappedBlockState state;
         try {
-            Method m = StateTypes.OAK_SIGN.getClass().getMethod("createBlockData");
-            state = (WrappedBlockState) m.invoke(StateTypes.OAK_SIGN);
-        } catch (Throwable ex) {
-            ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+            state = (WrappedBlockState) StateTypes.OAK_SIGN.getClass()
+                    .getMethod("createBlockData").invoke(StateTypes.OAK_SIGN);
+        } catch (Throwable t) {
             state = StateTypes.OAK_SIGN.createBlockState(cv);
         }
 
         for (String m : new String[]{"setBlockEntityData", "setNbt"}) {
             try {
-                Method method = state.getClass().getMethod(m, NBTCompound.class);
-                method.invoke(state, nbt);
+                state.getClass().getMethod(m, NBTCompound.class).invoke(state, nbt);
                 break;
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignored) {}
         }
 
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockChange(pos, state.getGlobalId()));
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
-        pending.put(target.getUniqueId(), new Request(executor, lines, System.currentTimeMillis()));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerBlockChange(pos, state.getGlobalId()));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerOpenSignEditor(pos, true));
+
+        pending.put(target.getUniqueId(),
+                new Request(executor, sentLines, System.currentTimeMillis()));
     }
 
     @Override
     public void onPacketReceive(PacketReceiveEvent e) {
-        if (e.getPacketType() != com.github.retrooper.packetevents.protocol.packettype.PacketType.Play.Client.UPDATE_SIGN) return;
+        if (e.getPacketType() != com.github.retrooper.packetevents.protocol.packettype.PacketType.Play.Client.UPDATE_SIGN)
+            return;
         if (!(e.getPlayer() instanceof Player p)) return;
+
         Request req = pending.remove(p.getUniqueId());
         if (req == null) return;
 
         String[] reply = new WrapperPlayClientUpdateSign(e).getTextLines();
         String result = "???";
-        for (int i = 0; i < reply.length; i++) {
-            String orig = i < req.originalLines().length ? req.originalLines()[i] : "";
-            if (!reply[i].isEmpty() && !reply[i].equals(orig)) {
+        for (int i = 0; i < reply.length && i < req.sent().length; i++) {
+            if (!reply[i].isEmpty() && !reply[i].equals(req.sent()[i])) {
                 result = reply[i];
                 break;
             }
         }
-
         long took = System.currentTimeMillis() - req.sentAt();
         req.executor().sendMessage(p.getName() + " | QO: result:\"" + result + "\" time:=" + took + "ms");
+    }
+
+    @SuppressWarnings({"rawtypes","unchecked"})
+    private static NBTList createList() {
+        try {
+            Constructor<NBTList> c = NBTList.class.getDeclaredConstructor();
+            c.setAccessible(true);
+            return c.newInstance();
+        } catch (Throwable ignored) {
+            try {
+                Constructor<NBTList> c = NBTList.class.getDeclaredConstructor(byte.class);
+                c.setAccessible(true);
+                return c.newInstance((byte) 8); // TAG_String
+            } catch (Throwable t) {
+                throw new IllegalStateException("Cannot construct NBTList", t);
+            }
+        }
     }
 }
