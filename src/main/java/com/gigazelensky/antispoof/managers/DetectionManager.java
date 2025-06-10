@@ -882,8 +882,14 @@ public class DetectionManager {
         ConfigManager.TranslatableModConfig modConfig = config.getTranslatableModConfig(key);
         String label = modConfig.getLabel() != null && !modConfig.getLabel().isEmpty() ? modConfig.getLabel() : key;
 
+        PlayerData pdata = plugin.getPlayerDataMap().get(player.getUniqueId());
+        boolean alreadyFlagged = pdata != null && pdata.getDetectedMods().contains(label);
+
+        if (config.isTranslatableAlertOnce() && alreadyFlagged) {
+            return;
+        }
+
         if (type == TranslatableEventType.TRANSLATED) {
-            PlayerData pdata = plugin.getPlayerDataMap().get(player.getUniqueId());
             if (pdata != null) pdata.addDetectedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
@@ -894,6 +900,7 @@ public class DetectionManager {
                 if (data != null) data.setAlreadyPunished(true);
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
+            if (pdata != null) pdata.addDetectedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }

@@ -38,9 +38,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private static final int   TIMEOUT_TICKS   = 20;  // 1 s
     private static final int   AIR_ID          = 0;   // block id for air
     // minimal horizontal movement (squared distance) to consider that the player
-    // actually moved. Using a small threshold avoids treating tiny coordinate
-    // changes from head rotation as movement events.
+    // actually moved.
     private static final double MOVE_EPSILON    = 0.0001; // ~1cm^2
+    // minimal head rotation in degrees to consider as movement
+    private static final float ROT_EPSILON     = 1.5f;
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
@@ -118,7 +119,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     public void onMove(PlayerMoveEvent e) {
         double dx = e.getTo().getX() - e.getFrom().getX();
         double dz = e.getTo().getZ() - e.getFrom().getZ();
-        if (dx * dx + dz * dz < MOVE_EPSILON) return; // ignore tiny head movements
+        float dy = Math.abs(e.getTo().getYaw() - e.getFrom().getYaw());
+        float dp = Math.abs(e.getTo().getPitch() - e.getFrom().getPitch());
+        boolean moved = dx * dx + dz * dz >= MOVE_EPSILON || dy > ROT_EPSILON || dp > ROT_EPSILON;
+        if (!moved) return;
 
         if (cfg.isTranslatableOnlyOnMove()) {
             UUID id = e.getPlayer().getUniqueId();
@@ -156,6 +160,31 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     {
         Map<String,String> single = Collections.singletonMap(key, key);
         beginProbe(target, single, 0, true, dbg, true);      // ignore cooldown
+    }
+
+    /**
+     * Starts a full mod probe for a player immediately.
+     */
+    public void runMods(Player target) {
+        beginProbe(target,
+                   cfg.getTranslatableModsWithLabels(),
+                   cfg.getTranslatableRetryCount(),
+                   true,
+                   null,
+                   false);
+    }
+
+    /**
+     * Stops any pending or running probe for a player.
+     */
+    public void stopMods(Player target) {
+        UUID id = target.getUniqueId();
+        pendingStart.remove(id);
+        Probe p = probes.remove(id);
+        if (p != null) {
+            if (p.timeoutTask != null) p.timeoutTask.cancel();
+            if (p.sign != null) sendAir(target, p.sign);
+        }
     }
 
     /* ======================================================================

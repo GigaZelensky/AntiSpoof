@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "mods", "keybind", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck"
+        "channels", "brand", "mods", "keybind", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck", "runmods", "stopmods"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -83,6 +83,18 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         // Handle runcheck command
         if (subCommand.equals("runcheck")) {
             handleRunCheckCommand(sender, args);
+            return true;
+        }
+
+        // Handle runmods command
+        if (subCommand.equals("runmods")) {
+            handleRunModsCommand(sender, args);
+            return true;
+        }
+
+        // Handle stopmods command
+        if (subCommand.equals("stopmods")) {
+            handleStopModsCommand(sender, args);
             return true;
         }
         
@@ -210,6 +222,84 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         plugin.getDetectionManager().checkPlayerAsync(target, false, true);
         sender.sendMessage(ChatColor.GREEN + "Check triggered for " + target.getName() + ".");
         sender.sendMessage(ChatColor.YELLOW + "Note: This only re-analyzes existing data, players might need to rejoin for fresh data.");
+    }
+
+    private void handleRunModsCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("antispoof.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+            return;
+        }
+
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.AQUA + "Running mod probes for all online players...");
+            int count = 0;
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                plugin.getTranslatableKeyManager().runMods(p);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Mod probe triggered for " + count + " players.");
+            return;
+        }
+
+        String playerName = args[1];
+        if (playerName.equals("*")) {
+            sender.sendMessage(ChatColor.AQUA + "Running mod probes for all online players...");
+            int count = 0;
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                plugin.getTranslatableKeyManager().runMods(p);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Mod probe triggered for " + count + " players.");
+            return;
+        }
+
+        Player target = Bukkit.getPlayer(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+
+        plugin.getTranslatableKeyManager().runMods(target);
+        sender.sendMessage(ChatColor.GREEN + "Mod probe triggered for " + target.getName() + ".");
+    }
+
+    private void handleStopModsCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("antispoof.admin")) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
+            return;
+        }
+
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.AQUA + "Stopping mod probes for all online players...");
+            int count = 0;
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                plugin.getTranslatableKeyManager().stopMods(p);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Stopped probes for " + count + " players.");
+            return;
+        }
+
+        String playerName = args[1];
+        if (playerName.equals("*")) {
+            sender.sendMessage(ChatColor.AQUA + "Stopping mod probes for all online players...");
+            int count = 0;
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                plugin.getTranslatableKeyManager().stopMods(p);
+                count++;
+            }
+            sender.sendMessage(ChatColor.GREEN + "Stopped probes for " + count + " players.");
+            return;
+        }
+
+        Player target = Bukkit.getPlayer(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found!");
+            return;
+        }
+
+        plugin.getTranslatableKeyManager().stopMods(target);
+        sender.sendMessage(ChatColor.GREEN + "Stopped probes for " + target.getName() + ".");
     }
     
     private void showBlockedBrands(CommandSender sender) {
@@ -566,6 +656,8 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof keybind <player> <key> " + ChatColor.WHITE + "- Send a test key to a player");
         sender.sendMessage(ChatColor.GRAY + "/antispoof check [player|*] " + ChatColor.WHITE + "- Check if player is spoofing");
         sender.sendMessage(ChatColor.GRAY + "/antispoof runcheck [player|*] " + ChatColor.WHITE + "- Re-run checks on player(s)");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof runmods [player|*] " + ChatColor.WHITE + "- Re-run mod probes on player(s)");
+        sender.sendMessage(ChatColor.GRAY + "/antispoof stopmods [player|*] " + ChatColor.WHITE + "- Stop pending mod probes for player(s)");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
@@ -660,17 +752,21 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         } else if (args.length == 2) {
             String partialArg = args[1].toLowerCase();
             
-            if (args[0].equalsIgnoreCase("check") || 
-                args[0].equalsIgnoreCase("runcheck")) {
+            if (args[0].equalsIgnoreCase("check") ||
+                args[0].equalsIgnoreCase("runcheck") ||
+                args[0].equalsIgnoreCase("runmods") ||
+                args[0].equalsIgnoreCase("stopmods")) {
                 completions.add("*");
             }
-            
+
             if (args[0].equalsIgnoreCase("channels") ||
                 args[0].equalsIgnoreCase("brand") ||
                 args[0].equalsIgnoreCase("mods") ||
                 args[0].equalsIgnoreCase("keybind") ||
                 args[0].equalsIgnoreCase("check") ||
-                args[0].equalsIgnoreCase("runcheck")) {
+                args[0].equalsIgnoreCase("runcheck") ||
+                args[0].equalsIgnoreCase("runmods") ||
+                args[0].equalsIgnoreCase("stopmods")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)
                         .filter(name -> name.toLowerCase().startsWith(partialArg))

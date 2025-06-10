@@ -668,6 +668,7 @@ public class ConfigManager {
 
     // Translatable key detection
     private boolean translatableKeysEnabled;
+    private boolean translatableAlertOnce;
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
     private TranslatableModConfig defaultTranslatableConfig;
 
@@ -698,6 +699,8 @@ public class ConfigManager {
         }
 
         translatableKeysEnabled = main.getBoolean("enabled", false);
+        translatableAlertOnce = main.getConfigurationSection("check")
+                .getBoolean("alert-once-per-label", false);
 
         ConfigurationSection def = main.getConfigurationSection("default");
         defaultTranslatableConfig = new TranslatableModConfig();
@@ -831,6 +834,10 @@ public class ConfigManager {
 
     public boolean isTranslatableOnlyOnMove() {
         return config.getBoolean("translatable-keys.check.only-on-move", false);
+    }
+
+    public boolean isTranslatableAlertOnce() {
+        return translatableAlertOnce;
     }
     
     /**

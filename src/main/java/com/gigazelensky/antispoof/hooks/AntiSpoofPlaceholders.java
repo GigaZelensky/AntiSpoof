@@ -75,6 +75,33 @@ public class AntiSpoofPlaceholders extends PlaceholderExpansion {
             return String.valueOf(data.getChannels().size());
         }
 
+        // %antispoof_mods%
+        if (identifier.equals("mods")) {
+            UUID uuid = player.getUniqueId();
+            PlayerData data = plugin.getPlayerDataMap().get(uuid);
+            if (data == null) {
+                return "none";
+            }
+
+            Set<String> mods = data.getDetectedMods();
+            if (mods.isEmpty()) {
+                return "none";
+            }
+
+            return String.join(", ", mods);
+        }
+
+        // %antispoof_mods_count%
+        if (identifier.equals("mods_count")) {
+            UUID uuid = player.getUniqueId();
+            PlayerData data = plugin.getPlayerDataMap().get(uuid);
+            if (data == null) {
+                return "0";
+            }
+
+            return String.valueOf(data.getDetectedMods().size());
+        }
+
         // %antispoof_is_spoofing%
         if (identifier.equals("is_spoofing")) {
             return plugin.isPlayerSpoofing(player) ? "true" : "false";
