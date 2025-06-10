@@ -175,16 +175,6 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         // Then, do a complete check with required channels, but with a longer delay
         // This gives the client more time to register all its channels
         scheduleRequiredChannelsCheck(player, REQUIRED_CHANNEL_CHECK_DELAY);
-
-        // Schedule translatable key probe
-        int tDelay = config.getTranslatableFirstDelay();
-        if (tDelay >= 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline()) {
-                    translatableKeyManager.probe(player);
-                }
-            }, tDelay);
-        }
     }
     
     @EventHandler(priority = EventPriority.MONITOR)

@@ -5,218 +5,197 @@ import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.nbt.*;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.protocol.world.blockentity.BlockEntityTypes;
+import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
+import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3i;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
-
+import com.github.retrooper.packetevents.wrapper.play.server.*;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.*;
 
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
-    private static final class ProbeInfo {
-        final LinkedHashMap<String, String> keys;
-        ProbeInfo(LinkedHashMap<String, String> k) { keys = k; }
+    private static final class Probe {
+        final Iterator<Map.Entry<String, String>> iterator;
+        final Set<String> translated = new HashSet<>();
+        String currentKey = null;
+
+        Probe(Map<String, String> src) {
+            iterator = src.entrySet().iterator();
+        }
     }
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
     private final ConfigManager cfg;
-    private final Map<UUID, ProbeInfo> probes = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> cooldown = new ConcurrentHashMap<>();
+    private final Map<UUID, Probe> probes = new HashMap<>();
+    private final Map<UUID, Long> cooldown = new HashMap<>();
 
-    public TranslatableKeyManager(AntiSpoofPlugin pl, DetectionManager dm, ConfigManager cfg) {
-        this.plugin = pl;
-        this.detect = dm;
+    public TranslatableKeyManager(AntiSpoofPlugin plugin,
+                                  DetectionManager detect,
+                                  ConfigManager cfg) {
+        this.plugin = plugin;
+        this.detect = detect;
         this.cfg = cfg;
-        Bukkit.getPluginManager().registerEvents(this, pl);
+
+        Bukkit.getPluginManager().registerEvents(this, plugin);
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
-    @EventHandler
-    public void onJoin(PlayerJoinEvent e) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> probe(e.getPlayer()),
-                cfg.getTranslatableFirstDelay());
+    /** Compatibility shim for legacy code that still calls probe() directly. */
+    public void probe(Player player) {
+        startProbe(player);
     }
 
-    public void probe(Player p) {
-        if (!cfg.isTranslatableKeysEnabled() || !p.isOnline()) return;
+    /* ------------------------------------------------------------------ */
+    /*  Join hook                                                         */
+    /* ------------------------------------------------------------------ */
+    @EventHandler
+    public void onJoin(PlayerJoinEvent e) {
+        if (!cfg.isTranslatableKeysEnabled()) return;
+
+        Bukkit.getScheduler().runTaskLater(
+                plugin,
+                () -> startProbe(e.getPlayer()),
+                cfg.getTranslatableFirstDelay()
+        );
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Probe lifecycle                                                   */
+    /* ------------------------------------------------------------------ */
+    private void startProbe(Player p) {
+        if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
 
         long now = System.currentTimeMillis();
-        if (now - cooldown.getOrDefault(p.getUniqueId(), 0L) < (cfg.getTranslatableCooldown() * 1000L)) return;
+        if (now - cooldown.getOrDefault(p.getUniqueId(), 0L)
+                < cfg.getTranslatableCooldown() * 1000L) return;
         cooldown.put(p.getUniqueId(), now);
 
-        LinkedHashMap<String, String> map = new LinkedHashMap<>(cfg.getTranslatableModsWithLabels());
-        if (map.isEmpty()) {
-            debug("no keys configured");
+        Map<String, String> keys = cfg.getTranslatableModsWithLabels();
+        if (keys.isEmpty()) return;
+
+        Probe probe = new Probe(keys);
+        probes.put(p.getUniqueId(), probe);
+        sendNextKey(p, probe);
+    }
+
+    private void sendNextKey(Player p, Probe probe) {
+        if (!p.isOnline()) {
+            probes.remove(p.getUniqueId());
             return;
         }
 
-        ProbeInfo info = new ProbeInfo(map);
-        probes.put(p.getUniqueId(), info);
+        if (!probe.iterator.hasNext()) {
+            finishProbe(p, probe);
+            probes.remove(p.getUniqueId());
+            return;
+        }
 
-        // Try the bundle method first; if it fails, use the fixed fallback.
-        if (!sendBundleReflectively(p, info)) {
-            fallbackWithPackets(p, info);
+        Map.Entry<String, String> entry = probe.iterator.next();
+        probe.currentKey = entry.getKey();
+        sendSignProbe(p, entry.getKey());
+
+        Bukkit.getScheduler().runTaskLater(
+                plugin,
+                () -> sendNextKey(p, probe),
+                Math.max(1, cfg.getTranslatableGuiTicks())
+        );
+    }
+
+    private void finishProbe(Player p, Probe probe) {
+        for (String required : cfg.getTranslatableRequiredKeys()) {
+            if (!probe.translated.contains(required)) {
+                detect.handleTranslatable(p,
+                        TranslatableEventType.REQUIRED_MISS,
+                        required);
+            }
         }
     }
 
+    /* ------------------------------------------------------------------ */
+    /*  Sign-probe packet burst                                           */
+    /* ------------------------------------------------------------------ */
+    private void sendSignProbe(Player target, String key) {
+        Vector3i pos = new Vector3i(
+                target.getLocation().getBlockX(),
+                target.getLocation().getBlockY() + 3,
+                target.getLocation().getBlockZ());
+
+        ClientVersion cv =
+                PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+        boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
+
+        NBTCompound nbt = new NBTCompound();
+        nbt.setTag("id", new NBTString("minecraft:sign"));
+
+        if (modern) {
+            NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
+            msgs.addTag(new NBTString("{\"translate\":\"" + key + "\"}"));
+            msgs.addTag(new NBTString("{\"text\":\"\"}"));
+            msgs.addTag(new NBTString("{\"text\":\"\"}"));
+            msgs.addTag(new NBTString("{\"text\":\"\"}"));
+
+            NBTCompound front = new NBTCompound();
+            front.setTag("messages", msgs);
+            front.setTag("color", new NBTString("black"));
+            front.setTag("has_glowing_text", new NBTByte((byte) 0));
+            nbt.setTag("front_text", front);
+        } else {
+            String json = "{\"translate\":\"" + key + "\"}";
+            nbt.setTag("Text1", new NBTString(json));
+            nbt.setTag("Text2", new NBTString(""));
+            nbt.setTag("Text3", new NBTString(""));
+            nbt.setTag("Text4", new NBTString(""));
+        }
+
+        WrappedBlockState state;
+        try {
+            state = (WrappedBlockState) StateTypes.OAK_SIGN
+                    .getClass()
+                    .getMethod("createBlockData")
+                    .invoke(StateTypes.OAK_SIGN);
+        } catch (Throwable t) {
+            state = StateTypes.OAK_SIGN.createBlockState(cv);
+        }
+
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerBlockChange(pos, state.getGlobalId()));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerOpenSignEditor(pos, true));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerCloseWindow(0));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  UPDATE_SIGN handler                                               */
+    /* ------------------------------------------------------------------ */
     @Override
     public void onPacketReceive(PacketReceiveEvent e) {
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
-        Player p = (Player) e.getPlayer();
-        ProbeInfo pi = probes.remove(p.getUniqueId());
-        if (pi == null) return;
+        if (!(e.getPlayer() instanceof Player p)) return;
+
+        Probe probe = probes.get(p.getUniqueId());
+        if (probe == null || probe.currentKey == null) return;
 
         String[] lines = new WrapperPlayClientUpdateSign(e).getTextLines();
-        boolean any = false;
-        int idx = 0;
-        for (Map.Entry<String, String> en : pi.keys.entrySet()) {
-            if (idx >= lines.length) break;
-            
-            if (!lines[idx].equals(en.getKey()) && !lines[idx].isEmpty()) {
-                any = true;
-                detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, en.getValue());
-            }
-            idx++;
+        if (lines.length == 0) return;
+        String out = lines[0];
+
+        if (!out.isEmpty() && !out.contains("\"translate\"")) {
+            probe.translated.add(probe.currentKey);
+            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.currentKey);
         }
-        if (!any) {
-            detect.handleTranslatable(p, TranslatableEventType.ZERO, "-");
-        }
-    }
-
-    private boolean sendBundleReflectively(Player player, ProbeInfo info) {
-        try {
-            Class<?> bcCls = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange");
-            Class<?> beCls = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData");
-            Class<?> cwCls = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCloseWindow");
-            Class<?> buCls = Class.forName("com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBundle");
-
-            Vector3i pos = new Vector3i(player.getLocation().getBlockX(),
-                    ThreadLocalRandom.current().nextInt(-64, -59),
-                    player.getLocation().getBlockZ());
-
-            Object bc = createBlockChange(bcCls, pos);
-
-            Object be = beCls.getConstructor().newInstance();
-            setField(be, "blockEntityPosition", pos);
-            setField(be, "actionId", (byte) 9);
-            setField(be, "nbtData", buildNmsNBT(pos, new ArrayList<>(info.keys.keySet())));
-
-            Object open = new WrapperPlayServerOpenSignEditor(pos, true);
-            Object close = cwCls.getConstructor(int.class).newInstance(0);
-
-            Object bundle = buCls.getConstructor(Object[].class)
-                    .newInstance((Object) new Object[]{bc, be, open, close});
-            PacketEvents.getAPI().getPlayerManager().sendPacket(player, bundle);
-            debug("bundle sent");
-            return true;
-        } catch (Exception e) {
-            debug("bundle reflect err: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    // THE FIX IS HERE: This is the fallback method, now corrected to send proper packets.
-    @SuppressWarnings("deprecation")
-    private void fallbackWithPackets(Player player, ProbeInfo info) {
-        debug("Using packet-based fallback.");
-        try {
-            Vector3i pos = new Vector3i(player.getLocation().getBlockX(), -64, player.getLocation().getBlockZ());
-            
-            // Build the raw NMS NBT object.
-            Object nmsNbtObject = buildNmsNBT(pos, new ArrayList<>(info.keys.keySet()));
-            
-            // Create the wrapper and inject the NBT data via reflection.
-            WrapperPlayServerBlockEntityData blockEntityData = new WrapperPlayServerBlockEntityData(null);
-            setField(blockEntityData, "blockEntityPosition", pos);
-            setField(blockEntityData, "actionId", (byte) 9);
-            setField(blockEntityData, "nbtData", nmsNbtObject);
-
-            // Create the other required packets.
-            int blockId = findSignMaterial().getId();
-            WrapperPlayServerBlockChange blockChange = new WrapperPlayServerBlockChange(pos, blockId);
-            WrapperPlayServerOpenSignEditor openSign = new WrapperPlayServerOpenSignEditor(pos, true);
-
-            // Send the packets individually.
-            PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockChange);
-            PacketEvents.getAPI().getPlayerManager().sendPacket(player, blockEntityData);
-            PacketEvents.getAPI().getPlayerManager().sendPacket(player, openSign);
-
-        } catch (Exception e) {
-            debug("Packet-based fallback failed: " + e.getMessage());
-        }
-    }
-
-    private Object createBlockChange(Class<?> bcCls, Vector3i pos) throws Exception {
-        try {
-            return bcCls.getConstructor(Vector3i.class, int.class).newInstance(pos, 63);
-        } catch (NoSuchMethodException ignore) {}
-        try {
-            Object bc = bcCls.getConstructor().newInstance();
-            bcCls.getMethod("setBlockPosition", Vector3i.class).invoke(bc, pos);
-            Class<?> wbd = Class.forName(bcCls.getName() + "$WrappedBlockData");
-            Object blk = wbd.getMethod("create", Material.class).invoke(null, findSignMaterial());
-            bcCls.getMethod("setBlockData", wbd).invoke(bc, blk);
-            return bc;
-        } catch (NoSuchMethodException ignore) {}
-        return bcCls.getConstructor(Material.class, Vector3i.class).newInstance(findSignMaterial(), pos);
-    }
-    
-    private void setField(Object target, String fieldName, Object value) throws NoSuchFieldException, IllegalAccessException {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
-    }
-
-    private Object buildNmsNBT(Vector3i pos, List<String> raw) throws Exception {
-        while (raw.size() < 4) raw.add("");
-        String v = Bukkit.getServer().getClass().getPackage().getName().split("\\.")[3];
-        Class<?> tag = Class.forName("net.minecraft.server." + v + ".NBTTagCompound");
-        Object n = tag.getConstructor().newInstance();
-        Method sS = tag.getMethod("setString", String.class, String.class);
-        Method sI = tag.getMethod("setInt", String.class, int.class);
-        sS.invoke(n, "id", "Sign");
-        sI.invoke(n, "x", pos.getX());
-        sI.invoke(n, "y", pos.getY());
-        sI.invoke(n, "z", pos.getZ());
-        for (int i = 0; i < 4; i++) {
-            sS.invoke(n, "Text" + (i + 1), "{\"translate\":\"" + raw.get(i) + "\"}");
-        }
-        sS.invoke(n, "is_waxed", "0b");
-        sS.invoke(n, "is_editable", "1b");
-        return n;
-    }
-
-    private Material findSignMaterial() {
-        for (String id : new String[]{"OAK_SIGN", "SIGN_POST", "SIGN"}) {
-            try {
-                return Material.valueOf(id);
-            } catch (IllegalArgumentException ignored) {}
-        }
-        return Material.SIGN;
-    }
-
-    private void debug(String m) {
-        if (cfg.isDebugMode()) plugin.getLogger().info("[Translatable] " + m);
     }
 }
