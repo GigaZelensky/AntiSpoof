@@ -49,18 +49,20 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /* ACTIVE PROBES ******************************************************** */
     private static final class Probe {
-        Iterator<Map.Entry<String, String>> iterator; // remaining keys → label
+        Iterator<List<Map.Entry<String, String>>> iterator; // remaining keys → label
         final Set<String> translated = new HashSet<>();
         final Map<String, String> failedForNext = new LinkedHashMap<>();
         int retriesLeft;
         /* per-round state */
-        String  key   = null;
+        List<Map.Entry<String, String>> currentEntries = null;
+        String[]  keys   = null;
         String  uid   = null;
         Vector3i sign = null;      // last fake sign position
         BukkitTask timeoutTask;
         boolean waitingForMove = false;
         org.bukkit.command.CommandSender debug;
         long sendTime;
+        boolean forceSend = false;
     }
     private final Map<UUID, Probe> probes   = new HashMap<>();
     private final Map<UUID, Long>  cooldown = new HashMap<>();
@@ -93,6 +95,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                    () -> beginProbe(e.getPlayer(),
                                     cfg.getTranslatableModsWithLabels(),
                                     cfg.getTranslatableRetryCount(),
+                                    false,
+                                    null,
                                     false),
                    delay);
         }
@@ -125,6 +129,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         () -> beginProbe(e.getPlayer(),
                                          cfg.getTranslatableModsWithLabels(),
                                          cfg.getTranslatableRetryCount(),
+                                         false,
+                                         null,
                                          false),
                         delay);
                 if (cfg.isDebugMode()) {
@@ -150,7 +156,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             org.bukkit.command.CommandSender dbg)
     {
         Map<String,String> single = Collections.singletonMap(key, key);
-        beginProbe(target, single, 0, true, dbg);      // ignore cooldown
+        beginProbe(target, single, 0, true, dbg, true);      // ignore cooldown
     }
 
     /* ======================================================================
@@ -160,7 +166,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             Map<String, String> keys,
                             int retries,
                             boolean ignoreCooldown,
-                            org.bukkit.command.CommandSender dbg)
+                            org.bukkit.command.CommandSender dbg,
+                            boolean forceSend)
     {
         if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
 
@@ -169,10 +176,44 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (!ignoreCooldown && now - cooldown.getOrDefault(p.getUniqueId(),0L) < cd) return;
         if (!ignoreCooldown) cooldown.put(p.getUniqueId(), now);
 
+        // Group keys by label to interleave them
+        Map<String, List<String>> labelToKeys = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : keys.entrySet()) {
+            labelToKeys.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(entry.getKey());
+        }
+
+        List<String> interleavedKeys = new ArrayList<>();
+        int maxKeysPerLabel = 0;
+        for (List<String> keyList : labelToKeys.values()) {
+            if (keyList.size() > maxKeysPerLabel) {
+                maxKeysPerLabel = keyList.size();
+            }
+        }
+
+        for (int i = 0; i < maxKeysPerLabel; i++) {
+            for (List<String> keyList : labelToKeys.values()) {
+                if (i < keyList.size()) {
+                    interleavedKeys.add(keyList.get(i));
+                }
+            }
+        }
+
+        List<Map.Entry<String, String>> finalKeyList = new ArrayList<>();
+        for (String key : interleavedKeys) {
+            finalKeyList.add(new AbstractMap.SimpleEntry<>(key, keys.get(key)));
+        }
+
+        // Group into chunks of 3
+        List<List<Map.Entry<String, String>>> keyGroups = new ArrayList<>();
+        for (int i = 0; i < finalKeyList.size(); i += 3) {
+            keyGroups.add(new ArrayList<>(finalKeyList.subList(i, Math.min(finalKeyList.size(), i + 3))));
+        }
+
         Probe probe = new Probe();
-        probe.iterator    = keys.entrySet().iterator();
+        probe.iterator    = keyGroups.iterator();
         probe.retriesLeft = retries;
         probe.debug       = dbg;
+        probe.forceSend   = forceSend;
         probes.put(p.getUniqueId(), probe);
 
         if (cfg.isDebugMode()) {
@@ -182,13 +223,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
 
         advance(p, probe);
-    }
-
-    private void beginProbe(Player p,
-                            Map<String, String> keys,
-                            int retries,
-                            boolean ignoreCooldown) {
-        beginProbe(p, keys, retries, ignoreCooldown, null);
     }
 
     /** Advance to next key (or finish) */
@@ -205,12 +239,18 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // revert previous sign (if any)
         if (probe.sign != null) sendAir(player, probe.sign);
 
-        Map.Entry<String,String> nxt = probe.iterator.next();
-        probe.key = nxt.getKey();  // current key
+        probe.currentEntries = probe.iterator.next();
+        probe.keys = new String[3];
+        for (int i = 0; i < probe.currentEntries.size(); i++) {
+            probe.keys[i] = probe.currentEntries.get(i).getKey();
+        }
+        for (int i = probe.currentEntries.size(); i < 3; i++) {
+            probe.keys[i] = null; // Pad with nulls
+        }
         probe.uid = randomUID();
 
         // place the sign immediately or wait for movement depending on config
-        if (cfg.isTranslatableOnlyOnMove()) {
+        if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
             probe.waitingForMove = true;
         } else {
             placeNextSign(player, probe);
@@ -218,11 +258,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void placeNextSign(Player player, Probe probe) {
-        Vector3i pos = buildFakeSign(player, probe.key, probe.uid);
+        Vector3i pos = buildFakeSign(player, probe.keys, probe.uid);
         probe.sign = pos;
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Sent key '" + probe.key + "' to " +
+            String keyStr = String.join("', '", Arrays.stream(probe.keys).filter(Objects::nonNull).toArray(String[]::new));
+            plugin.getLogger().info("[Debug] Sent keys '" + keyStr + "' to " +
                     player.getName());
         }
 
@@ -230,7 +271,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             // no translation
-            handleResult(player, probe, false, null);
+            for (Map.Entry<String, String> entry : probe.currentEntries) {
+                handleResult(player, probe, entry.getKey(), entry.getValue(), false, null);
+            }
             advance(player, probe);
         }, TIMEOUT_TICKS);
     }
@@ -243,7 +286,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player  p = (Player) e.getPlayer();
         Probe probe = probes.get(p.getUniqueId());
-        if (probe == null || probe.key == null) return;
+        if (probe == null || probe.keys == null) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
         if (recv.length < 4) return;
@@ -251,21 +294,29 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         probe.timeoutTask.cancel();
 
-        boolean translated =
-                !recv[0].isEmpty() &&
-                !recv[0].equals(probe.key) &&
-                !recv[0].startsWith("{\"translate\"");
-        handleResult(p, probe, translated, recv[0]);
+        for (int i = 0; i < probe.currentEntries.size(); i++) {
+            Map.Entry<String, String> entry = probe.currentEntries.get(i);
+            String key = entry.getKey();
+            String label = entry.getValue();
+
+            boolean translated =
+                    !recv[i].isEmpty() &&
+                    !recv[i].equals(key) &&
+                    !recv[i].startsWith("{\"translate\"");
+            handleResult(p, probe, key, label, translated, recv[i]);
+        }
         advance(p, probe);
     }
 
-    private void handleResult(Player p, Probe probe, boolean translated, String response) {
+    private void handleResult(Player p, Probe probe, String key, String label, boolean translated, String response) {
         long ms = System.currentTimeMillis() - probe.sendTime;
         if (probe.debug != null) {
             String text = translated ? response : "";
             probe.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
                     org.bukkit.ChatColor.DARK_GRAY + " | " +
-                    org.bukkit.ChatColor.GRAY + "Response: \"" +
+                    org.bukkit.ChatColor.GRAY + "Key: \"" +
+                    org.bukkit.ChatColor.WHITE + key +
+                    org.bukkit.ChatColor.GRAY + "\" Response: \"" +
                     org.bukkit.ChatColor.AQUA + text +
                     org.bukkit.ChatColor.GRAY + "\" Time: " +
                     org.bukkit.ChatColor.AQUA + ms + "ms");
@@ -273,18 +324,17 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         if (cfg.isDebugMode()) {
             String res = translated ? ("\"" + response + "\"") : "<no translation>";
-            plugin.getLogger().info("[Debug] Key " + probe.key + " for " + p.getName() +
+            plugin.getLogger().info("[Debug] Key " + key + " for " + p.getName() +
                     " => " + res + " in " + ms + "ms");
         }
 
         if (translated) {
-            probe.translated.add(probe.key);
-            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.key);
+            probe.translated.add(key);
+            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
         } else {
-            probe.failedForNext.put(probe.key, probe.key);
+            probe.failedForNext.put(key, label);
         }
-        // tidy sign
-        if (probe.sign != null) sendAir(p, probe.sign);
+        // tidy sign is handled in advance()
     }
 
     /* ======================================================================
@@ -297,11 +347,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
         }
 
+        // revert final sign
+        if (probe.sign != null) sendAir(p, probe.sign);
+
         // schedule retry of ONLY failed keys
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
             Bukkit.getScheduler().runTaskLater(plugin, () ->
-                    beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true, probe.debug),
+                    beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
                     interval);
         } else {
             probes.remove(p.getUniqueId());
@@ -314,7 +367,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     /* ======================================================================
      *  LOW-LEVEL sign building / cleanup
      * ==================================================================== */
-    private Vector3i buildFakeSign(Player target, String key, String uid) {
+    private Vector3i buildFakeSign(Player target, String[] keys, String uid) {
         ClientVersion cv   = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
         boolean modern     = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos       = signPos(target);
@@ -335,9 +388,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         nbt.setTag("id", new NBTString("minecraft:sign"));
         if (modern) {
             NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
-            msgs.addTag(new NBTString("{\"translate\":\"" + key + "\"}"));
-            msgs.addTag(new NBTString("{\"text\":\"\"}"));
-            msgs.addTag(new NBTString("{\"text\":\"\"}"));
+            String key1 = keys[0] != null ? keys[0] : "";
+            String key2 = keys[1] != null ? keys[1] : "";
+            String key3 = keys[2] != null ? keys[2] : "";
+            msgs.addTag(new NBTString("{\"translate\":\"" + key1 + "\"}"));
+            msgs.addTag(new NBTString("{\"translate\":\"" + key2 + "\"}"));
+            msgs.addTag(new NBTString("{\"translate\":\"" + key3 + "\"}"));
             msgs.addTag(new NBTString("{\"text\":\"" + uid + "\"}"));
             NBTCompound front = new NBTCompound();
             front.setTag("messages", msgs);
@@ -345,9 +401,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             front.setTag("has_glowing_text", new NBTByte((byte)0));
             nbt.setTag("front_text", front);
         } else {
-            nbt.setTag("Text1", new NBTString("{\"translate\":\"" + key + "\"}"));
-            nbt.setTag("Text2", new NBTString(""));
-            nbt.setTag("Text3", new NBTString(""));
+            String key1 = keys[0] != null ? keys[0] : "";
+            String key2 = keys[1] != null ? keys[1] : "";
+            String key3 = keys[2] != null ? keys[2] : "";
+            nbt.setTag("Text1", new NBTString("{\"translate\":\"" + key1 + "\"}"));
+            nbt.setTag("Text2", new NBTString("{\"translate\":\"" + key2 + "\"}"));
+            nbt.setTag("Text3", new NBTString("{\"translate\":\"" + key3 + "\"}"));
             nbt.setTag("Text4", new NBTString(uid));
         }
         PacketEvents.getAPI().getPlayerManager()
