@@ -821,6 +821,40 @@ client-brands:
       punishments: []
 
 # ──────────────────────────────────────────────────────────
+#                Translatable Key Detection
+# ──────────────────────────────────────────────────────────
+translatable-keys:
+  enabled: true
+  default:
+    alert-message: "&8[&cAntiSpoof&8] &7%player% using %label%"
+    console-alert-message: "%player% flagged: %label%"
+    discord-alert: false
+    punish: false
+    punishments: []
+  mods:
+    sodium.option_impact.low:
+      label: Sodium
+      alert: true
+      punish: false
+      punishments: []
+    modmenu.mods:
+      label: ModMenu
+      alert: true
+      punish: false
+      punishments: []
+  required: []
+  check:
+    first-delay: 40
+    gui-visible-ticks: 1
+    cooldown: 600
+    key-delay: 2
+    retry-count: 0
+    retry-interval: 60
+    only-on-move: false
+    # When enabled, probes wait until the player moves and are sent only while
+    # they keep moving. This helps hide the sign GUI during the check.
+
+# ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
 # ──────────────────────────────────────────────────────────
 bedrock-handling:

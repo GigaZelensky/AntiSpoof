@@ -6,6 +6,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -85,6 +86,9 @@ public class ConfigManager {
         
         // Load client brand configurations
         loadClientBrandConfigs();
+
+        // Load translatable key configurations
+        loadTranslatableKeyConfigs();
     }
     
     /**
@@ -660,6 +664,170 @@ public class ConfigManager {
     
     public List<String> getDiscordViolationContent() {
         return config.getStringList("discord.violation-content");
+    }
+
+    // Translatable key detection
+    private boolean translatableKeysEnabled;
+    private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
+    private TranslatableModConfig defaultTranslatableConfig;
+
+    public static class TranslatableModConfig {
+        private String label;
+        private boolean alert;
+        private boolean discordAlert;
+        private boolean punish;
+        private String alertMessage;
+        private String consoleAlertMessage;
+        private List<String> punishments = new ArrayList<>();
+
+        public String getLabel() { return label; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldDiscordAlert() { return discordAlert; }
+        public boolean shouldPunish() { return punish; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+        public List<String> getPunishments() { return punishments; }
+    }
+
+    private void loadTranslatableKeyConfigs() {
+        translatableMods.clear();
+        ConfigurationSection main = config.getConfigurationSection("translatable-keys");
+        if (main == null) {
+            translatableKeysEnabled = false;
+            return;
+        }
+
+        translatableKeysEnabled = main.getBoolean("enabled", false);
+
+        ConfigurationSection def = main.getConfigurationSection("default");
+        defaultTranslatableConfig = new TranslatableModConfig();
+        if (def != null) {
+            defaultTranslatableConfig.alertMessage = def.getString("alert-message", "&8[&cAntiSpoof&8] &7%player% using %label%");
+            defaultTranslatableConfig.consoleAlertMessage = def.getString("console-alert-message", "%player% flagged: %label%");
+            defaultTranslatableConfig.discordAlert = def.getBoolean("discord-alert", false);
+            defaultTranslatableConfig.punish = def.getBoolean("punish", false);
+            defaultTranslatableConfig.punishments = def.getStringList("punishments");
+            defaultTranslatableConfig.alert = true;
+            defaultTranslatableConfig.label = "";
+        } else {
+            defaultTranslatableConfig.alertMessage = "&8[&cAntiSpoof&8] &7%player% using %label%";
+            defaultTranslatableConfig.consoleAlertMessage = "%player% flagged: %label%";
+            defaultTranslatableConfig.discordAlert = false;
+            defaultTranslatableConfig.punish = false;
+            defaultTranslatableConfig.punishments = new ArrayList<>();
+            defaultTranslatableConfig.alert = true;
+            defaultTranslatableConfig.label = "";
+        }
+
+        ConfigurationSection mods = main.getConfigurationSection("mods");
+        if (mods != null) {
+            for (String key : mods.getKeys(false)) {
+                // This logic is flawed for nested keys, so it's being updated in getTranslatableModsWithLabels
+                // and this loading logic will be used for punishment/alert settings.
+                ConfigurationSection m = mods.getConfigurationSection(key);
+                if (m == null) continue;
+                TranslatableModConfig cfg = new TranslatableModConfig();
+                cfg.label = m.getString("label", key);
+                cfg.alert = m.getBoolean("alert", true);
+                cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
+                cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
+                cfg.punishments = m.getStringList("punishments");
+                cfg.alertMessage = defaultTranslatableConfig.alertMessage;
+                cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
+                translatableMods.put(key, cfg);
+            }
+        }
+    }
+
+    public boolean isTranslatableKeysEnabled() { return translatableKeysEnabled; }
+
+    public LinkedHashMap<String, String> getTranslatableTestKeysPlain() {
+        LinkedHashMap<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, TranslatableModConfig> e : translatableMods.entrySet()) {
+            String label = e.getValue().label != null ? e.getValue().label : e.getKey();
+            out.put(e.getKey(), label);
+        }
+        return out;
+    }
+
+    public TranslatableModConfig getTranslatableModConfig(String key) {
+        TranslatableModConfig cfg = translatableMods.get(key);
+        if (cfg != null) return cfg;
+
+        ConfigurationSection m = config.getConfigurationSection("translatable-keys.mods." + key);
+        if (m != null) {
+            cfg = new TranslatableModConfig();
+            cfg.label = m.getString("label", key);
+            cfg.alert = m.getBoolean("alert", true);
+            cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
+            cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
+            cfg.punishments = m.getStringList("punishments");
+            cfg.alertMessage = defaultTranslatableConfig.alertMessage;
+            cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
+            translatableMods.put(key, cfg);
+            return cfg;
+        }
+
+        return defaultTranslatableConfig;
+    }
+    
+    // ===================================================================================
+    // START OF FIX
+    // The following two methods replace the old, buggy implementation.
+    // ===================================================================================
+
+    // New public method to be called from TranslatableKeyManager
+    public Map<String, String> getTranslatableModsWithLabels() {
+        Map<String, String> modsWithLabels = new LinkedHashMap<>();
+        ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
+        if (modsSection != null) {
+            for (String path : modsSection.getKeys(true)) {
+                ConfigurationSection sub = modsSection.getConfigurationSection(path);
+                if (sub != null) {
+                    String label = sub.getString("label", path);
+                    modsWithLabels.put(path, label);
+                }
+            }
+        }
+        return modsWithLabels;
+    }
+
+    // ===================================================================================
+    // END OF FIX
+    // ===================================================================================
+
+    public List<String> getTranslatableRequiredKeys() {
+        return config.getStringList("translatable-keys.required");
+    }
+
+    public int getTranslatableFirstDelay() {
+        return config.getInt("translatable-keys.check.first-delay", 40);
+    }
+
+    public int getTranslatableGuiTicks() {
+        return config.getInt("translatable-keys.check.gui-visible-ticks", 1);
+    }
+
+    public int getTranslatableCooldown() {
+        return config.getInt("translatable-keys.check.cooldown", 600);
+    }
+
+    // Added configurable delay between keys
+    public int getTranslatableKeyDelay() {
+        return config.getInt("translatable-keys.check.key-delay", 2);
+    }
+
+    // Added retry settings
+    public int getTranslatableRetryCount() {
+        return config.getInt("translatable-keys.check.retry-count", 0);
+    }
+
+    public int getTranslatableRetryInterval() {
+        return config.getInt("translatable-keys.check.retry-interval", 60);
+    }
+
+    public boolean isTranslatableOnlyOnMove() {
+        return config.getBoolean("translatable-keys.check.only-on-move", false);
     }
     
     /**

@@ -3,6 +3,7 @@ package com.gigazelensky.antispoof.listeners;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import com.gigazelensky.antispoof.managers.ConfigManager;
+import com.gigazelensky.antispoof.managers.TranslatableKeyManager;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -23,6 +24,7 @@ import java.util.UUID;
 public class PlayerEventListener extends PacketListenerAbstract implements Listener {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
+    private final TranslatableKeyManager translatableKeyManager;
     
     // Extended delay in ticks for required channel checks (5 seconds)
     private static final long REQUIRED_CHANNEL_CHECK_DELAY = 5 * 20L;
@@ -30,6 +32,7 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
     public PlayerEventListener(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
         this.config = plugin.getConfigManager();
+        this.translatableKeyManager = plugin.getTranslatableKeyManager();
     }
 
     public void register() {

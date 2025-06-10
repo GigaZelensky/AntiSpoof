@@ -2,7 +2,7 @@ name: Build AntiSpoof
 
 on:
   push:
-    branches: [ main, master, dev, translatablekeystest ]
+    branches: [ main, master, dev ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:  # Allows manual triggering

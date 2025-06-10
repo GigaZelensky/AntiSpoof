@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerData {
     private final Set<String> channels = ConcurrentHashMap.newKeySet();
+    private final Set<String> detectedMods = ConcurrentHashMap.newKeySet();
     private boolean alreadyPunished = false;
     private long joinTime = System.currentTimeMillis();
     private boolean initialChannelsRegistered = false;
@@ -29,8 +30,23 @@ public class PlayerData {
      * Removes a channel from the player's channel set
      * @param channel The channel to remove
      */
-    public void removeChannel(String channel) { 
-        channels.remove(channel); 
+    public void removeChannel(String channel) {
+        channels.remove(channel);
+    }
+
+    /**
+     * Adds a detected mod label to this player's session
+     * @param label The mod label
+     */
+    public void addDetectedMod(String label) {
+        detectedMods.add(label);
+    }
+
+    /**
+     * @return An unmodifiable view of detected mod labels
+     */
+    public Set<String> getDetectedMods() {
+        return Collections.unmodifiableSet(detectedMods);
     }
     
     /**
