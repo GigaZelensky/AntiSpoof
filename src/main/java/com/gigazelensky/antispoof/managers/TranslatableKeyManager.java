@@ -226,7 +226,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (receivedLines.length > 0) {
             String originalLineJson = probe.sentLines[0];
             String receivedLine = receivedLines[0];
-            boolean translated = !receivedLine.isEmpty() && !receivedLine.equals(originalLineJson);
+            boolean translated = !receivedLine.isEmpty() &&
+                                 !receivedLine.equals(originalLineJson) &&
+                                 !receivedLine.equals(probe.currentKey);
             if (translated) {
                 probe.translated.add(probe.currentKey);
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.currentKey);
