@@ -69,7 +69,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private final ConfigManager cfg;
     private final Map<UUID, Probe> probes = new HashMap<>();
     private final Map<UUID, Long> cooldown = new HashMap<>();
-    private static final int RESPONSE_TIMEOUT_TICKS = 40; // 2 seconds
+    private static final int RESPONSE_TIMEOUT_TICKS = 40; // Increased timeout slightly for more reliability
 
     public TranslatableKeyManager(AntiSpoofPlugin plugin, DetectionManager detect, ConfigManager cfg) {
         this.plugin = plugin;
@@ -90,6 +90,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Probe probe = probes.remove(e.getPlayer().getUniqueId());
         if (probe != null) {
             probe.cancelTimeout();
+            restoreOriginalBlock(e.getPlayer(), probe); // Failsafe restore on quit
         }
         cooldown.remove(e.getPlayer().getUniqueId());
     }
@@ -126,24 +127,21 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     public void sendKeybind(Player p, String key, org.bukkit.command.CommandSender sender) {
         if (p == null || !p.isOnline()) return;
         Probe probe = new Probe(Collections.singletonMap(key, key));
-        probe.currentKey = key; // Set manually for single use
+        probe.currentKey = key;
         probe.debugStart = System.currentTimeMillis();
         probe.debugSender = sender;
         probes.put(p.getUniqueId(), probe);
-        // We still need to generate an ID and get block data
         sendNextKey(p, probe);
     }
 
     private void sendNextKey(Player p, Probe probe) {
         if (probe == null || !p.isOnline()) {
-            if (probe != null) restoreOriginalBlock(p, probe); // Failsafe
             if (p != null) probes.remove(p.getUniqueId());
             return;
         }
 
         if (probe.debugSender != null && probe.currentKey != null) {
-            // Special path for one-off debug command
-            // We already have the key, now we just need to set up the probe details
+           // For debug command, skip iterator logic.
         } else if (!probe.iterator.hasNext()) {
             finishProbe(p, probe);
             return;
@@ -152,37 +150,35 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             probe.currentKey = entry.getKey();
         }
 
-        // --- FIX: Generate unique ID and get original block data before sending packets ---
         probe.probeId = UUID.randomUUID().toString().substring(0, 8);
         Location playerLoc = p.getLocation();
         int y = Math.min(p.getWorld().getMaxHeight() - 2, playerLoc.getBlockY() + 50);
         probe.probePos = new Vector3i(playerLoc.getBlockX(), y, playerLoc.getBlockZ());
 
-        // We must run the block check on the main thread
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (!p.isOnline() || !probes.containsKey(p.getUniqueId())) return;
-            
             Location probeLocation = new Location(p.getWorld(), probe.probePos.getX(), probe.probePos.getY(), probe.probePos.getZ());
             org.bukkit.block.Block block = probeLocation.getBlock();
             probe.originalMaterial = block.getType();
             //noinspection deprecation
             probe.originalData = block.getData();
             probe.hasOriginalBlock = true;
-
-            // Now send the actual packets
+            
             sendSignProbe(p, probe);
 
-            // The timeout logic from your original code
             probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (probes.get(p.getUniqueId()) != probe) return; // Ignore timeout for old probes
+
+                if (cfg.isDebugMode()) {
+                    plugin.getLogger().warning("[Debug] Timed out waiting for response on key '" + probe.currentKey + "' from " + p.getName() + ". Moving to next key.");
+                }
+                
+                restoreOriginalBlock(p, probe); // Restore block on timeout
+                
                 if (probe.debugSender != null) {
                     probe.debugSender.sendMessage(p.getName() + " | timeout");
                     probes.remove(p.getUniqueId());
-                } else if (probes.get(p.getUniqueId()) == probe) { // Ensure we don't act on an old probe
-                    if (cfg.isDebugMode()) {
-                        plugin.getLogger().warning("[Debug] Timed out waiting for response on key '" + probe.currentKey + "' from " + p.getName() + ". Moving to next key.");
-                    }
-                    probe.timeoutTask = null;
-                    restoreOriginalBlock(p, probe); // Restore block on timeout
+                } else {
                     scheduleNext(p, probe);
                 }
             }, RESPONSE_TIMEOUT_TICKS);
@@ -190,46 +186,44 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void sendSignProbe(Player target, Probe probe) {
-        String key = probe.currentKey;
         Vector3i pos = probe.probePos;
         ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+        boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        String[] sentLines = new String[4];
+        probe.sentLines = new String[4];
 
         // --- FIX: Embed the unique ID into the sign text ---
         String probeIdJson = "{\"text\":\"" + probe.probeId + "\"}";
 
-        if (cv.isNewerThanOrEquals(ClientVersion.V_1_20)) {
+        if (modern) {
             NBTList<NBTString> messages = new NBTList<>(NBTType.STRING);
-            sentLines[0] = "{\"translate\":\"" + key + "\"}";
-            sentLines[1] = "{\"text\":\"\"}";
-            sentLines[2] = "{\"text\":\"\"}";
-            sentLines[3] = probeIdJson;
-            for (String line : sentLines) messages.addTag(new NBTString(line));
+            probe.sentLines[0] = "{\"translate\":\"" + probe.currentKey + "\"}";
+            probe.sentLines[1] = "{\"text\":\"\"}";
+            probe.sentLines[2] = "{\"text\":\"\"}";
+            probe.sentLines[3] = probeIdJson;
+            for (String line : probe.sentLines) messages.addTag(new NBTString(line));
             NBTCompound front = new NBTCompound();
             front.setTag("messages", messages);
             front.setTag("color", new NBTString("black"));
             front.setTag("has_glowing_text", new NBTByte((byte) 0));
             nbt.setTag("front_text", front);
         } else {
-            sentLines[0] = "{\"translate\":\"" + key + "\"}";
-            sentLines[1] = "";
-            sentLines[2] = "";
-            sentLines[3] = probeIdJson; // Use the JSON representation for legacy too
-            nbt.setTag("Text1", new NBTString(sentLines[0]));
-            nbt.setTag("Text2", new NBTString(sentLines[1]));
-            nbt.setTag("Text3", new NBTString(sentLines[2]));
-            nbt.setTag("Text4", new NBTString(sentLines[3]));
+            probe.sentLines[0] = "{\"translate\":\"" + probe.currentKey + "\"}";
+            probe.sentLines[1] = "";
+            probe.sentLines[2] = "";
+            probe.sentLines[3] = probe.probeId; // For legacy, just send raw text.
+            nbt.setTag("Text1", new NBTString(probe.sentLines[0]));
+            nbt.setTag("Text2", new NBTString(probe.sentLines[1]));
+            nbt.setTag("Text3", new NBTString(probe.sentLines[2]));
+            nbt.setTag("Text4", new NBTString(probe.sentLines[3]));
         }
-        probe.sentLines = sentLines;
 
         WrappedBlockState signState = WrappedBlockState.getByString("minecraft:oak_sign");
-        
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockChange(pos, signState.getGlobalId()));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, cv.isNewerThanOrEquals(ClientVersion.V_1_20)));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, modern));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
     }
 
@@ -244,20 +238,16 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         WrapperPlayClientUpdateSign packet = new WrapperPlayClientUpdateSign(e);
         String[] receivedLines = packet.getTextLines();
 
-        // --- FIX: This is the core of the fix. Check for our unique ID. ---
-        // For legacy clients, the JSON might not be parsed, so we check for raw text or JSON.
-        String expectedIdRaw = probe.probeId;
-        String expectedIdJson = "{\"text\":\"" + probe.probeId + "\"}";
-        
-        if (receivedLines.length < 4 || (!receivedLines[3].equals(expectedIdRaw) && !receivedLines[3].equals(expectedIdJson))) {
+        // --- FIX: The core of the fix. Check for our unique ID. ---
+        if (receivedLines.length < 4 || !receivedLines[3].equals(probe.probeId)) {
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Ignored stray UPDATE_SIGN from " + p.getName() + ". Expected ID: '" + expectedIdRaw + "', but got a packet for a different/old sign.");
+                plugin.getLogger().info("[Debug] Ignored stray UPDATE_SIGN from " + p.getName() + ". Expected ID: '" + probe.probeId + "', but got a packet for a different/old sign.");
             }
             return;
         }
-        
-        // If we're here, the packet is valid for the current probe.
+
         probe.cancelTimeout();
+        restoreOriginalBlock(p, probe);
 
         if (cfg.isDebugMode()) {
             plugin.getLogger().info(
@@ -266,35 +256,37 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             "Line 1 Received: '" + (receivedLines.length > 0 ? receivedLines[0] : "EMPTY") + "'"
             );
         }
-        
+
         if (receivedLines.length > 0) {
             String receivedLine = receivedLines[0];
-            boolean translated = !receivedLine.isEmpty() && !receivedLine.equals(probe.sentLines[0]) && !receivedLine.equals(probe.currentKey);
-
+            boolean translated = !receivedLine.isEmpty() &&
+                                 !receivedLine.equals(probe.sentLines[0]) &&
+                                 !receivedLine.equals(probe.currentKey);
             if (translated) {
                 probe.translated.add(probe.currentKey);
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.currentKey);
+                if (cfg.isDebugMode()) {
+                    String label = cfg.getTranslatableModConfig(probe.currentKey).getLabel();
+                    plugin.getLogger().info("[Debug] Player " + p.getName() + " translated key '" + probe.currentKey + "' (" + label + ") to: '" + receivedLine + "'");
+                }
             } else if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Player " + p.getName() + " did not translate key '" + probe.currentKey + "'");
             }
+
             if (probe.debugSender != null) {
                 long time = System.currentTimeMillis() - probe.debugStart;
                 probe.debugSender.sendMessage(p.getName() + " | result:\"" + receivedLine + "\" time=" + time + "ms");
                 probes.remove(p.getUniqueId());
-                restoreOriginalBlock(p, probe); // Restore after debug
                 return;
-            }
-            if (translated && cfg.isDebugMode()) {
-                String label = cfg.getTranslatableModConfig(probe.currentKey).getLabel();
-                plugin.getLogger().info("[Debug] Player " + p.getName() + " translated key '" + probe.currentKey + "' (" + label + ") to: '" + receivedLine + "'");
             }
         }
         
-        restoreOriginalBlock(p, probe); // Restore after processing
         scheduleNext(p, probe);
     }
     
     private void finishProbe(Player p, Probe probe) {
+        probes.remove(p.getUniqueId());
+
         if (cfg.isDebugMode()) {
             plugin.getLogger().info("[Debug] Finished translatable key probe for " + p.getName() + ". Translated keys: " + probe.translated);
         }
@@ -310,12 +302,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             int remaining = probe.retriesLeft - 1;
             Bukkit.getScheduler().runTaskLater(plugin, () -> startProbe(p, remaining, true), cfg.getTranslatableRetryInterval());
         }
-        // Final cleanup
-        probes.remove(p.getUniqueId());
-        restoreOriginalBlock(p, probe);
     }
 
     private void scheduleNext(Player p, Probe probe) {
+        if (probe == null || !probes.containsValue(probe)) return; // Don't schedule if probe is already finished
         Bukkit.getScheduler().runTaskLater(plugin, () -> sendNextKey(p, probe), cfg.getTranslatableKeyDelay());
     }
 
