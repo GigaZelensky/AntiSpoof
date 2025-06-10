@@ -1,12 +1,9 @@
-
 package com.gigazelensky.antispoof.keybind;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.nbt.NBTCompound;
-import com.github.retrooper.packetevents.protocol.nbt.NBTList;
 import com.github.retrooper.packetevents.protocol.nbt.NBTString;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
@@ -15,121 +12,119 @@ import com.github.retrooper.packetevents.util.Vector3i;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Light‑weight re‑implementation of Grimʼs “debug keybind” logic
- * without relying on any Grim runtime classes.
+ * Cross-version re-implementation of Grim’s “debug keybind” workflow.
  * <p>
- *     Flow:
- *     <ol>
- *         <li>Command issues {@link #request(Player, Player, String)}</li>
- *         <li>Fake sign (with “translate” JSON component) is sent only to the target client.</li>
- *         <li>When the client immediately confirms the editor, it sends an UPDATE_SIGN packet.</li>
- *         <li>We capture the first differing line ‑ thatʼs the client‑side translation result.</li>
- *     </ol>
+ * A virtual sign containing a single
+ * <code>{"translate":"&lt;translationKey&gt;"}</code> JSON component is sent
+ * 64 blocks below the target. The client resolves the key, immediately
+ * responds with UPDATE_SIGN, and we time that round-trip:
+ *
+ * <pre>
+ * &lt;player&gt; | QO: result:"&lt;Translated&gt;" time:=&lt;ms&gt;ms
+ * </pre>
  */
 public final class KeybindDebugManager extends PacketListenerAbstract {
 
-    private static final class Request {
-        final Player executor;
-        final String translationKey;
-        final Vector3i pos;
-        final String[] originalLines;
-        final long sentAt;
-
-        Request(Player executor, String translationKey, Vector3i pos, String[] originalLines) {
-            this.executor = executor;
-            this.translationKey = translationKey;
-            this.pos = pos;
-            this.originalLines = originalLines;
-            this.sentAt = System.currentTimeMillis();
-        }
-    }
-
+    /** Tracks an in-flight sign probe keyed by the target’s UUID. */
     private final Map<UUID, Request> pending = new HashMap<>();
+
+    private record Request(Player executor,
+                           String translationKey,
+                           Vector3i pos,
+                           String[] originalLines,
+                           long sentAt) { }
 
     public KeybindDebugManager() {
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
     /**
-     * Initiates a key‑bind translation probe for {@code target}.
+     * Launch a localisation probe against {@code target}.
+     *
+     * @param executor command executor
+     * @param target   player whose client resolves the key
+     * @param key      e.g. {@code sodium.option_impact.medium}
      */
-    public void request(Player executor, Player target, String translationKey) {
-        // Pick an out‑of‑world coordinate ‑ always Y = ‑64 under player, chunk‑local so collisions are fine.
-        Vector3i pos = new Vector3i(target.getLocation().getBlockX(), -64, target.getLocation().getBlockZ());
+    public void request(Player executor, Player target, String key) {
+        // Position 64 blocks below player (never visible or colliding).
+        Vector3i pos = new Vector3i(target.getLocation().getBlockX(), -64,
+                                    target.getLocation().getBlockZ());
 
-        // Compose sign front_text NBT with the “translate” component so the client does the localisation for us.
-        String json = "{"translate":"" + translationKey + ""}";
-        String[] signLines = new String[]{json, "", "", ""};
+        // Legacy Text1-4 format works on every MC version 1.8 → 1.21+
+        String json = "{\"translate\":\"" + key + "\"}";
+        String[] lines = { json, "", "", "" };
 
-        // Build sign NBT for 1.20 format
-        NBTCompound frontText = buildSignTextCompound(signLines);
-        NBTCompound signNbt = new NBTCompound();
-        signNbt.setTag("front_text", frontText);
-        signNbt.setTag("id", new NBTString("minecraft:sign"));
+        NBTCompound nbt = new NBTCompound();
+        nbt.setTag("id",   new NBTString("minecraft:sign"));
+        nbt.setTag("Text1", new NBTString(json));
+        nbt.setTag("Text2", new NBTString(""));
+        nbt.setTag("Text3", new NBTString(""));
+        nbt.setTag("Text4", new NBTString(""));
 
-        // Create a wrapped OAK_SIGN block state with our NBT
-        ClientVersion cv = PacketEvents.getAPI().getPlayerUtils().getClientVersion(target);
-        WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState(cv);
-        signState.setNbt(signNbt);
+        // Obtain an OAK_SIGN WrappedBlockState regardless of PacketEvents version
+        WrappedBlockState state;
+        try {                                   // PacketEvents ≥ 2.x
+            Method m = StateTypes.OAK_SIGN.getClass().getMethod("createBlockData");
+            state = (WrappedBlockState) m.invoke(StateTypes.OAK_SIGN);
+        } catch (Throwable ex) {                // PacketEvents ≤ 1.x
+            ClientVersion cv =
+                PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+            state = StateTypes.OAK_SIGN.createBlockState(cv);
+        }
 
-        // Send block change & open‑editor packets ‑ only to the target client.
-        new WrapperPlayServerBlockChange(pos, signState.getGlobalId()).send(target);
-        new WrapperPlayServerOpenSignEditor(pos, true).send(target);
+        // Set NBT with whichever setter exists
+        boolean ok = false;
+        for (String setter : new String[] { "setBlockEntityData", "setNbt" }) {
+            try {
+                state.getClass().getMethod(setter, NBTCompound.class)
+                     .invoke(state, nbt);
+                ok = true;
+                break;
+            } catch (Throwable ignore) {}
+        }
+        if (!ok) throw new IllegalStateException(
+                "Cannot write NBT to WrappedBlockState (unknown PacketEvents build)");
 
-        // Track request
-        pending.put(target.getUniqueId(), new Request(executor, translationKey, pos, signLines));
+        // Send packets via PlayerManager (present on all builds)
+        PacketEvents.getAPI().getPlayerManager()
+                .sendPacket(target, new WrapperPlayServerBlockChange(pos, state.getGlobalId()));
+        PacketEvents.getAPI().getPlayerManager()
+                .sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
+
+        pending.put(target.getUniqueId(),
+                    new Request(executor, key, pos, lines, System.currentTimeMillis()));
     }
 
     @Override
-    public void onPacketReceive(PacketReceiveEvent event) {
-        if (!(event.getPlayer() instanceof Player player)) return;
+    public void onPacketReceive(PacketReceiveEvent e) {
+        if (!(e.getPlayer() instanceof Player p)) return;
+        if (e.getPacketType() !=
+            com.github.retrooper.packetevents.protocol.packettype.PacketType
+                    .Play.Client.UPDATE_SIGN) return;
 
-        if (event.getPacketType() == com.github.retrooper.packetevents.protocol.packettype.PacketType.Play.Client.UPDATE_SIGN) {
-            WrapperPlayClientUpdateSign wrapper = new WrapperPlayClientUpdateSign(event);
+        Request req = pending.remove(p.getUniqueId());
+        if (req == null) return; // Not ours.
 
-            Request req = pending.remove(player.getUniqueId());
-            if (req == null) return; // Not ours.
-
-            String[] newLines = wrapper.getTextLines();
-            // Compare first line ‑ thatʼs where we put the translation key.
-            String translated = "";
-            for (int i = 0; i < newLines.length; i++) {
-                String original = (req.originalLines.length > i) ? req.originalLines[i] : "";
-                if (!newLines[i].equals(original) && !newLines[i].isEmpty()) {
-                    translated = newLines[i];
-                    break;
-                }
+        String[] received = new WrapperPlayClientUpdateSign(e).getTextLines();
+        String translated = "???";
+        for (int i = 0; i < received.length; i++) {
+            String orig = i < req.originalLines().length ? req.originalLines()[i] : "";
+            if (!received[i].isEmpty() && !received[i].equals(orig)) {
+                translated = received[i];
+                break;
             }
-
-            long took = System.currentTimeMillis() - req.sentAt;
-            if (translated.isEmpty()) translated = "???";
-
-            String msg = player.getName() + " | QO: result:"" + translated + "" time:=" + took + "ms";
-            req.executor.sendMessage(msg);
         }
-    }
 
-    // Helper for 1.20 sign JSON front_text compound
-    private static NBTCompound buildSignTextCompound(String[] jsonLines) {
-        NBTCompound front = new NBTCompound();
-        NBTList linesList = new NBTList();
-
-        for (String j : jsonLines) {
-            linesList.addTag(new NBTString(j));
-        }
-        front.setTag("messages", linesList);
-        front.setTag("color", new NBTString("black"));
-        front.setTag("has_glowing_text", new NBTByte((byte) 0));
-        return front;
+        long ms = System.currentTimeMillis() - req.sentAt();
+        req.executor().sendMessage(
+                p.getName() + " | QO: result:\"" + translated + "\" time:=" + ms + "ms");
     }
 }
