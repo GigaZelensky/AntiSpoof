@@ -5,12 +5,12 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.nbt.*;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.protocol.world.blockentity.BlockEntityTypes;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3i;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
+import com.github.retrooper.packetevents.wrapper.play.server.*;
 import org.bukkit.entity.Player;
 
 import java.util.HashMap;
@@ -19,7 +19,7 @@ import java.util.UUID;
 
 public final class KeybindDebugManager extends PacketListenerAbstract {
     private final Map<UUID, Request> pending = new HashMap<>();
-    private record Request(Player executor, String[] sent, long sentAt) {}
+    private record Request(Player executor, String[] sentLines, long sentAt) {}
 
     public KeybindDebugManager() {
         PacketEvents.getAPI().getEventManager().registerListener(this);
@@ -36,7 +36,7 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        String[] sentLines;
+        String[] sent;
 
         if (modern) {
             NBTList<NBTString> messages = new NBTList<>(NBTType.STRING);
@@ -51,7 +51,7 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
             front.setTag("has_glowing_text", new NBTByte((byte) 0));
             nbt.setTag("front_text", front);
 
-            sentLines = new String[]{
+            sent = new String[]{
                     "{\"translate\":\"" + key + "\"}",
                     "{\"text\":\"\"}",
                     "{\"text\":\"\"}",
@@ -63,31 +63,32 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
             nbt.setTag("Text2", new NBTString(""));
             nbt.setTag("Text3", new NBTString(""));
             nbt.setTag("Text4", new NBTString(""));
-            sentLines = new String[]{json, "", "", ""};
+            sent = new String[]{json, "", "", ""};
         }
 
-        WrappedBlockState state;
+        WrappedBlockState signState;
         try {
-            state = (WrappedBlockState) StateTypes.OAK_SIGN.getClass()
+            signState = (WrappedBlockState) StateTypes.OAK_SIGN.getClass()
                     .getMethod("createBlockData").invoke(StateTypes.OAK_SIGN);
         } catch (Throwable t) {
-            state = StateTypes.OAK_SIGN.createBlockState(cv);
+            signState = StateTypes.OAK_SIGN.createBlockState(cv);
         }
 
-        for (String m : new String[]{"setBlockEntityData", "setNbt"}) {
-            try {
-                state.getClass().getMethod(m, NBTCompound.class).invoke(state, nbt);
-                break;
-            } catch (Throwable ignored) {}
-        }
-
+        // 1) place a sign block
         PacketEvents.getAPI().getPlayerManager().sendPacket(target,
-                new WrapperPlayServerBlockChange(pos, state.getGlobalId()));
+                new WrapperPlayServerBlockChange(pos, signState.getGlobalId()));
+        // 2) push its NBT (BLOCK_ENTITY_DATA)
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
+        // 3) open the sign editor
         PacketEvents.getAPI().getPlayerManager().sendPacket(target,
                 new WrapperPlayServerOpenSignEditor(pos, true));
+        // 4) close it instantly (matches Grim behaviour so GUI doesn’t linger)
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
+                new WrapperPlayServerCloseWindow(0));
 
         pending.put(target.getUniqueId(),
-                new Request(executor, sentLines, System.currentTimeMillis()));
+                new Request(executor, sent, System.currentTimeMillis()));
     }
 
     @Override
@@ -101,8 +102,8 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
 
         String[] reply = new WrapperPlayClientUpdateSign(e).getTextLines();
         String result = "???";
-        for (int i = 0; i < reply.length && i < req.sent().length; i++) {
-            if (!reply[i].isEmpty() && !reply[i].equals(req.sent()[i])) {
+        for (int i = 0; i < reply.length && i < req.sentLines().length; i++) {
+            if (!reply[i].isEmpty() && !reply[i].equals(req.sentLines()[i])) {
                 result = reply[i];
                 break;
             }
