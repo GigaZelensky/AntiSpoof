@@ -58,6 +58,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Vector3i sign = null;      // last fake sign position
         BukkitTask timeoutTask;
         boolean waitingForMove = false;
+        boolean isAwaitingResponse = false; // The fix: new state flag
         org.bukkit.command.CommandSender debug;
         long sendTime;
     }
@@ -133,11 +134,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
 
         Probe p = probes.get(e.getPlayer().getUniqueId());
-        if (p != null && p.waitingForMove) {
+        // The fix: Don't do anything if we're already waiting for a response
+        if (p != null && p.waitingForMove && !p.isAwaitingResponse) {
             p.waitingForMove = false;
             placeNextSign(e.getPlayer(), p);                  // now!
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Player moved, sending next key to " + e.getPlayer().getName());
+                plugin.getLogger().info("[Debug] Player moved, sending current keys to " + e.getPlayer().getName());
             }
         }
     }
@@ -192,8 +194,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /** Advance to next key (or finish) */
     private void advance(Player player, Probe probe) {
-        // cancel stale timeout
+        // cancel stale timeout and reset state
         if (probe.timeoutTask != null) probe.timeoutTask.cancel();
+        probe.isAwaitingResponse = false; // The fix: reset the flag
 
         // revert previous sign (if any)
         if (probe.sign != null) {
@@ -219,8 +222,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (cfg.isTranslatableOnlyOnMove()) {
             probe.waitingForMove = true;
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Waiting for movement to send key '" +
-                        probe.currentKeys + "' to " + player.getName());
+                plugin.getLogger().info("[Debug] Waiting for movement to send keys " +
+                        probe.currentKeys + " to " + player.getName());
             }
         } else {
             placeNextSign(player, probe);
@@ -228,6 +231,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void placeNextSign(Player player, Probe probe) {
+        // The fix: Set the flag to true before sending the packet
+        probe.isAwaitingResponse = true;
         Vector3i pos = buildFakeSign(player, probe.currentKeys, probe.uid);
         probe.sign = pos;
 
@@ -255,7 +260,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player  p = (Player) e.getPlayer();
         Probe probe = probes.get(p.getUniqueId());
-        if (probe == null || probe.uid == null) return;
+        if (probe == null || probe.uid == null || !probe.isAwaitingResponse) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
         if (recv.length < 4) return;
