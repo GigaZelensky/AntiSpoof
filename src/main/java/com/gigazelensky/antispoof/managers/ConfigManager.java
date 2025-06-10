@@ -776,35 +776,28 @@ public class ConfigManager {
     // The following two methods replace the old, buggy implementation.
     // ===================================================================================
 
-    // New public method to be called from TranslatableKeyManager
     public Map<String, String> getTranslatableModsWithLabels() {
         Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
-        if (modsSection != null) {
-            findModKeysRecursive(modsSection, "", modsWithLabels);
+        if (modsSection == null) {
+            return modsWithLabels; // Return empty map if the section doesn't exist
+        }
+
+        // Use getKeys(true) to get all possible paths, including nested ones.
+        for (String path : modsSection.getKeys(true)) {
+            // We are only interested in paths that point to a "label" definition.
+            if (path.endsWith(".label")) {
+                // The actual mod key is the path without the ".label" suffix.
+                String modKey = path.substring(0, path.length() - ".label".length());
+                
+                // Get the label value from the full path.
+                String label = modsSection.getString(path);
+                
+                // Add the key-label pair to our results.
+                modsWithLabels.put(modKey, label);
+            }
         }
         return modsWithLabels;
-    }
-
-    private void findModKeysRecursive(ConfigurationSection section, String currentPath, Map<String, String> results) {
-        // If a section has a 'label', it is considered a "leaf" node representing a mod definition.
-        // We add it to the results and do not recurse further down this path.
-        if (section.isSet("label")) {
-            String label = section.getString("label");
-            // Only add if path is not empty (handles the top-level 'mods' section)
-            if (!currentPath.isEmpty()) {
-                results.put(currentPath, label);
-            }
-            return; // Stop recursion for this branch
-        }
-
-        // If there's no label, it's a parent category, so recurse into its children.
-        for (String key : section.getKeys(false)) {
-            if (section.isConfigurationSection(key)) {
-                String newPath = currentPath.isEmpty() ? key : currentPath + "." + key;
-                findModKeysRecursive(section.getConfigurationSection(key), newPath, results);
-            }
-        }
     }
 
     // ===================================================================================
