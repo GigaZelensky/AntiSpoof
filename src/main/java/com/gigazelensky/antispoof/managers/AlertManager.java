@@ -294,7 +294,8 @@ public class AlertManager {
      */
     public void sendTranslatableViolationAlert(Player player, String label, String violationType,
                                                ConfigManager.TranslatableModConfig modConfig) {
-        if (!canSendAlert(player.getUniqueId(), violationType)) {
+        String combinedType = violationType + ":" + label;
+        if (!canSendAlert(player.getUniqueId(), combinedType)) {
             return;
         }
 

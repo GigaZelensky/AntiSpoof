@@ -883,6 +883,8 @@ public class DetectionManager {
         String label = modConfig.getLabel() != null && !modConfig.getLabel().isEmpty() ? modConfig.getLabel() : key;
 
         if (type == TranslatableEventType.TRANSLATED) {
+            PlayerData pdata = plugin.getPlayerDataMap().get(player.getUniqueId());
+            if (pdata != null) pdata.addDetectedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }

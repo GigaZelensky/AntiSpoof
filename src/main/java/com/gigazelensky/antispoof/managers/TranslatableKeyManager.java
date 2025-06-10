@@ -33,6 +33,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String currentKey = null;
         String[] sentLines = null;
         BukkitTask timeoutTask = null;
+        long debugStart = 0L;
+        org.bukkit.command.CommandSender debugSender = null;
 
         Probe(Map<String, String> src) {
             this.iterator = src.entrySet().iterator();
@@ -104,6 +106,22 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Probe probe = new Probe(keys);
         probes.put(p.getUniqueId(), probe);
         sendNextKey(p, probe);
+    }
+
+    public void sendKeybind(Player p, String key, org.bukkit.command.CommandSender sender) {
+        if (p == null || !p.isOnline()) return;
+        Probe probe = new Probe(Collections.singletonMap(key, key));
+        probe.currentKey = key;
+        probe.debugStart = System.currentTimeMillis();
+        probe.debugSender = sender;
+        probes.put(p.getUniqueId(), probe);
+        sendSignProbe(p, probe);
+        probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (probe.debugSender != null) {
+                probe.debugSender.sendMessage(p.getName() + " | timeout");
+            }
+            probes.remove(p.getUniqueId());
+        }, RESPONSE_TIMEOUT_TICKS);
     }
 
     private void sendNextKey(Player p, Probe probe) {
@@ -208,17 +226,22 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (receivedLines.length > 0) {
             String originalLineJson = probe.sentLines[0];
             String receivedLine = receivedLines[0];
-            if (!receivedLine.isEmpty() && !receivedLine.equals(originalLineJson)) {
+            boolean translated = !receivedLine.isEmpty() && !receivedLine.equals(originalLineJson);
+            if (translated) {
                 probe.translated.add(probe.currentKey);
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, probe.currentKey);
-                if (cfg.isDebugMode()) {
-                    String label = cfg.getTranslatableModConfig(probe.currentKey).getLabel();
-                    plugin.getLogger().info("[Debug] Player " + p.getName() + " translated key '" + probe.currentKey + "' (" + label + ") to: '" + receivedLine + "'");
-                }
-            } else {
-                if (cfg.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Player " + p.getName() + " did not translate key '" + probe.currentKey + "'");
-                }
+            } else if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Player " + p.getName() + " did not translate key '" + probe.currentKey + "'");
+            }
+            if (probe.debugSender != null) {
+                long time = System.currentTimeMillis() - probe.debugStart;
+                probe.debugSender.sendMessage(p.getName() + " | result:\"" + receivedLine + "\" time=" + time + "ms");
+                probes.remove(p.getUniqueId());
+                return;
+            }
+            if (translated && cfg.isDebugMode()) {
+                String label = cfg.getTranslatableModConfig(probe.currentKey).getLabel();
+                plugin.getLogger().info("[Debug] Player " + p.getName() + " translated key '" + probe.currentKey + "' (" + label + ") to: '" + receivedLine + "'");
             }
         }
         sendNextKey(p, probe);

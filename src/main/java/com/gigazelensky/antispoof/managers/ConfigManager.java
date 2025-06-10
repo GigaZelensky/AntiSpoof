@@ -751,7 +751,24 @@ public class ConfigManager {
     }
 
     public TranslatableModConfig getTranslatableModConfig(String key) {
-        return translatableMods.getOrDefault(key, defaultTranslatableConfig);
+        TranslatableModConfig cfg = translatableMods.get(key);
+        if (cfg != null) return cfg;
+
+        ConfigurationSection m = config.getConfigurationSection("translatable-keys.mods." + key);
+        if (m != null) {
+            cfg = new TranslatableModConfig();
+            cfg.label = m.getString("label", key);
+            cfg.alert = m.getBoolean("alert", true);
+            cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
+            cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
+            cfg.punishments = m.getStringList("punishments");
+            cfg.alertMessage = defaultTranslatableConfig.alertMessage;
+            cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
+            translatableMods.put(key, cfg);
+            return cfg;
+        }
+
+        return defaultTranslatableConfig;
     }
     
     // ===================================================================================
