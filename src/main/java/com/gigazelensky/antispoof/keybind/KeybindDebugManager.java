@@ -3,10 +3,7 @@ package com.gigazelensky.antispoof.keybind;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.protocol.nbt.NBTByte;
-import com.github.retrooper.packetevents.protocol.nbt.NBTCompound;
-import com.github.retrooper.packetevents.protocol.nbt.NBTList;
-import com.github.retrooper.packetevents.protocol.nbt.NBTString;
+import com.github.retrooper.packetevents.protocol.nbt.*;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
@@ -16,7 +13,6 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBl
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenSignEditor;
 import org.bukkit.entity.Player;
 
-import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -43,7 +39,7 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
         String[] sentLines;
 
         if (modern) {
-            NBTList messages = createList();
+            NBTList<NBTString> messages = new NBTList<>(NBTType.STRING);
             messages.addTag(new NBTString("{\"translate\":\"" + key + "\"}"));
             messages.addTag(new NBTString("{\"text\":\"\"}"));
             messages.addTag(new NBTString("{\"text\":\"\"}"));
@@ -113,22 +109,5 @@ public final class KeybindDebugManager extends PacketListenerAbstract {
         }
         long took = System.currentTimeMillis() - req.sentAt();
         req.executor().sendMessage(p.getName() + " | QO: result:\"" + result + "\" time:=" + took + "ms");
-    }
-
-    @SuppressWarnings({"rawtypes","unchecked"})
-    private static NBTList createList() {
-        try {
-            Constructor<NBTList> c = NBTList.class.getDeclaredConstructor();
-            c.setAccessible(true);
-            return c.newInstance();
-        } catch (Throwable ignored) {
-            try {
-                Constructor<NBTList> c = NBTList.class.getDeclaredConstructor(byte.class);
-                c.setAccessible(true);
-                return c.newInstance((byte) 8); // TAG_String
-            } catch (Throwable t) {
-                throw new IllegalStateException("Cannot construct NBTList", t);
-            }
-        }
     }
 }
