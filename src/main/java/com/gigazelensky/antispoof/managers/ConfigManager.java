@@ -780,20 +780,15 @@ public class ConfigManager {
         Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection == null) {
-            return modsWithLabels; // Return empty map if the section doesn't exist
+            return modsWithLabels;
         }
 
-        // Use getKeys(true) to get all possible paths, including nested ones.
         for (String path : modsSection.getKeys(true)) {
-            // We are only interested in paths that point to a "label" definition.
-            if (path.endsWith(".label")) {
+            // We are only interested in paths that point to a "label" string value.
+            if (path.endsWith(".label") && modsSection.isString(path)) {
                 // The actual mod key is the path without the ".label" suffix.
                 String modKey = path.substring(0, path.length() - ".label".length());
-                
-                // Get the label value from the full path.
                 String label = modsSection.getString(path);
-                
-                // Add the key-label pair to our results.
                 modsWithLabels.put(modKey, label);
             }
         }

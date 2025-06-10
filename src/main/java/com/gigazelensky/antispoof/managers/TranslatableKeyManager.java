@@ -16,7 +16,6 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUp
 import com.github.retrooper.packetevents.wrapper.play.server.*;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
-import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -177,36 +176,31 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (!ignoreCooldown) cooldown.put(p.getUniqueId(), now);
 
         // Group keys by label to interleave them
-        Map<String, List<String>> labelToKeys = new LinkedHashMap<>();
+        Map<String, List<Map.Entry<String, String>>> labelToKeys = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : keys.entrySet()) {
-            labelToKeys.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(entry.getKey());
+            labelToKeys.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(entry);
         }
 
-        List<String> interleavedKeys = new ArrayList<>();
+        List<Map.Entry<String, String>> interleavedKeys = new ArrayList<>();
         int maxKeysPerLabel = 0;
-        for (List<String> keyList : labelToKeys.values()) {
+        for (List<Map.Entry<String, String>> keyList : labelToKeys.values()) {
             if (keyList.size() > maxKeysPerLabel) {
                 maxKeysPerLabel = keyList.size();
             }
         }
 
         for (int i = 0; i < maxKeysPerLabel; i++) {
-            for (List<String> keyList : labelToKeys.values()) {
+            for (List<Map.Entry<String, String>> keyList : labelToKeys.values()) {
                 if (i < keyList.size()) {
                     interleavedKeys.add(keyList.get(i));
                 }
             }
         }
 
-        List<Map.Entry<String, String>> finalKeyList = new ArrayList<>();
-        for (String key : interleavedKeys) {
-            finalKeyList.add(new AbstractMap.SimpleEntry<>(key, keys.get(key)));
-        }
-
         // Group into chunks of 3
         List<List<Map.Entry<String, String>>> keyGroups = new ArrayList<>();
-        for (int i = 0; i < finalKeyList.size(); i += 3) {
-            keyGroups.add(new ArrayList<>(finalKeyList.subList(i, Math.min(finalKeyList.size(), i + 3))));
+        for (int i = 0; i < interleavedKeys.size(); i += 3) {
+            keyGroups.add(new ArrayList<>(interleavedKeys.subList(i, Math.min(interleavedKeys.size(), i + 3))));
         }
 
         Probe probe = new Probe();
@@ -262,10 +256,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.sign = pos;
 
         if (cfg.isDebugMode()) {
-            String keyStr = String.join("', '", Arrays.stream(probe.keys).filter(Objects::nonNull).toArray(String[]::new));
-            plugin.getLogger().info("[Debug] Sent keys '" + keyStr + "' to " +
+            List<String> nonNullKeys = new ArrayList<>();
+            for (String key : probe.keys) {
+                if (key != null) nonNullKeys.add(key);
+            }
+            plugin.getLogger().info("[Debug] Sent keys '" + String.join("', '", nonNullKeys) + "' to " +
                     player.getName());
         }
+
 
         // timeout
         probe.sendTime = System.currentTimeMillis();
