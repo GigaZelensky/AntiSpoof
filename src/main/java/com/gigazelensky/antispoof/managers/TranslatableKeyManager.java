@@ -63,6 +63,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean waitingForMove = false;
         org.bukkit.command.CommandSender debug;
         long sendTime;
+        boolean ignoreMovement;
     }
     private final Map<UUID, Probe> probes   = new HashMap<>();
     private final Map<UUID, Long>  cooldown = new HashMap<>();
@@ -95,7 +96,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                    () -> beginProbe(e.getPlayer(),
                                     cfg.getTranslatableModsWithLabels(),
                                     cfg.getTranslatableRetryCount(),
-                                    false),
+                                    false,
+                                    false,
+                                    null),
                    delay);
         }
     }
@@ -127,7 +130,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         () -> beginProbe(e.getPlayer(),
                                          cfg.getTranslatableModsWithLabels(),
                                          cfg.getTranslatableRetryCount(),
-                                         false),
+                                         false,
+                                         false,
+                                         null),
                         delay);
                 if (cfg.isDebugMode()) {
                     plugin.getLogger().info("[Debug] Movement detected, starting probe for " + e.getPlayer().getName());
@@ -152,7 +157,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             org.bukkit.command.CommandSender dbg)
     {
         Map<String,String> single = Collections.singletonMap(key, key);
-        beginProbe(target, single, 0, true, dbg);      // ignore cooldown
+        // send immediately even when movement is required
+        beginProbe(target, single, 0, true, true, dbg);      // ignore cooldown
     }
 
     /* ======================================================================
@@ -162,6 +168,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             Map<String, String> keys,
                             int retries,
                             boolean ignoreCooldown,
+                            boolean ignoreMovement,
                             org.bukkit.command.CommandSender dbg)
     {
         if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
@@ -175,6 +182,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.iterator    = keys.entrySet().iterator();
         probe.retriesLeft = retries;
         probe.debug       = dbg;
+        probe.ignoreMovement = ignoreMovement;
         probes.put(p.getUniqueId(), probe);
 
         if (cfg.isDebugMode()) {
@@ -190,7 +198,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                             Map<String, String> keys,
                             int retries,
                             boolean ignoreCooldown) {
-        beginProbe(p, keys, retries, ignoreCooldown, null);
+        beginProbe(p, keys, retries, ignoreCooldown, false, null);
     }
 
     /** Advance to next key (or finish) */
@@ -215,7 +223,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.uid = randomUID();
 
         // place the sign immediately or wait for movement depending on config
-        if (cfg.isTranslatableOnlyOnMove()) {
+        boolean wait = cfg.isTranslatableOnlyOnMove() && !probe.ignoreMovement;
+        if (wait) {
             probe.waitingForMove = true;
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Waiting for movement to send keys " +
@@ -320,7 +329,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         " in " + interval + " ticks with " + probe.failedForNext.size() + " keys");
             }
             Bukkit.getScheduler().runTaskLater(plugin, () ->
-                    beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true, probe.debug),
+                    beginProbe(p, probe.failedForNext, probe.retriesLeft-1,
+                               true,
+                               probe.ignoreMovement,
+                               probe.debug),
                     interval);
         } else {
             probes.remove(p.getUniqueId());

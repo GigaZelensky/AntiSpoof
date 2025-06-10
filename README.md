@@ -244,7 +244,14 @@ This transparency helps administrators understand exactly how the plugin is work
 | `/antispoof reload` | Reload the configuration | `antispoof.admin` |
 | `/antispoof blockedchannels` | Show current channel whitelist/blacklist configuration | `antispoof.admin` |
 | `/antispoof blockedbrands` | Show current brand whitelist/blacklist configuration | `antispoof.admin` |
+| `/antispoof keybind <player> <key>` | Test a single translatable key and show the player's response | `antispoof.admin` |
 | `/antispoof help` | Display help message with all commands | `antispoof.command` |
+
+Running `/antispoof keybind samucafriend modmenu.title` will reply with:
+
+```
+&bsamucafriend &8| &7Response: "&bModMenu&7" Time: &b154ms
+```
 
 ### Permission Nodes
 | Permission | Description | Default |
@@ -857,6 +864,8 @@ translatable-keys:
     # order so every mod gets checked quickly without spamming the player.
     # Up to three keys are packed into each sign using the first three lines to
     # reduce the total number of sign flashes needed.
+    # Use "/antispoof keybind <player> <key>" to test any key manually and see
+    # the translated text along with how long it took to respond.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

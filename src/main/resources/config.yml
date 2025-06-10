@@ -354,6 +354,8 @@ translatable-keys:
     # while they keep moving. Keys with the same label are sent in a round-
     # robin order so every mod is tested before repeating labels.
     # Up to three keys are placed on each sign (lines 1-3) to reduce GUI flashes.
+    # Use "/antispoof keybind <player> <key>" to manually test any key and view
+    # its translation along with the response time.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
