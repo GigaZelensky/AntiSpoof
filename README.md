@@ -856,6 +856,9 @@ translatable-keys:
     only-on-move: false
     # When enabled, probes wait until the player moves and are sent only while
     # they keep moving. This helps hide the sign GUI during the check.
+    alert-once-per-label: true
+    # When enabled, each mod label will only alert once per player even if the
+    # probes run again later in the same session.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

@@ -700,7 +700,7 @@ public class ConfigManager {
 
         translatableKeysEnabled = main.getBoolean("enabled", false);
         translatableAlertOnce = main.getConfigurationSection("check")
-                .getBoolean("alert-once-per-label", false);
+                .getBoolean("alert-once-per-label", true);
 
         ConfigurationSection def = main.getConfigurationSection("default");
         defaultTranslatableConfig = new TranslatableModConfig();

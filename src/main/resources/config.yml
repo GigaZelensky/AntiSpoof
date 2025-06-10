@@ -352,9 +352,9 @@ translatable-keys:
     only-on-move: false
     # When true, delay the probes until the player moves and continue only
     # while they keep moving.
-  # When enabled, each mod label will only alert once per player even if
-  # the probes are triggered again during the same session.
-  alert-once-per-label: false
+    alert-once-per-label: true
+    # When enabled, each mod label will only alert once per player even if
+    # the probes are triggered again during the same session.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
