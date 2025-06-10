@@ -12,17 +12,15 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
     private final AntiSpoofPlugin plugin;
     private final List<String> subcommands = Arrays.asList(
-        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", 
-        "runcheck", "detectmods", "clearcooldowns", "translatekey"
+        "channels", "brand", "help", "reload", "check", "blockedchannels", "blockedbrands", "runcheck"
     );
 
     public AntiSpoofCommand(AntiSpoofPlugin plugin) {
@@ -117,34 +115,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             checkPlayer(sender, target);
             return true;
         }
-
-        // Handle detectmods command
-        if (subCommand.equals("detectmods")) {
-            if (!sender.hasPermission("antispoof.admin")) {
-                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-                return true;
-            }
-            
-            handleDetectModsCommand(sender, args);
-            return true;
-        }
-        
-        // Handle translatekey command
-        if (subCommand.equals("translatekey")) {
-            handleTranslateKeyCommand(sender, args);
-            return true;
-        }
-        
-        // Handle clearcooldowns command
-        if (subCommand.equals("clearcooldowns")) {
-            if (!sender.hasPermission("antispoof.admin")) {
-                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-                return true;
-            }
-            
-            handleClearCooldownsCommand(sender, args);
-            return true;
-        }
         
         // Commands that require a player argument
         if (args.length < 2) {
@@ -169,7 +139,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         switch (subCommand) {
             case "channels":
                 showChannels(sender, target, data);
-                break;
             case "brand":
                 showBrand(sender, target);
                 break;
@@ -179,117 +148,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         }
         
         return true;
-    }
-    
-    /**
-     * Handles the translatekey command to test a specific translation key against a player
-     * @param sender The command sender
-     * @param args The command arguments
-     */
-    private void handleTranslateKeyCommand(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("antispoof.admin")) {
-            sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-            return;
-        }
-        
-        if (args.length < 3) {
-            sender.sendMessage(ChatColor.RED + "Usage: /antispoof translatekey <player> <key>");
-            return;
-        }
-        
-        String playerName = args[1];
-        String translationKey = args[2];
-        
-        Player target = Bukkit.getPlayer(playerName);
-        if (target == null) {
-            sender.sendMessage(ChatColor.RED + "Player not found!");
-            return;
-        }
-        
-        // Check if translation detection is enabled
-        if (!plugin.getConfigManager().isTranslationDetectionEnabled()) {
-            sender.sendMessage(ChatColor.RED + "Translation key detection is disabled in the configuration.");
-            return;
-        }
-        
-        sender.sendMessage(ChatColor.AQUA + "Testing translation key '" + translationKey + "' on player " + target.getName() + "...");
-        
-        // Scan the player for the specific translation key
-        plugin.getTranslationKeyDetector().scanPlayerForKey(target, translationKey);
-        
-        sender.sendMessage(ChatColor.GREEN + "Test initialized. Results will be reported via alerts if mod is detected.");
-    }
-    
-    /**
-     * Handles the clearCooldowns command to reset detection cooldowns
-     * @param sender The command sender
-     * @param args The command arguments
-     */
-    private void handleClearCooldownsCommand(CommandSender sender, String[] args) {
-        if (args.length < 2) {
-            sender.sendMessage(ChatColor.RED + "Usage: /antispoof clearcooldowns <player|*>");
-            return;
-        }
-        
-        String playerName = args[1];
-        
-        if (playerName.equals("*")) {
-            // Clear all cooldowns
-            plugin.getTranslationKeyDetector().clearAllCooldowns();
-            sender.sendMessage(ChatColor.GREEN + "Cleared detection cooldowns for all players.");
-            return;
-        }
-        
-        Player target = Bukkit.getPlayer(playerName);
-        if (target == null) {
-            sender.sendMessage(ChatColor.RED + "Player not found!");
-            return;
-        }
-        
-        plugin.getTranslationKeyDetector().clearCooldown(target.getUniqueId());
-        sender.sendMessage(ChatColor.GREEN + "Cleared detection cooldown for " + target.getName() + ".");
-    }
-    
-    /**
-     * Handles the detectmods command to trigger translation key detection
-     * @param sender The command sender
-     * @param args The command arguments
-     */
-    private void handleDetectModsCommand(CommandSender sender, String[] args) {
-        if (!plugin.getConfigManager().isTranslationDetectionEnabled()) {
-            sender.sendMessage(ChatColor.RED + "Translation key detection is disabled in the configuration.");
-            return;
-        }
-        
-        if (args.length < 2) {
-            sender.sendMessage(ChatColor.RED + "Usage: /antispoof detectmods <player>");
-            return;
-        }
-        
-        String playerName = args[1];
-        Player target = Bukkit.getPlayer(playerName);
-        
-        if (target == null) {
-            sender.sendMessage(ChatColor.RED + "Player not found!");
-            return;
-        }
-        
-        // Check if already detected mods for this player
-        Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
-        
-        if (!detectedMods.isEmpty()) {
-            sender.sendMessage(ChatColor.AQUA + "Previously detected mods for " + target.getName() + ":");
-            for (String mod : detectedMods) {
-                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
-            }
-        } else {
-            sender.sendMessage(ChatColor.YELLOW + "No mods previously detected for " + target.getName() + ".");
-        }
-        
-        // Run a new scan - passing true to forceScan to bypass cooldown
-        sender.sendMessage(ChatColor.AQUA + "Starting new mod detection scan for " + target.getName() + "...");
-        plugin.getTranslationKeyDetector().scanPlayer(target, true);
-        sender.sendMessage(ChatColor.GREEN + "Detection scan initiated. Results will be reported via alerts if mods are found.");
     }
     
     private void handleRunCheckCommand(CommandSender sender, String[] args) {
@@ -392,27 +250,21 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         List<String> flagReasons = new ArrayList<>();
         
         if (brand == null) {
-            sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.YELLOW + " has no client brand information yet.");
-            return;
+            if (!plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
+                sender.sendMessage(ChatColor.AQUA + target.getName() + ChatColor.YELLOW + " has no client brand information yet.");
+                return;
+            }
+            flagReasons.add("Non-vanilla client detected");
         }
         
         PlayerData data = plugin.getPlayerDataMap().get(target.getUniqueId());
         boolean hasChannels = data != null && !data.getChannels().isEmpty();
-        boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
+        boolean claimsVanilla = brand != null && brand.equalsIgnoreCase("vanilla");
         
         // Display channels first regardless of spoof status
         if (hasChannels) {
             sender.sendMessage(ChatColor.GRAY + "Channels:");
             data.getChannels().forEach(channel -> sender.sendMessage(ChatColor.WHITE + channel));
-        }
-        
-        // Check for detected mods via translation keys
-        Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
-        if (!detectedMods.isEmpty()) {
-            sender.sendMessage(ChatColor.AQUA + "Detected Mods (via translation keys):");
-            for (String mod : detectedMods) {
-                sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
-            }
         }
         
         // Determine all reasons for flagging
@@ -427,9 +279,9 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 flagReasons.add("Spoofing Geyser client");
             }
             
-            // Check for non-vanilla with channels
-            if (!claimsVanilla && hasChannels && plugin.getConfigManager().shouldBlockNonVanillaWithChannels()) {
-                flagReasons.add("Non-vanilla client with channels");
+            // Check for strict non-vanilla
+            if (plugin.getConfigManager().shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                flagReasons.add("Non-vanilla client detected");
             }
             
             // Check for blocked brand
@@ -449,16 +301,18 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             if (hasChannels && plugin.getConfigManager().isBlockedChannelsEnabled()) {
                 String whitelistMode = plugin.getConfigManager().getChannelWhitelistMode();
                 
+                Set<String> filtered = plugin.getDetectionManager().getFilteredChannels(data.getChannels());
+
                 if (!whitelistMode.equals("FALSE")) {
                     // Whitelist mode
-                    boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(data.getChannels());
+                    boolean passesWhitelist = plugin.getDetectionManager().checkChannelWhitelist(filtered);
                     if (!passesWhitelist) {
                         if (whitelistMode.equals("STRICT")) {
                             // Get missing channels for strict mode
                             List<String> missingChannels = new ArrayList<>();
                             for (String whitelistedChannel : plugin.getConfigManager().getBlockedChannels()) {
                                 boolean found = false;
-                                for (String playerChannel : data.getChannels()) {
+                                for (String playerChannel : filtered) {
                                     try {
                                         if (playerChannel.matches(whitelistedChannel)) {
                                             found = true;
@@ -489,18 +343,17 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                     }
                 } else {
                     // Blacklist mode - check for blocked channels
-                    String blockedChannel = plugin.getDetectionManager().findBlockedChannel(data.getChannels());
+                    String blockedChannel = plugin.getDetectionManager().findBlockedChannel(filtered);
                     if (blockedChannel != null) {
                         flagReasons.add("Using blocked channel: " + blockedChannel);
                     }
                 }
             }
             
-            // Check for missing required channels for their brand
+            // Check for missing required brand channels
             String matchedBrand = plugin.getConfigManager().getMatchingClientBrand(brand);
             if (matchedBrand != null && hasChannels) {
                 ConfigManager.ClientBrandConfig brandConfig = plugin.getConfigManager().getClientBrandConfig(matchedBrand);
-                
                 if (!brandConfig.getRequiredChannels().isEmpty()) {
                     // Look for missing required channels
                     List<String> missingRequiredChannels = new ArrayList<>();
@@ -692,9 +545,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "/antispoof runcheck [player|*] " + ChatColor.WHITE + "- Re-run checks on player(s)");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedchannels " + ChatColor.WHITE + "- Show blocked channel config");
         sender.sendMessage(ChatColor.GRAY + "/antispoof blockedbrands " + ChatColor.WHITE + "- Show blocked brand config");
-        sender.sendMessage(ChatColor.GRAY + "/antispoof detectmods <player> " + ChatColor.WHITE + "- Scan player for mods using translation keys");
-        sender.sendMessage(ChatColor.GRAY + "/antispoof translatekey <player> <key> " + ChatColor.WHITE + "- Test a specific translation key on a player");
-        sender.sendMessage(ChatColor.GRAY + "/antispoof clearcooldowns <player|*> " + ChatColor.WHITE + "- Clear detection cooldowns");
         sender.sendMessage(ChatColor.GRAY + "/antispoof reload " + ChatColor.WHITE + "- Reload the plugin configuration");
         sender.sendMessage(ChatColor.GRAY + "/antispoof help " + ChatColor.WHITE + "- Show this help message");
     }
@@ -761,15 +611,6 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.AQUA + "Client brand for " + target.getName() + ": " + 
                     ChatColor.WHITE + brand);
             }
-            
-            // Show detected mods via translation keys
-            Set<String> detectedMods = plugin.getTranslationKeyDetector().getDetectedMods(target.getUniqueId());
-            if (!detectedMods.isEmpty()) {
-                sender.sendMessage(ChatColor.AQUA + "Detected Mods (via translation keys):");
-                for (String mod : detectedMods) {
-                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
-                }
-            }
         }
     }
     
@@ -788,56 +629,83 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             String partialArg = args[1].toLowerCase();
             
             if (args[0].equalsIgnoreCase("check") || 
-                args[0].equalsIgnoreCase("runcheck") ||
-                args[0].equalsIgnoreCase("clearcooldowns")) {
+                args[0].equalsIgnoreCase("runcheck")) {
                 completions.add("*");
             }
             
             if (args[0].equalsIgnoreCase("channels") || 
                 args[0].equalsIgnoreCase("brand") ||
                 args[0].equalsIgnoreCase("check") ||
-                args[0].equalsIgnoreCase("detectmods") ||
-                args[0].equalsIgnoreCase("runcheck") ||
-                args[0].equalsIgnoreCase("clearcooldowns") ||
-                args[0].equalsIgnoreCase("translatekey")) {
+                args[0].equalsIgnoreCase("runcheck")) {
                 completions.addAll(Bukkit.getOnlinePlayers().stream()
                         .map(Player::getName)
                         .filter(name -> name.toLowerCase().startsWith(partialArg))
                         .collect(Collectors.toList()));
             }
-        } else if (args.length == 3) {
-            if (args[0].equalsIgnoreCase("translatekey")) {
-                String partialArg = args[2].toLowerCase();
-                // Add some common translation keys for convenience
-                List<String> commonKeys = Arrays.asList(
-                    "sodium.option_impact.low",
-                    "key.wurst.zoom",
-                    "key.freecam.toggle",
-                    "xray.config.toggle",
-                    "key.meteor-client.open-gui",
-                    "litematica.gui.button.change_menu.to_main_menu",
-                    "gui.xaero_open_map",
-                    "tweakeroo.gui.button.config_gui.tweaks"
-                );
-                
-                for (String key : commonKeys) {
-                    if (key.toLowerCase().contains(partialArg)) {
-                        completions.add(key);
-                    }
-                }
-                
-                // Also suggest any translation keys from the config if available
-                Set<String> configKeys = plugin.getTranslationKeyDetector().getAllTranslationKeys();
-                if (configKeys != null) {
-                    for (String key : configKeys) {
-                        if (key.toLowerCase().contains(partialArg)) {
-                            completions.add(key);
-                        }
-                    }
-                }
-            }
         }
         
         return completions;
+    }
+
+
+    /**
+     * /antispoof keybind <player> <translation_key>
+     */
+    private void handleKeybind(CommandSender sender, String[] args) {
+        if (!(sender.hasPermission("antispoof.admin"))) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this sub‑command.");
+            return;
+        }
+
+        if (args.length < 3) {
+            sender.sendMessage(ChatColor.RED + "Usage: /antispoof keybind <player> <key>");
+            return;
+        }
+
+        String playerName = args[1];
+        Player target = Bukkit.getPlayerExact(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found: " + playerName);
+            return;
+        }
+
+        String translationKey = args[2];
+
+        // delegate to KeybindDebugManager
+        new com.gigazelensky.antispoof.keybind.KeybindDebugManager().request((sender instanceof Player ? (Player) sender : target), target, translationKey);
+    }
+
+
+    /**
+     * /antispoof keybind <player> <translation_key>
+     */
+    private void handleKeybind(CommandSender sender, String[] args) {
+        if (!(sender.hasPermission("antispoof.admin"))) {
+            sender.sendMessage(ChatColor.RED + "You don't have permission to use this sub‑command.");
+            return;
+        }
+
+        if (args.length < 3) {
+            sender.sendMessage(ChatColor.RED + "Usage: /antispoof keybind <player> <key>");
+            return;
+        }
+
+        String playerName = args[1];
+        Player target = Bukkit.getPlayerExact(playerName);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found: " + playerName);
+            return;
+        }
+
+        String translationKey = args[2];
+
+        // delegate to KeybindDebugManager
+        if (plugin.getKeybindManager() == null) {
+            sender.sendMessage(ChatColor.RED + "Keybind manager not initialised.");
+            return;
+        }
+
+        Player executor = (sender instanceof Player p) ? p : target;
+        plugin.getKeybindManager().request(executor, target, translationKey);
     }
 }

@@ -172,16 +172,6 @@ public class PlayerEventListener extends PacketListenerAbstract implements Liste
         // Then, do a complete check with required channels, but with a longer delay
         // This gives the client more time to register all its channels
         scheduleRequiredChannelsCheck(player, REQUIRED_CHANNEL_CHECK_DELAY);
-        
-        // Trigger a translation key check if enabled
-        if (config.isTranslationDetectionEnabled() && config.isTranslationCheckOnJoinEnabled()) {
-            // Wait a bit for the player to fully join before checking
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (player.isOnline() && !player.hasPermission("antispoof.bypass")) {
-                    plugin.getTranslationKeyDetector().scanPlayer(player);
-                }
-            }, 40L); // 2 seconds delay
-        }
     }
     
     @EventHandler(priority = EventPriority.MONITOR)

@@ -3,8 +3,8 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
+import com.gigazelensky.antispoof.utils.MessageUtil;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,12 +67,12 @@ public class AlertManager {
      * @param message The message to send
      */
     public void sendAlertToRecipients(String message) {
-        String coloredMessage = ChatColor.translateAlternateColorCodes('&', message);
-        
+        String formatted = MessageUtil.miniMessage(message);
+
         for (UUID uuid : playersWithAlertPermission) {
             Player player = plugin.getServer().getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                player.sendMessage(coloredMessage);
+                player.sendMessage(formatted);
             }
         }
     }
@@ -396,66 +396,6 @@ public class AlertManager {
     }
     
     /**
-     * Sends a translation key detection alert
-     * @param player The player who triggered the alert
-     * @param detectedMods The list of detected mods
-     */
-    public void sendTranslationDetectionAlert(Player player, Set<String> detectedMods) {
-        if (!canSendAlert(player.getUniqueId(), "TRANSLATION_DETECTION")) {
-            return;
-        }
-        
-        String modsString = String.join(", ", detectedMods);
-        
-        // Format the player alert message
-        String alertMessage = config.getTranslationDetectionAlertMessage()
-                .replace("%player%", player.getName())
-                .replace("%mods%", modsString);
-        
-        // Format the console alert message
-        String consoleAlertMessage = config.getTranslationDetectionConsoleAlertMessage()
-                .replace("%player%", player.getName())
-                .replace("%mods%", modsString);
-        
-        // Log to console
-        plugin.getLogger().info(consoleAlertMessage);
-        
-        // Notify players with permission
-        sendAlertToRecipients(alertMessage);
-        
-        // Send to Discord if enabled
-        if (config.isDiscordWebhookEnabled() && 
-            config.isTranslationDetectionDiscordAlertEnabled()) {
-            
-            List<String> violations = new ArrayList<>(detectedMods);
-            plugin.getDiscordWebhookHandler().sendAlert(
-                player, 
-                "Translation Key Detection", 
-                plugin.getClientBrand(player), 
-                null, 
-                violations
-            );
-        }
-        
-        // Execute punishment if needed
-        if (config.shouldPunishTranslationDetection()) {
-            String reason = "Detected mods via translation keys: " + modsString;
-            
-            for (String command : config.getTranslationDetectionPunishments()) {
-                String formatted = command.replace("%player%", player.getName())
-                                         .replace("%reason%", reason)
-                                         .replace("%mods%", modsString);
-                
-                // Execute command on the main thread
-                final String finalCommand = formatted;
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), finalCommand);
-                });
-            }
-        }
-    }
-    
-    /**
      * Executes brand-specific punishment for a player
      * @param player The player to punish
      * @param reason The reason for punishment
@@ -567,10 +507,6 @@ public class AlertManager {
                 if (punishments.isEmpty()) {
                     punishments = config.getPunishments();
                 }
-                break;
-                
-            case "TRANSLATION_KEY":
-                punishments = config.getTranslationDetectionPunishments();
                 break;
                 
             default:

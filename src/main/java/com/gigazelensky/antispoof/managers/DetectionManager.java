@@ -3,7 +3,6 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.data.PlayerData;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.*;
@@ -13,6 +12,11 @@ import java.util.regex.Pattern;
 public class DetectionManager {
     private final AntiSpoofPlugin plugin;
     private final ConfigManager config;
+
+    // Channels that should be ignored during detection (still stored for display)
+    // MC|Brand is case sensitive on legacy versions
+    private static final String MODERN_BRAND_CHANNEL = "minecraft:brand";
+    private static final String LEGACY_BRAND_CHANNEL = "MC|Brand";
     
     // Track which players have been checked recently to prevent duplicate checks
     private final Set<UUID> recentlyCheckedPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -28,6 +32,31 @@ public class DetectionManager {
     
     // Grace period for channel registrations (milliseconds)
     private static final long CHANNEL_GRACE_PERIOD = 5000;
+
+    /**
+     * Returns a copy of the given channels excluding ones that should be ignored
+     * for detection purposes.
+     */
+    private Set<String> filterIgnoredChannels(Set<String> channels) {
+        if (channels == null || channels.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        Set<String> result = new HashSet<>();
+        for (String ch : channels) {
+            if (!ch.equalsIgnoreCase(MODERN_BRAND_CHANNEL) && !ch.equals(LEGACY_BRAND_CHANNEL)) {
+                result.add(ch);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Exposes filtered channels for other classes.
+     */
+    public Set<String> getFilteredChannels(Set<String> channels) {
+        return filterIgnoredChannels(channels);
+    }
     
     public DetectionManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;
@@ -189,39 +218,36 @@ public class DetectionManager {
         String brand = plugin.getClientBrand(player);
         
         // Check for missing brand first
-        if (brand == null && config.isNoBrandCheckEnabled()) {
+        if (brand == null) {
             if (config.isDebugMode()) {
                 plugin.getLogger().info("[Debug] No brand detected for " + player.getName());
             }
-            
+
             // Initialize violations map for this player if not exists
             playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
             Map<String, Boolean> violations = playerViolations.get(uuid);
-            
+
             // Skip if already alerted for this player
-            if (!violations.getOrDefault("NO_BRAND", false)) {
+            if (!violations.getOrDefault("NO_BRAND", false) && config.isNoBrandCheckEnabled()) {
                 violations.put("NO_BRAND", true);
-                
-                // Process it as a violation
+
                 Map<String, String> detectedViolations = new HashMap<>();
                 detectedViolations.put("NO_BRAND", "No client brand detected");
-                
-                // Process detected violations on the main thread
+
                 final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
-                
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    processViolations(player, finalViolations, "unknown");
+                });
+            } else if (config.shouldBlockNonVanillaWithChannels()) {
+                Map<String, String> detectedViolations = new HashMap<>();
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     processViolations(player, finalViolations, "unknown");
                 });
             }
-            
+
             return; // Skip other checks if no brand
-        }
-        
-        if (brand == null) {
-            if (config.isDebugMode()) {
-                plugin.getLogger().info("[Debug] No brand available for " + player.getName());
-            }
-            return;
         }
         
         // Check if player is a Bedrock player
@@ -260,7 +286,9 @@ public class DetectionManager {
             detectedViolations.put("GEYSER_SPOOF", "Spoofing Geyser client");
         }
         
-        boolean hasChannels = data.getChannels() != null && !data.getChannels().isEmpty();
+        // Exclude ignored channels like minecraft:brand when evaluating
+        Set<String> filteredChannels = filterIgnoredChannels(data.getChannels());
+        boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Check if client brands system is enabled
@@ -297,9 +325,9 @@ public class DetectionManager {
                     // Log channels in debug mode to help diagnose issues
                     if (config.isDebugMode()) {
                         plugin.getLogger().info("[Debug] Checking required channels for " + player.getName());
-                        plugin.getLogger().info("[Debug] Required patterns for " + matchedBrandKey + ": " + 
+                        plugin.getLogger().info("[Debug] Required patterns for " + matchedBrandKey + ": " +
                                               String.join(", ", brandConfig.getRequiredChannelStrings()));
-                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", data.getChannels()));
+                        plugin.getLogger().info("[Debug] Player channels: " + String.join(", ", filteredChannels));
                     }
                     
                     // For each required channel pattern, check if any player channel matches it
@@ -309,7 +337,7 @@ public class DetectionManager {
                         boolean patternMatched = false;
                         
                         // Check each player channel against this pattern
-                        for (String channel : data.getChannels()) {
+                        for (String channel : filteredChannels) {
                             try {
                                 if (pattern.matcher(channel).matches()) {
                                     patternMatched = true;
@@ -397,6 +425,11 @@ public class DetectionManager {
                         });
                     }
                 }
+
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
+                }
             } else {
                 // No matching brand found - use default brand config
                 if (config.isDebugMode()) {
@@ -414,9 +447,9 @@ public class DetectionManager {
                     detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
                 }
                 
-                // Non-vanilla check if enabled
-                else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+                // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+                else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                    detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
                 }
             }
         } else {
@@ -427,9 +460,9 @@ public class DetectionManager {
                 detectedViolations.put("VANILLA_WITH_CHANNELS", "Vanilla client with plugin channels");
             }
             
-            // Non-vanilla with channels check
-            else if (config.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
-                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Non-vanilla client with channels");
+            // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+            else if (config.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
+                detectedViolations.put("NON_VANILLA_WITH_CHANNELS", "Client modifications detected");
             }
         }
         
@@ -437,12 +470,12 @@ public class DetectionManager {
         if (config.isBlockedChannelsEnabled() && hasChannels) {
             if (config.isChannelWhitelistEnabled()) {
                 // Whitelist mode
-                boolean passesWhitelist = checkChannelWhitelist(data.getChannels());
+                boolean passesWhitelist = checkChannelWhitelist(filteredChannels);
                 if (!passesWhitelist) {
                     // Use the proper violation type for whitelist
                     if (config.isChannelWhitelistStrict()) {
                         // Get missing channels for detailed message
-                        List<String> missingChannels = findMissingRequiredChannels(data.getChannels());
+                        List<String> missingChannels = findMissingRequiredChannels(filteredChannels);
                         if (!missingChannels.isEmpty()) {
                             detectedViolations.put("CHANNEL_WHITELIST", 
                                 "Missing required channels: " + String.join(", ", missingChannels));
@@ -456,7 +489,7 @@ public class DetectionManager {
                 }
             } else {
                 // Blacklist mode
-                String blockedChannel = findBlockedChannel(data.getChannels());
+                String blockedChannel = findBlockedChannel(filteredChannels);
                 if (blockedChannel != null) {
                     detectedViolations.put("BLOCKED_CHANNEL", "Using blocked channel: " + blockedChannel);
                 }
@@ -484,15 +517,6 @@ public class DetectionManager {
     }
     
     /**
-     * Alias for checking player with checkRequiredChannels parameter
-     * @param player The player to check
-     * @param isJoinCheck Whether this is an initial join check
-     */
-    private void checkPlayer(Player player, boolean isJoinCheck) {
-        checkPlayer(player, isJoinCheck, true);
-    }
-    
-    /**
      * Sends a client brand alert for a non-violating player
      * @param player The player
      * @param brand The client brand
@@ -514,8 +538,11 @@ public class DetectionManager {
         
         UUID uuid = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
-        
+
         if (data == null || data.isAlreadyPunished() || detectedViolations.isEmpty()) return;
+
+        // Channels without ignored ones for violation processing
+        Set<String> filteredChannels = filterIgnoredChannels(data.getChannels());
         
         // Get player's violation tracking map
         Map<String, Boolean> violations = playerViolations.get(uuid);
@@ -540,7 +567,7 @@ public class DetectionManager {
         // Get violated channel for blacklist mode
         String violatedChannel = null;
         if (newViolations.containsKey("BLOCKED_CHANNEL")) {
-            violatedChannel = findBlockedChannel(data.getChannels());
+            violatedChannel = findBlockedChannel(filteredChannels);
         }
         
         // Special handling for client brand violations
@@ -606,22 +633,24 @@ public class DetectionManager {
         
         // If we still have violations to process, handle punishment
         if (!newViolations.isEmpty() && !data.isAlreadyPunished()) {
-            // Execute punishment if needed - use the first violation for punishment
-            String primaryViolationType = newViolations.keySet().iterator().next();
-            String primaryReason = newViolations.get(primaryViolationType);
-            
-            boolean shouldPunish = shouldPunishViolation(primaryViolationType, brand);
-            
-            if (shouldPunish) {
-                plugin.getAlertManager().executePunishment(
-                    player, primaryReason, brand, primaryViolationType, violatedChannel);
-                data.setAlreadyPunished(true);
+            // Find the first violation that should trigger a punishment
+            for (Map.Entry<String, String> entry : newViolations.entrySet()) {
+                String violationType = entry.getKey();
+                String reason = entry.getValue();
+
+                if (shouldPunishViolation(violationType, brand)) {
+                    String channelParam = violationType.equals("BLOCKED_CHANNEL") ? violatedChannel : null;
+                    plugin.getAlertManager().executePunishment(
+                        player, reason, brand, violationType, channelParam);
+                    data.setAlreadyPunished(true);
+                    break;
+                }
             }
         }
     }
     
     /**
-     * Process a translation key violation detection
+     * Process a single violation for a player
      * @param player The player
      * @param violationType The type of violation
      * @param reason The reason for the violation
@@ -632,80 +661,36 @@ public class DetectionManager {
         UUID uuid = player.getUniqueId();
         PlayerData data = plugin.getPlayerDataMap().get(uuid);
         
-        if (data == null) {
-            data = new PlayerData();
-            plugin.getPlayerDataMap().put(uuid, data);
+        if (data == null || data.isAlreadyPunished()) return;
+        
+        // Get player's violation tracking map
+        Map<String, Boolean> violations = playerViolations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+        
+        // Skip if already alerted for this violation
+        if (violations.getOrDefault(violationType, false)) {
+            return;
         }
         
-        if (data.isAlreadyPunished()) return;
+        // Mark as alerted
+        violations.put(violationType, true);
         
-        // Handle translation key detection
-        if (violationType.equals("TRANSLATION_KEY")) {
-            // Extract detected mods from reason
-            Set<String> detectedMods = extractModsFromReason(reason);
-            
-            // Send alert
-            plugin.getAlertManager().sendTranslationDetectionAlert(player, detectedMods);
-            
-            // Mark as punished if needed
-            if (plugin.getConfigManager().shouldPunishTranslationDetection()) {
-                data.setAlreadyPunished(true);
-            }
-        }
-        // Handle other violation types...
-        else {
-            // Initialize violations map for this player if not exists
-            playerViolations.putIfAbsent(uuid, new ConcurrentHashMap<>());
-            Map<String, Boolean> violations = playerViolations.get(uuid);
-            
-            // Skip if already alerted for this violation
-            if (violations.getOrDefault(violationType, false)) {
-                return;
-            }
-            
-            // Mark as alerted
-            violations.put(violationType, true);
-            
-            // Send alert
-            plugin.getAlertManager().sendViolationAlert(
-                player, reason, "unknown", null, violationType);
-            
-            // Execute punishment if needed - using "unknown" as brand since we don't know it
-            boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
-            
-            if (shouldPunish) {
-                plugin.getAlertManager().executePunishment(
-                    player, reason, "unknown", violationType, null);
-                data.setAlreadyPunished(true);
-            }
-            
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
-                                      ": " + violationType + " - " + reason);
-            }
-        }
-    }
-    
-    /**
-     * Extracts mod names from a reason string
-     * @param reason The reason string (format: "Using mods: mod1, mod2, mod3")
-     * @return Set of mod names
-     */
-    private Set<String> extractModsFromReason(String reason) {
-        Set<String> result = new HashSet<>();
+        // Send alert
+        plugin.getAlertManager().sendViolationAlert(
+            player, reason, "unknown", null, violationType);
         
-        if (reason.contains("Using mods: ")) {
-            String modsText = reason.substring("Using mods: ".length());
-            String[] mods = modsText.split(", ");
-            
-            for (String mod : mods) {
-                if (!mod.trim().isEmpty()) {
-                    result.add(mod.trim());
-                }
-            }
+        // Execute punishment if needed - using "unknown" as brand since we don't know it
+        boolean shouldPunish = shouldPunishViolation(violationType, "unknown");
+        
+        if (shouldPunish) {
+            plugin.getAlertManager().executePunishment(
+                player, reason, "unknown", violationType, null);
+            data.setAlreadyPunished(true);
         }
         
-        return result;
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("[Debug] Processed violation for " + player.getName() + 
+                                  ": " + violationType + " - " + reason);
+        }
     }
     
     /**
@@ -714,12 +699,13 @@ public class DetectionManager {
      * @return List of missing required channels
      */
     private List<String> findMissingRequiredChannels(Set<String> playerChannels) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
         List<String> missingChannels = new ArrayList<>();
         List<String> requiredChannels = config.getBlockedChannels();
         
         for (String requiredChannel : requiredChannels) {
             boolean found = false;
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 try {
                     if (playerChannel.matches(requiredChannel)) {
                         found = true;
@@ -777,8 +763,6 @@ public class DetectionManager {
                 return config.shouldPunishGeyserSpoof();
             case "NO_BRAND":
                 return config.shouldPunishNoBrand();
-            case "TRANSLATION_KEY":
-                return config.shouldPunishTranslationDetection();
             default:
                 return false;
         }
@@ -806,7 +790,8 @@ public class DetectionManager {
      * @return True if the channels pass the whitelist check, false otherwise
      */
     public boolean checkChannelWhitelist(Set<String> playerChannels) {
-        if (playerChannels == null || playerChannels.isEmpty()) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
+        if (filtered.isEmpty()) {
             // Empty channels always pass whitelist check
             return true;
         }
@@ -816,22 +801,22 @@ public class DetectionManager {
         
         // If no channels are whitelisted, then fail if player has any channels
         if (whitelistedChannels.isEmpty()) {
-            return playerChannels.isEmpty();
+            return filtered.isEmpty();
         }
         
         // SIMPLE mode: Player must have at least one of the whitelisted channels
         if (!strictMode) {
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 if (config.matchesChannelPattern(playerChannel)) {
                     return true; // Pass if player has at least one whitelisted channel
                 }
             }
             return false; // Fail if player has no whitelisted channels
-        } 
+        }
         // STRICT mode: Player must have ALL whitelisted channels AND only whitelisted channels
         else {
             // 1. Check if every player channel is whitelisted
-            for (String playerChannel : playerChannels) {
+            for (String playerChannel : filtered) {
                 if (!config.matchesChannelPattern(playerChannel)) {
                     return false; // Fail if any player channel is not whitelisted
                 }
@@ -841,7 +826,7 @@ public class DetectionManager {
             for (String whitelistedChannel : whitelistedChannels) {
                 boolean playerHasChannel = false;
                 
-                for (String playerChannel : playerChannels) {
+                for (String playerChannel : filtered) {
                     try {
                         if (playerChannel.matches(whitelistedChannel)) {
                             playerHasChannel = true;
@@ -872,7 +857,8 @@ public class DetectionManager {
      * @return The blocked channel, or null if none are blocked
      */
     public String findBlockedChannel(Set<String> playerChannels) {
-        if (playerChannels == null || playerChannels.isEmpty()) {
+        Set<String> filtered = filterIgnoredChannels(playerChannels);
+        if (filtered.isEmpty()) {
             return null;
         }
         
@@ -881,7 +867,7 @@ public class DetectionManager {
             return null;
         }
         
-        for (String playerChannel : playerChannels) {
+        for (String playerChannel : filtered) {
             if (config.matchesChannelPattern(playerChannel)) {
                 return playerChannel;
             }

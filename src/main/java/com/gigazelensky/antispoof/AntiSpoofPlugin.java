@@ -2,7 +2,6 @@ package com.gigazelensky.antispoof;
 
 import com.gigazelensky.antispoof.commands.AntiSpoofCommand;
 import com.gigazelensky.antispoof.data.PlayerData;
-import com.gigazelensky.antispoof.detection.TranslationKeyDetector;
 import com.gigazelensky.antispoof.hooks.AntiSpoofPlaceholders;
 import com.gigazelensky.antispoof.listeners.PermissionChangeListener;
 import com.gigazelensky.antispoof.listeners.PlayerEventListener;
@@ -31,10 +30,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
     private ConfigManager configManager;
     private DiscordWebhookHandler discordWebhookHandler;
     private AlertManager alertManager;
+    private com.gigazelensky.antispoof.keybind.KeybindDebugManager keybindManager;
     private DetectionManager detectionManager;
     private PlayerEventListener playerEventListener;
-    private VersionChecker versionChecker;
-    private TranslationKeyDetector translationKeyDetector;
     
     private final ConcurrentHashMap<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> playerBrands = new ConcurrentHashMap<>();
@@ -53,7 +51,7 @@ public class AntiSpoofPlugin extends JavaPlugin {
         this.discordWebhookHandler = new DiscordWebhookHandler(this);
         
         // Initialize version checker
-        this.versionChecker = new VersionChecker(this);
+        new VersionChecker(this);
         
         // Initialize PacketEvents
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
@@ -94,15 +92,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
         getCommand("antispoof").setExecutor(commandExecutor);
         getCommand("antispoof").setTabCompleter(commandExecutor);
         
-        // Initialize translation key detector
-        if (configManager.isTranslationDetectionEnabled()) {
-            this.translationKeyDetector = new TranslationKeyDetector(this);
-            getLogger().info("Translation key detection enabled.");
-        } else {
-            getLogger().info("Translation key detection is disabled in config.");
-        }
-        
         PacketEvents.getAPI().init();
+        // Initialize KeybindDebugManager
+        this.keybindManager = new com.gigazelensky.antispoof.keybind.KeybindDebugManager();
         
         // Log Discord webhook status
         if (configManager.isDiscordWebhookEnabled()) {
@@ -175,10 +167,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
     
     public DetectionManager getDetectionManager() {
         return detectionManager;
-    }
-    
-    public TranslationKeyDetector getTranslationKeyDetector() {
-        return translationKeyDetector;
     }
     
     public ConcurrentHashMap<UUID, PlayerData> getPlayerDataMap() {
@@ -324,13 +312,17 @@ public class AntiSpoofPlugin extends JavaPlugin {
         
         String brand = getClientBrand(player);
         
-        // Check for missing brand first
-        if (brand == null && configManager.isNoBrandCheckEnabled()) {
-            return true;
+        // Handle missing brand first
+        if (brand == null) {
+            if (configManager.isNoBrandCheckEnabled()) {
+                return true;
+            }
+            // Treat missing brand as non-vanilla if strict mode is enabled
+            if (configManager.shouldBlockNonVanillaWithChannels()) {
+                return true;
+            }
+            return false;
         }
-        
-        // Skip other checks if brand is null
-        if (brand == null) return false;
         
         // Check if player is a Bedrock player
         boolean isBedrockPlayer = isBedrockPlayer(player);
@@ -344,7 +336,9 @@ public class AntiSpoofPlugin extends JavaPlugin {
         PlayerData data = playerDataMap.get(uuid);
         if (data == null) return false;
         
-        boolean hasChannels = !data.getChannels().isEmpty();
+        // Exclude ignored channels (like minecraft:brand or MC|Brand) from detection logic
+        Set<String> filteredChannels = detectionManager.getFilteredChannels(data.getChannels());
+        boolean hasChannels = !filteredChannels.isEmpty();
         boolean claimsVanilla = brand.equalsIgnoreCase("vanilla");
         
         // Check for Geyser spoofing first
@@ -368,8 +362,8 @@ public class AntiSpoofPlugin extends JavaPlugin {
             }
         }
         
-        // Non-vanilla with channels check
-        if (configManager.shouldBlockNonVanillaWithChannels() && !claimsVanilla && hasChannels) {
+        // Non-vanilla strict check - flag if player either has channels or isn't vanilla
+        if (configManager.shouldBlockNonVanillaWithChannels() && (!claimsVanilla || hasChannels)) {
             return true;
         }
         
@@ -377,19 +371,19 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (configManager.isBlockedChannelsEnabled() && hasChannels) {
             if (configManager.isChannelWhitelistEnabled()) {
                 // Whitelist mode
-                if (!detectionManager.checkChannelWhitelist(data.getChannels())) {
+                if (!detectionManager.checkChannelWhitelist(filteredChannels)) {
                     return true;
                 }
             } else {
                 // Blacklist mode
-                String blockedChannel = detectionManager.findBlockedChannel(data.getChannels());
+                String blockedChannel = detectionManager.findBlockedChannel(filteredChannels);
                 if (blockedChannel != null) {
                     return true;
                 }
             }
         }
         
-        // Check for missing required channels for their brand
+        // NEW: Check for missing required channels for their brand
         String matchedBrand = configManager.getMatchingClientBrand(brand);
         if (matchedBrand != null && hasChannels) {
             ConfigManager.ClientBrandConfig brandConfig = configManager.getClientBrandConfig(matchedBrand);
@@ -401,11 +395,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 // For each required channel pattern, check if any player channel matches it
                 for (int i = 0; i < brandConfig.getRequiredChannels().size(); i++) {
                     Pattern pattern = brandConfig.getRequiredChannels().get(i);
-                    String patternStr = brandConfig.getRequiredChannelStrings().get(i);
                     boolean patternMatched = false;
                     
                     // Check each player channel against this pattern
-                    for (String channel : data.getChannels()) {
+                    for (String channel : filteredChannels) {
                         try {
                             if (pattern.matcher(channel).matches()) {
                                 patternMatched = true;
@@ -437,14 +430,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
                 if (missingRequiredChannels) {
                     return true;
                 }
-            }
-        }
-        
-        // Check for detected mods via translation key detection
-        if (translationKeyDetector != null) {
-            Set<String> detectedMods = translationKeyDetector.getDetectedMods(player.getUniqueId());
-            if (!detectedMods.isEmpty()) {
-                return true;
             }
         }
         
@@ -492,11 +477,6 @@ public class AntiSpoofPlugin extends JavaPlugin {
         playerDataMap.remove(uuid);
         brandAlertedPlayers.remove(uuid);
         
-        // Clean up translation key detector data if available
-        if (translationKeyDetector != null) {
-            translationKeyDetector.handlePlayerQuit(uuid);
-        }
-        
         if (configManager.isDebugMode()) {
             getLogger().info("Cleaned up all data for player with UUID: " + uuid);
         }
@@ -507,15 +487,15 @@ public class AntiSpoofPlugin extends JavaPlugin {
         if (PacketEvents.getAPI() != null) {
             PacketEvents.getAPI().terminate();
         }
-        
-        // Shutdown translation key detector
-        if (translationKeyDetector != null) {
-            translationKeyDetector.shutdown();
-        }
-        
         playerBrands.clear();
         playerDataMap.clear();
         brandAlertedPlayers.clear();
         getLogger().info("AntiSpoof disabled!");
     }
+
+
+    public com.gigazelensky.antispoof.keybind.KeybindDebugManager getKeybindManager() {
+        return keybindManager;
+    }
+
 }
