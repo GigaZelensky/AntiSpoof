@@ -35,6 +35,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         BukkitTask timeoutTask = null;
         long debugStart = 0L;
         org.bukkit.command.CommandSender debugSender = null;
+        int retriesLeft = 0;
 
         Probe(Map<String, String> src) {
             this.iterator = src.entrySet().iterator();
@@ -70,7 +71,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-        Bukkit.getScheduler().runTaskLater(plugin, () -> startProbe(e.getPlayer()), cfg.getTranslatableFirstDelay());
+        Bukkit.getScheduler().runTaskLater(plugin, () -> startProbe(e.getPlayer(), cfg.getTranslatableRetryCount(), false), cfg.getTranslatableFirstDelay());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -82,17 +83,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         cooldown.remove(e.getPlayer().getUniqueId());
     }
 
-    private void startProbe(Player p) {
+    private void startProbe(Player p, int retries, boolean ignoreCooldown) {
         if (p == null || !p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
         long now = System.currentTimeMillis();
         long cooldownTime = (long) cfg.getTranslatableCooldown() * 1000L;
-        if (now - cooldown.getOrDefault(p.getUniqueId(), 0L) < cooldownTime) {
+        if (!ignoreCooldown && now - cooldown.getOrDefault(p.getUniqueId(), 0L) < cooldownTime) {
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Translatable key check for " + p.getName() + " is on cooldown.");
             }
             return;
         }
-        cooldown.put(p.getUniqueId(), now);
+        if (!ignoreCooldown) {
+            cooldown.put(p.getUniqueId(), now);
+        }
         Map<String, String> keys = cfg.getTranslatableModsWithLabels();
         if (keys.isEmpty()) {
             if (cfg.isDebugMode()) {
@@ -104,6 +107,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             plugin.getLogger().info("[Debug] Starting translatable key probe for " + p.getName() + " with " + keys.size() + " keys.");
         }
         Probe probe = new Probe(keys);
+        probe.retriesLeft = retries;
         probes.put(p.getUniqueId(), probe);
         sendNextKey(p, probe);
     }
@@ -145,7 +149,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 plugin.getLogger().warning("[Debug] Timed out waiting for response on key '" + probe.currentKey + "' from " + p.getName() + ". Moving to next key.");
             }
             probe.timeoutTask = null;
-            sendNextKey(p, probe);
+            scheduleNext(p, probe);
         }, RESPONSE_TIMEOUT_TICKS);
     }
 
@@ -160,6 +164,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, required);
             }
         }
+        if (probe.retriesLeft > 0) {
+            int remaining = probe.retriesLeft - 1;
+            Bukkit.getScheduler().runTaskLater(plugin, () -> startProbe(p, remaining, true), cfg.getTranslatableRetryInterval());
+        }
+    }
+
+    private void scheduleNext(Player p, Probe probe) {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> sendNextKey(p, probe), cfg.getTranslatableKeyDelay());
     }
 
     private void sendSignProbe(Player target, Probe probe) {
@@ -246,6 +258,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 plugin.getLogger().info("[Debug] Player " + p.getName() + " translated key '" + probe.currentKey + "' (" + label + ") to: '" + receivedLine + "'");
             }
         }
-        sendNextKey(p, probe);
+        scheduleNext(p, probe);
     }
 }

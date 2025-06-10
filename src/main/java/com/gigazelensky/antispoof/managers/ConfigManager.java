@@ -837,6 +837,20 @@ public class ConfigManager {
     public int getTranslatableCooldown() {
         return config.getInt("translatable-keys.check.cooldown", 600);
     }
+
+    // Added configurable delay between keys
+    public int getTranslatableKeyDelay() {
+        return config.getInt("translatable-keys.check.key-delay", 2);
+    }
+
+    // Added retry settings
+    public int getTranslatableRetryCount() {
+        return config.getInt("translatable-keys.check.retry-count", 0);
+    }
+
+    public int getTranslatableRetryInterval() {
+        return config.getInt("translatable-keys.check.retry-interval", 60);
+    }
     
     /**
      * Checks if update checking is enabled
