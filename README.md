@@ -267,6 +267,8 @@ AntiSpoof integrates with PlaceholderAPI to provide useful placeholders for othe
 | `%antispoof_brand%` | Shows the player's client brand | "vanilla", "fabric", "lunarclient:v1.8.9-10b0" |
 | `%antispoof_channels%` | Shows a comma-separated list of player's registered channels | "minecraft:brand, fabric:registry/sync, fabric:screen-handler-api" |
 | `%antispoof_channels_count%` | Shows the number of registered channels | "5" |
+| `%antispoof_mods%` | Shows a comma-separated list of detected mod labels | "Sodium, ModMenu" |
+| `%antispoof_mods_count%` | Shows the number of detected mod labels | "2" |
 | `%antispoof_is_spoofing%` | Returns whether the player is detected as spoofing | "true" or "false" |
 | `%antispoof_is_bedrock%` | Returns whether the player is detected as a Bedrock player | "true" or "false" |
 
@@ -281,7 +283,7 @@ Here are some examples of how you can use these placeholders:
 
 #### Welcome Message (with an essentials-like plugin)
 ```
-&aWelcome! &7You're using &e%antispoof_brand%&7 with &e%antispoof_channels_count%&7 plugin channels.
+&aWelcome! &7You're using &e%antispoof_brand%&7 with &e%antispoof_channels_count%&7 channels and &e%antispoof_mods_count%&7 mods detected.
 ```
 
 #### Custom Scoreboard
@@ -289,6 +291,7 @@ Here are some examples of how you can use these placeholders:
 &6═════ &bServer Info &6═════
 &7Client: &e%antispoof_brand%
 &7Channels: &e%antispoof_channels_count%
+&7Mods: &e%antispoof_mods_count%
 &7Bedrock: &e%antispoof_is_bedrock%
 &6════════════════════
 ```
@@ -546,7 +549,7 @@ vanillaspoof-check:
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
-  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  # Available placeholders: %player%, %reason%, %brand%, %channel%, %mods%, %mods_count%
   punishments:
     - "kick %player% &cVanilla spoof detected: %reason%"
     # - "ban %player% &cVanilla client spoofing detected"
@@ -567,7 +570,7 @@ non-vanilla-check:
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
-  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  # Available placeholders: %player%, %reason%, %brand%, %channel%, %mods%, %mods_count%
   punishments:
     - "kick %player% &cNon-vanilla client with channels detected"
     # - "tempban %player% 1h &cUsing a modified client"
@@ -631,7 +634,7 @@ blocked-channels:
   # Whether to punish the player if detection is positive
   punish: false
   # Punishment actions to execute
-  # Available placeholders: %player%, %reason%, %brand%, %channel%
+  # Available placeholders: %player%, %reason%, %brand%, %channel%, %mods%, %mods_count%
   punishments:
     - "kick %player% &cBlocked channel detected: %channel%"
     # - "tempban %player% 1d &cUsing blocked mod channels"
@@ -882,7 +885,7 @@ bedrock-handling:
     # Whether to punish the player if detection is positive
     punish: false
     # Punishment actions to execute
-    # Available placeholders: %player%, %reason%, %brand%
+    # Available placeholders: %player%, %reason%, %brand%, %mods%, %mods_count%
     punishments:
       - "kick %player% &cGeyser client spoofing detected"
       # - "ban %player% &cGeyser client spoofing"
@@ -938,7 +941,7 @@ update-checker:
 # Legacy global punishment system (for backward compatibility)
 # These punishments will be used if a specific check has 'punish: true'
 # but doesn't have its own punishments defined
-# Available placeholders: %player%, %reason%, %brand%, %channel%
+# Available placeholders: %player%, %reason%, %brand%, %channel%, %mods%, %mods_count%
 punishments:
   - "kick %player% &cSuspicious client detected!"
   # - "ban %player% &cClient spoofing detected"
@@ -949,7 +952,7 @@ punishments:
 # Legacy global alert system (for backward compatibility)
 # These messages will be used if a specific check is enabled
 # but doesn't have its own alerts defined
-# Available placeholders: %player%, %reason%, %brand%, %channel%
+# Available placeholders: %player%, %reason%, %brand%, %channel%, %mods%, %mods_count%
 # Defines the message sent to players with the `antispoof.alerts` permission
 # when a spoofing attempt is detected.
 messages:

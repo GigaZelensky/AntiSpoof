@@ -476,7 +476,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
         // Clean up all tracked data for this player
         getDetectionManager().handlePlayerQuit(uuid);
         if (translatableKeyManager != null) {
-            // cleanup placeholder
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                translatableKeyManager.stopMods(p);
+            }
         }
         getAlertManager().handlePlayerQuit(uuid);
         getDiscordWebhookHandler().handlePlayerQuit(uuid);
