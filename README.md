@@ -853,6 +853,8 @@ translatable-keys:
     only-on-move: false
     # When enabled, probes wait until the player moves and are sent only while
     # they keep moving. This helps hide the sign GUI during the check.
+    # Keys that share the same label are probed one at a time in a round-robin
+    # order so every mod gets checked quickly without spamming the player.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

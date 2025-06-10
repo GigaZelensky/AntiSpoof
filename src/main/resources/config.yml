@@ -351,7 +351,8 @@ translatable-keys:
     retry-interval: 60
     only-on-move: false
     # When true, delay the probes until the player moves and continue only
-    # while they keep moving.
+    # while they keep moving. Keys with the same label are sent in a round-
+    # robin order so every mod is tested before repeating labels.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

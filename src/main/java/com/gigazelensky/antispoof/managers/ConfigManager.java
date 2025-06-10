@@ -7,8 +7,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -776,20 +778,37 @@ public class ConfigManager {
     // The following two methods replace the old, buggy implementation.
     // ===================================================================================
 
-    // New public method to be called from TranslatableKeyManager
+    // New public method to be called from TranslatableKeyManager.
+    // It returns keys ordered so that only one key per label is sent per round
+    // to ensure all mods are tested quickly.
     public Map<String, String> getTranslatableModsWithLabels() {
-        Map<String, String> modsWithLabels = new LinkedHashMap<>();
+        LinkedHashMap<String, Queue<String>> perLabel = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection != null) {
-            for (String path : modsSection.getKeys(true)) {
-                ConfigurationSection sub = modsSection.getConfigurationSection(path);
+            for (String key : modsSection.getKeys(false)) {
+                ConfigurationSection sub = modsSection.getConfigurationSection(key);
                 if (sub != null) {
-                    String label = sub.getString("label", path);
-                    modsWithLabels.put(path, label);
+                    String label = sub.getString("label", key);
+                    perLabel.computeIfAbsent(label, k -> new LinkedList<>()).add(key);
                 }
             }
         }
-        return modsWithLabels;
+
+        // Round-robin one key per label at a time
+        LinkedHashMap<String, String> ordered = new LinkedHashMap<>();
+        boolean done;
+        do {
+            done = true;
+            for (Map.Entry<String, Queue<String>> e : perLabel.entrySet()) {
+                Queue<String> q = e.getValue();
+                if (!q.isEmpty()) {
+                    done = false;
+                    ordered.put(q.poll(), e.getKey());
+                }
+            }
+        } while (!done);
+
+        return ordered;
     }
 
     // ===================================================================================

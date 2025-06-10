@@ -212,6 +212,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // place the sign immediately or wait for movement depending on config
         if (cfg.isTranslatableOnlyOnMove()) {
             probe.waitingForMove = true;
+            if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Waiting for movement to send key '" +
+                        probe.key + "' to " + player.getName());
+            }
         } else {
             placeNextSign(player, probe);
         }
@@ -300,6 +304,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // schedule retry of ONLY failed keys
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
+            if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Scheduling retry for " + p.getName() +
+                        " in " + interval + " ticks with " + probe.failedForNext.size() + " keys");
+            }
             Bukkit.getScheduler().runTaskLater(plugin, () ->
                     beginProbe(p, probe.failedForNext, probe.retriesLeft-1, true, probe.debug),
                     interval);
