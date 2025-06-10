@@ -61,6 +61,30 @@ public class ConfigManager {
         public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
     }
 
+    // Translatable key detection
+    private boolean translatableKeysEnabled;
+    private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
+    private TranslatableModConfig defaultTranslatableConfig;
+
+    public static class TranslatableModConfig {
+        private String label;
+        private boolean alert;
+        private boolean discordAlert;
+        private boolean punish;
+        private String alertMessage;
+        private String consoleAlertMessage;
+        private List<String> punishments = new ArrayList<>();
+
+        public String getLabel() { return label; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldDiscordAlert() { return discordAlert; }
+        public boolean shouldPunish() { return punish; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+        public List<String> getPunishments() { return punishments; }
+    }
+
+
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
         reload();
@@ -666,29 +690,6 @@ public class ConfigManager {
         return config.getStringList("discord.violation-content");
     }
 
-    // Translatable key detection
-    private boolean translatableKeysEnabled;
-    private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
-    private TranslatableModConfig defaultTranslatableConfig;
-
-    public static class TranslatableModConfig {
-        private String label;
-        private boolean alert;
-        private boolean discordAlert;
-        private boolean punish;
-        private String alertMessage;
-        private String consoleAlertMessage;
-        private List<String> punishments = new ArrayList<>();
-
-        public String getLabel() { return label; }
-        public boolean shouldAlert() { return alert; }
-        public boolean shouldDiscordAlert() { return discordAlert; }
-        public boolean shouldPunish() { return punish; }
-        public String getAlertMessage() { return alertMessage; }
-        public String getConsoleAlertMessage() { return consoleAlertMessage; }
-        public List<String> getPunishments() { return punishments; }
-    }
-
     private void loadTranslatableKeyConfigs() {
         translatableMods.clear();
         ConfigurationSection main = config.getConfigurationSection("translatable-keys");
@@ -730,6 +731,7 @@ public class ConfigManager {
                 cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
                 cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
                 cfg.punishments = m.getStringList("punishments");
+                // Inherit default messages
                 cfg.alertMessage = defaultTranslatableConfig.alertMessage;
                 cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
                 translatableMods.put(key, cfg);
@@ -739,48 +741,29 @@ public class ConfigManager {
 
     public boolean isTranslatableKeysEnabled() { return translatableKeysEnabled; }
 
-    public LinkedHashMap<String, String> getTranslatableTestKeysPlain() {
-        LinkedHashMap<String, String> out = new LinkedHashMap<>();
-        for (Map.Entry<String, TranslatableModConfig> e : translatableMods.entrySet()) {
-            String label = e.getValue().label != null ? e.getValue().label : e.getKey();
-            out.put(e.getKey(), label);
-        }
-        return out;
-    }
-
-    public TranslatableModConfig getTranslatableModConfig(String key) {
-        return translatableMods.getOrDefault(key, defaultTranslatableConfig);
-    }
-    
-    // New public method to be called from TranslatableKeyManager
+    /**
+     * [UPDATED] Gets a map of translatable keys and their labels directly from the config.
+     * This is more reliable for keys containing dots.
+     */
     public Map<String, String> getTranslatableModsWithLabels() {
         Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection != null) {
-            findTranslatableKeysRecursive(modsSection, "", modsWithLabels);
+            for (String key : modsSection.getKeys(false)) {
+                // key is 'sodium.option_impact.low' etc.
+                ConfigurationSection modConfig = modsSection.getConfigurationSection(key);
+                if (modConfig != null && modConfig.contains("label")) {
+                    modsWithLabels.put(key, modConfig.getString("label", key));
+                } else if (isDebugMode()) {
+                    plugin.getLogger().warning("[Debug] Translatable key '" + key + "' is missing a 'label' field in config.yml");
+                }
+            }
         }
         return modsWithLabels;
     }
 
-    /**
-     * Helper method to recursively find all keys that have a 'label' defined,
-     * handling both flat (quoted) and nested (unquoted) YAML structures.
-     */
-    private void findTranslatableKeysRecursive(ConfigurationSection section, String currentPath, Map<String, String> outputMap) {
-        for (String key : section.getKeys(false)) {
-            String newPath = currentPath.isEmpty() ? key : currentPath + "." + key;
-
-            // Check if the value at 'key' is a section AND that section contains a 'label'.
-            // This is the condition for a final mod entry.
-            if (section.isConfigurationSection(key) && section.getConfigurationSection(key).contains("label")) {
-                ConfigurationSection modConfigSection = section.getConfigurationSection(key);
-                outputMap.put(newPath, modConfigSection.getString("label", newPath));
-            }
-            // Otherwise, if it's just a section (a category), go deeper.
-            else if (section.isConfigurationSection(key)) {
-                findTranslatableKeysRecursive(section.getConfigurationSection(key), newPath, outputMap);
-            }
-        }
+    public TranslatableModConfig getTranslatableModConfig(String key) {
+        return translatableMods.getOrDefault(key, defaultTranslatableConfig);
     }
 
     public List<String> getTranslatableRequiredKeys() {
