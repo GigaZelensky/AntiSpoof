@@ -781,41 +781,15 @@ public class ConfigManager {
         Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection != null) {
-            findTranslatableKeysRecursive(modsSection, modsWithLabels);
-        }
-        return modsWithLabels;
-    }
-
-    /**
-     * Helper method to recursively find all keys that have a 'label' defined.
-     * This robustly handles both quoted keys with dots and nested key structures,
-     * which addresses the parsing issue the user is seeing.
-     */
-    private void findTranslatableKeysRecursive(ConfigurationSection section, Map<String, String> outputMap) {
-        // The base path to remove from the full path to get the translatable key.
-        final String basePath = "translatable-keys.mods.";
-
-        for (String key : section.getKeys(false)) {
-            // Bukkit's config API treats keys with dots as nested sections if unquoted.
-            // We need to check if the current path leads to a section with a "label".
-            if (section.isConfigurationSection(key)) {
-                ConfigurationSection subSection = section.getConfigurationSection(key);
-                // If this sub-section has a 'label' key, it's a final mod definition.
-                if (subSection.contains("label")) {
-                    // Get the full path (e.g., "translatable-keys.mods.sodium.option_impact.low")
-                    String fullPath = subSection.getCurrentPath();
-                    // Extract just the translatable key part.
-                    if (fullPath.startsWith(basePath)) {
-                        String translatableKey = fullPath.substring(basePath.length());
-                        outputMap.put(translatableKey, subSection.getString("label"));
-                    }
-                }
-                // If there's no 'label', it's a parent category, so we go deeper.
-                else {
-                    findTranslatableKeysRecursive(subSection, outputMap);
+            for (String path : modsSection.getKeys(true)) {
+                ConfigurationSection sub = modsSection.getConfigurationSection(path);
+                if (sub != null) {
+                    String label = sub.getString("label", path);
+                    modsWithLabels.put(path, label);
                 }
             }
         }
+        return modsWithLabels;
     }
 
     // ===================================================================================

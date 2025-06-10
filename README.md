@@ -851,6 +851,8 @@ translatable-keys:
     retry-count: 0
     retry-interval: 60
     only-on-move: false
+    # When enabled, probes wait until the player moves and are sent only while
+    # they keep moving. This helps hide the sign GUI during the check.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

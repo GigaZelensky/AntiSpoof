@@ -350,6 +350,8 @@ translatable-keys:
     retry-count: 0
     retry-interval: 60
     only-on-move: false
+    # When true, delay the probes until the player moves and continue only
+    # while they keep moving.
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
