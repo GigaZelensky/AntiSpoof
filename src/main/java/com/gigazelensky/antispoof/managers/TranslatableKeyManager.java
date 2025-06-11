@@ -3,7 +3,7 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.event.PacketListenerAbstract; // Correct class to extend
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.item.ItemStack;
 import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
@@ -34,7 +34,6 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-// CORRECTED: Extends PacketListenerAbstract, not ListenerAbstract
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     /* --------------------------------------------------------------------- */
@@ -428,11 +427,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         WrappedBlockState anvilState = StateTypes.ANVIL.createBlockState(PacketEvents.getAPI().getPlayerManager().getClientVersion(target));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockChange(pos, anvilState.getGlobalId()));
 
-        int containerId = 1;
-        Component title = Component.text(" ");
-        WrapperPlayServerOpenWindow openWindow = new WrapperPlayServerOpenWindow(containerId, 8, title);
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, openWindow);
-
         Component itemName = Component.text()
                 .decoration(TextDecoration.ITALIC, false)
                 .append(Component.translatable(key))
@@ -443,21 +437,25 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         display.setTag("Name", new NBTString(GsonComponentSerializer.gson().serialize(itemName)));
         NBTCompound tag = new NBTCompound();
         tag.setTag("display", display);
+        
+        // CORRECTED: Use the ItemStack.Builder, which is the proper way.
         ItemStack probeItem = ItemStack.builder()
                 .type(ItemTypes.PAPER)
                 .amount(1)
                 .nbt(tag)
                 .build();
 
+        int containerId = 1;
+        Component title = Component.text(" ");
+        WrapperPlayServerOpenWindow openWindow = new WrapperPlayServerOpenWindow(containerId, 8, title);
         WrapperPlayServerSetSlot setSlot = new WrapperPlayServerSetSlot(containerId, 0, 0, probeItem);
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target, setSlot);
+        WrapperPlayServerCloseWindow closeWindow = new WrapperPlayServerCloseWindow(containerId);
 
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (target.isOnline()) {
-                PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(containerId));
-                sendAir(target, pos);
-            }
-        }, 1L);
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, openWindow);
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, setSlot);
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, closeWindow);
+
+        sendAir(target, pos);
 
         return pos;
     }
