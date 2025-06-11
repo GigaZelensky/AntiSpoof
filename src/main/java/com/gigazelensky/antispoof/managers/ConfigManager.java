@@ -5,6 +5,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -854,5 +855,31 @@ public class ConfigManager {
      */
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
+    }
+
+    /**
+     * Gets the list of vanilla translation keys for probing.
+     * @return A list of strings, or an empty list if not configured.
+     */
+    public List<String> getVanillaTranslationKeys() {
+        ConfigurationSection section = config.getConfigurationSection("translatable-keys.vanilla");
+        if (section == null) {
+            return Collections.emptyList();
+        }
+        // We only care about the keys, not the labels for this purpose.
+        return new ArrayList<>(section.getKeys(false));
+    }
+
+    /**
+     * Gets the list of vanilla keybind keys for probing.
+     * @return A list of strings, or an empty list if not configured.
+     */
+    public List<String> getVanillaKeybindKeys() {
+        ConfigurationSection section = config.getConfigurationSection("translatable-keys.keybinds");
+        if (section == null) {
+            return Collections.emptyList();
+        }
+        // We only care about the keys, not the labels for this purpose.
+        return new ArrayList<>(section.getKeys(false));
     }
 }
