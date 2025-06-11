@@ -21,7 +21,7 @@ public class AlertManager {
     private final Set<UUID> playersWithAlertPermission = ConcurrentHashMap.newKeySet();
     
     // Alert cooldown in milliseconds (3 seconds by default)
-    private static final long ALERT_COOLDOWN = 3000;
+    private static final long ALERT_COOLDOWN = 1;
     
     public AlertManager(AntiSpoofPlugin plugin) {
         this.plugin = plugin;

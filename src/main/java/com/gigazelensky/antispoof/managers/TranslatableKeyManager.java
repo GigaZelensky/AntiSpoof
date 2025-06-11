@@ -418,10 +418,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private Vector3i signPos(Player p) {
+        // Place the sign at the corner of an adjacent chunk, high up, to keep it out of sight.
         World w = p.getWorld();
-        int x = p.getLocation().getBlockX();
-        int y = Math.min(w.getMaxHeight() - 2, p.getLocation().getBlockY() + 24);
-        int z = p.getLocation().getBlockZ();
+        org.bukkit.Chunk playerChunk = p.getLocation().getChunk();
+        int x = (playerChunk.getX() + 1) * 16;
+        int z = (playerChunk.getZ() + 1) * 16;
+        int y = w.getMaxHeight() - 5;
         return new Vector3i(x, y, z);
     }
 
