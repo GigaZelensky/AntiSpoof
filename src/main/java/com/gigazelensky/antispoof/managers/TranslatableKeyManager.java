@@ -28,48 +28,64 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /**
- * Your original, stable, sequential probe, with robust batching and restored command functionality.
+ * Your original, stable, sequential probe, minimally modified for high-density batching.
  */
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
-    private static final int TIMEOUT_TICKS = 40;
-    private static final int AIR_ID = 0;
-    private static final double MOVE_EPSILON = 0.0001;
-    private static final float ROT_EPSILON = 1.5f;
-    private static final String DELIMITER = "\t";
-    private static final int MAX_COMPONENT_LENGTH = 256;
+    /* --------------------------------------------------------------------- */
+    private static final int   TIMEOUT_TICKS   = 40;  // 2s, safer for potentially slow clients
+    private static final int   AIR_ID          = 0;
+    private static final double MOVE_EPSILON    = 0.0001;
+    private static final float ROT_EPSILON     = 1.5f;
+
+    // --- NEW CONSTANTS FOR BATCHING ---
+    private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
+    private static final int MAX_COMPONENT_LENGTH = 256; // A safe length for each packed line to avoid packet issues
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
-    private final ConfigManager cfg;
+    private final ConfigManager    cfg;
 
+    /* ACTIVE PROBES (Original structure is preserved) */
     private static final class Probe {
         Iterator<List<Map.Entry<String, String>>> iterator;
         final Set<String> translated = new HashSet<>();
         final Map<String, String> failedForNext = new LinkedHashMap<>();
         int retriesLeft;
+        int totalBatches;
+        int currentBatchNum = 0;
+        /* per-round state */
         List<Map.Entry<String, String>> currentEntries = null;
-        String[] keys = null;
-        String uid = null;
+        String[]  keys   = null; // This will hold PACKED keys
+        String  uid   = null;
         Vector3i sign = null;
         BukkitTask timeoutTask;
         boolean waitingForMove = false;
         org.bukkit.command.CommandSender debug;
+        long sendTime;
         boolean forceSend = false;
     }
 
-    private final Map<UUID, Probe> probes = new HashMap<>();
-    private final Map<UUID, Long> cooldown = new HashMap<>();
+    private final Map<UUID, Probe> probes   = new HashMap<>();
+    private final Map<UUID, Long>  cooldown = new HashMap<>();
     private final Set<UUID> pendingStart = new HashSet<>();
 
-    public TranslatableKeyManager(AntiSpoofPlugin pl, DetectionManager det, ConfigManager cfg) {
+    /* --------------------------------------------------------------------- */
+    public TranslatableKeyManager(AntiSpoofPlugin pl,
+                                  DetectionManager det,
+                                  ConfigManager cfg)
+    {
         this.plugin = pl;
         this.detect = det;
-        this.cfg = cfg;
+        this.cfg    = cfg;
+
         Bukkit.getPluginManager().registerEvents(this, pl);
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
+    /* ======================================================================
+     *  UNCHANGED LIFECYCLE & COMMAND METHODS
+     * ==================================================================== */
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         if (!cfg.isTranslatableKeysEnabled()) return;
@@ -78,18 +94,20 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         } else {
             int delay = cfg.getTranslatableFirstDelay();
             Bukkit.getScheduler().runTaskLater(plugin,
-                    () -> beginProbe(e.getPlayer(), cfg.getTranslatableModsWithLabels(), cfg.getTranslatableRetryCount(), false, null, false),
-                    delay);
+                   () -> beginProbe(e.getPlayer(),
+                                    cfg.getTranslatableModsWithLabels(),
+                                    cfg.getTranslatableRetryCount(),
+                                    false,
+                                    null,
+                                    false),
+                   delay);
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent e) {
-        Probe p = probes.remove(e.getPlayer().getUniqueId());
-        if (p != null && p.sign != null) sendAir(e.getPlayer(), p.sign);
-        if (p != null && p.timeoutTask != null) p.timeoutTask.cancel();
-        cooldown.remove(e.getPlayer().getUniqueId());
-        pendingStart.remove(e.getPlayer().getUniqueId());
+        // This now calls the restored stopMods method for clean cleanup
+        stopMods(e.getPlayer());
     }
 
     @EventHandler
@@ -106,7 +124,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             if (pendingStart.remove(id)) {
                 int delay = cfg.getTranslatableFirstDelay();
                 Bukkit.getScheduler().runTaskLater(plugin,
-                        () -> beginProbe(e.getPlayer(), cfg.getTranslatableModsWithLabels(), cfg.getTranslatableRetryCount(), false, null, false),
+                        () -> beginProbe(e.getPlayer(),
+                                         cfg.getTranslatableModsWithLabels(),
+                                         cfg.getTranslatableRetryCount(),
+                                         false,
+                                         null,
+                                         false),
                         delay);
             }
         }
@@ -118,23 +141,26 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
-    // FIX #1: sendKeybind now works as intended.
     public void sendKeybind(Player target, String key, org.bukkit.command.CommandSender dbg) {
-        if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Force sending single key '" + key + "' to " + target.getName());
+        Map<String,String> single = Collections.singletonMap(key, key);
+        // Force re-probe for debug command
+        if (probes.containsKey(target.getUniqueId())) {
+            stopMods(target);
         }
-        Map<String, String> single = Collections.singletonMap(key, key);
-        // Force-start a new probe, ignoring existing ones, with 0 retries.
         beginProbe(target, single, 0, true, dbg, true);
     }
 
-    // FIX #2: runmods now works as intended.
     public void runMods(Player target) {
-        if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Force running all mod probes for " + target.getName());
+        // Force re-probe by stopping any existing probe first
+        if (probes.containsKey(target.getUniqueId())) {
+            stopMods(target);
         }
-        // Force-start a new probe, ignoring existing ones.
-        beginProbe(target, cfg.getTranslatableModsWithLabels(), cfg.getTranslatableRetryCount(), true, null, false);
+        beginProbe(target,
+                   cfg.getTranslatableModsWithLabels(),
+                   cfg.getTranslatableRetryCount(),
+                   true,
+                   null,
+                   false);
     }
 
     public void stopMods(Player target) {
@@ -144,32 +170,36 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (p != null) {
             if (p.timeoutTask != null) p.timeoutTask.cancel();
             if (p.sign != null) sendAir(target, p.sign);
-            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Manually stopped probe for " + target.getName());
         }
     }
 
-    private void beginProbe(Player p, Map<String, String> keys, int retries, boolean ignoreCooldown, org.bukkit.command.CommandSender dbg, boolean forceSend) {
-        // Allow forceSend to bypass the existing probe check
-        if (!p.isOnline() || !cfg.isTranslatableKeysEnabled() || (!forceSend && probes.containsKey(p.getUniqueId()))) return;
+    /* ======================================================================
+     *  MAIN PROBE LIFECYCLE (EDITED FOR BATCHING)
+     * ==================================================================== */
+    private void beginProbe(Player p,
+                            Map<String, String> keys,
+                            int retries,
+                            boolean ignoreCooldown,
+                            org.bukkit.command.CommandSender dbg,
+                            boolean forceSend)
+    {
+        if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
 
+        // Cooldown check
         long now = System.currentTimeMillis();
         if (!ignoreCooldown) {
-            long cd = cfg.getTranslatableCooldown() * 1000L;
-            if (now - cooldown.getOrDefault(p.getUniqueId(), 0L) < cd) return;
+            long cd  = cfg.getTranslatableCooldown()*1000L;
+            if (now - cooldown.getOrDefault(p.getUniqueId(),0L) < cd) return;
             cooldown.put(p.getUniqueId(), now);
         }
-
-        // If a probe is forced, cancel any existing one for this player.
-        if (forceSend) {
-            stopMods(p);
-        }
-
-        List<Map.Entry<String, String>> allEntries = new ArrayList<>(keys.entrySet());
+        
+        // --- BATCHING LOGIC ---
         List<Map.Entry<String, String>> packedEntries = new ArrayList<>();
         StringBuilder currentLine = new StringBuilder();
         List<String> keysInCurrentLine = new ArrayList<>();
 
-        for (Map.Entry<String, String> entry : allEntries) {
+        // Using entrySet() preserves the key-value link for labels
+        for (Map.Entry<String, String> entry : keys.entrySet()) {
             if (currentLine.length() > 0 && currentLine.length() + entry.getKey().length() + DELIMITER.length() > MAX_COMPONENT_LENGTH) {
                 packedEntries.add(new AbstractMap.SimpleEntry<>(String.join(DELIMITER, keysInCurrentLine), ""));
                 currentLine.setLength(0);
@@ -187,30 +217,34 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         for (int i = 0; i < packedEntries.size(); i += 3) {
             keyGroups.add(new ArrayList<>(packedEntries.subList(i, Math.min(packedEntries.size(), i + 3))));
         }
+        // --- END BATCHING LOGIC ---
 
         Probe probe = new Probe();
         probe.iterator = keyGroups.iterator();
         probe.retriesLeft = retries;
         probe.debug = dbg;
         probe.forceSend = forceSend;
+        probe.totalBatches = keyGroups.size(); // Store total for debug messages
         probes.put(p.getUniqueId(), probe);
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Starting batched probe for " + p.getName() + " with " + keys.size() + " keys in " + keyGroups.size() + " sign packets.");
+            plugin.getLogger().info("[Debug] Starting translatable probe for " + p.getName() + " with " + keys.size() + " keys in " + keyGroups.size() + " sign packets.");
         }
         advance(p, probe);
     }
 
     private void advance(Player player, Probe probe) {
         if (probe.timeoutTask != null) probe.timeoutTask.cancel();
+
         if (!probe.iterator.hasNext()) {
             finishRound(player, probe);
             return;
         }
+
         if (probe.sign != null) sendAir(player, probe.sign);
 
         probe.currentEntries = probe.iterator.next();
-        probe.keys = new String[3];
+        probe.keys = new String[3]; // This now holds PACKED keys
         for (int i = 0; i < probe.currentEntries.size(); i++) {
             probe.keys[i] = probe.currentEntries.get(i).getKey();
         }
@@ -218,9 +252,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             probe.keys[i] = null;
         }
         probe.uid = randomUID();
+        probe.currentBatchNum++; // Increment batch number
 
         if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
-            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Waiting for " + player.getName() + " to move before sending next batch.");
             probe.waitingForMove = true;
         } else {
             placeNextSign(player, probe);
@@ -230,10 +264,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private void placeNextSign(Player player, Probe probe) {
         Vector3i pos = buildFakeSign(player, probe.keys, probe.uid);
         probe.sign = pos;
-        if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Sent sign packet with UID " + probe.uid + " to " + player.getName());
 
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Sending batch " + probe.currentBatchNum + "/" + probe.totalBatches + " to " + player.getName());
+        }
+
+        probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Probe timed out for " + player.getName() + ". UID: " + probe.uid);
+            if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
+            // Unpack and handle each key as a failure on timeout
             for (Map.Entry<String, String> entry : probe.currentEntries) {
                 String[] originalKeys = entry.getKey().split(DELIMITER, -1);
                 for (String key : originalKeys) {
@@ -252,13 +291,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe == null || probe.keys == null) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
-        if (recv.length < 4 || !probe.uid.equals(recv[3])) {
-            // This can happen if a previous probe timed out but the client responded late.
-            // It's safe to ignore.
-            return;
-        }
+        if (recv.length < 4 || !probe.uid.equals(recv[3])) return;
 
-        if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Received valid sign response from " + p.getName() + " for UID " + probe.uid);
         probe.timeoutTask.cancel();
 
         for (int i = 0; i < probe.currentEntries.size(); i++) {
@@ -276,13 +310,24 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void handleResult(Player p, Probe probe, String key, boolean translated, String response) {
-        String label = cfg.getTranslatableModsWithLabels().get(key);
-        if (label == null) return; // Should not happen if config is correct
+        long ms = System.currentTimeMillis() - probe.sendTime;
+        if (probe.debug != null) {
+            String text = translated ? response : "";
+            probe.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
+                    org.bukkit.ChatColor.DARK_GRAY + " | " +
+                    org.bukkit.ChatColor.GRAY + "Key: \"" +
+                    org.bukkit.ChatColor.WHITE + key +
+                    org.bukkit.ChatColor.GRAY + "\" Response: \"" +
+                    org.bukkit.ChatColor.AQUA + text +
+                    org.bukkit.ChatColor.GRAY + "\" Time: " +
+                    org.bukkit.ChatColor.AQUA + ms + "ms");
+        }
 
-        // FIX #3: The `runmods` command will re-report already found keys.
-        // We only add to `failedForNext` if it was not translated.
-        // The `detect.handleTranslatable` call happens regardless.
+        String label = cfg.getTranslatableModsWithLabels().get(key);
+        if (label == null) return;
+
         if (translated) {
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
         } else {
@@ -291,31 +336,31 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void finishRound(Player p, Probe probe) {
-        if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Probe round finished for " + p.getName() + ". Translated: " + probe.translated.size() + ", Failed: " + probe.failedForNext.size());
-        }
-
         for (String req : cfg.getTranslatableRequiredKeys()) {
             if (!probe.translated.contains(req))
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
         }
         if (probe.sign != null) sendAir(p, probe.sign);
-
-        // FIX #4: Retry logic is now confirmed to work on the failed keys from all batches.
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
-            if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName() + ". Retries left: " + (probe.retriesLeft - 1));
-            }
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName());
             int interval = cfg.getTranslatableRetryInterval();
             Bukkit.getScheduler().runTaskLater(plugin, () ->
-                            beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
+                    beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
                     interval);
         } else {
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] All probe rounds finished for " + p.getName());
+                plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
             }
         }
+    }
+
+    private String createComponentJson(String packedKeys) {
+        if (packedKeys == null) return "{\"text\":\"\"}";
+        String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
+            .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
+            .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
+        return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
     private Vector3i buildFakeSign(Player target, String[] keys, String uid) {
@@ -325,8 +370,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         WrappedBlockState signState;
         try {
-            signState = (WrappedBlockState) StateTypes.OAK_SIGN.getClass()
-                    .getMethod("createBlockData").invoke(StateTypes.OAK_SIGN);
+            signState = (WrappedBlockState) StateTypes.OAK_SIGN.getClass().getMethod("createBlockData").invoke(StateTypes.OAK_SIGN);
         } catch (Throwable t) {
             signState = StateTypes.OAK_SIGN.createBlockState(cv);
         }
@@ -334,7 +378,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        
         String key1_json = createComponentJson(keys[0]);
         String key2_json = createComponentJson(keys[1]);
         String key3_json = createComponentJson(keys[2]);
@@ -346,13 +389,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             msgs.addTag(new NBTString(key2_json));
             msgs.addTag(new NBTString(key3_json));
             msgs.addTag(new NBTString(uid_json));
-            
             NBTCompound front = new NBTCompound();
             front.setTag("messages", msgs);
             front.setTag("color", new NBTString("black"));
             front.setTag("has_glowing_text", new NBTByte((byte)0));
             nbt.setTag("front_text", front);
-
             NBTCompound back = new NBTCompound();
             back.setTag("messages", msgs);
             back.setTag("color", new NBTString("black"));
@@ -367,19 +408,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
-
         return pos;
-    }
-    
-    private String createComponentJson(String packedKeys) {
-        if (packedKeys == null) return "{\"text\":\"\"}";
-
-        String[] keys = packedKeys.split(DELIMITER, -1);
-        String extraContent = Arrays.stream(keys)
-            .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
-            .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
-        
-        return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
     private void sendAir(Player p, Vector3i pos) {
