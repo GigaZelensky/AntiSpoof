@@ -46,7 +46,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private final DetectionManager detect;
     private final ConfigManager cfg;
 
-    private enum ProbeType {
+    // This is now public within the class to be accessible from the new method
+    public enum ProbeType {
         SIGN, ANVIL
     }
 
@@ -86,6 +87,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
+    // NEW: Helper method to get the initial probe type from config
+    private ProbeType getInitialProbeType() {
+        String methodName = cfg.getInitialProbeMethod();
+        return ProbeType.valueOf(methodName);
+    }
+
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         if (!cfg.isTranslatableKeysEnabled()) return;
@@ -96,7 +103,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             Bukkit.getScheduler().runTaskLater(plugin,
                     () -> beginProbe(e.getPlayer(),
                             cfg.getTranslatableModsWithLabels(),
-                            ProbeType.SIGN,
+                            getInitialProbeType(), // MODIFIED: Use the config option
                             cfg.getTranslatableRetryCount(),
                             false,
                             null,
@@ -131,7 +138,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 Bukkit.getScheduler().runTaskLater(plugin,
                         () -> beginProbe(e.getPlayer(),
                                 cfg.getTranslatableModsWithLabels(),
-                                ProbeType.SIGN,
+                                getInitialProbeType(), // MODIFIED: Use the config option
                                 cfg.getTranslatableRetryCount(),
                                 false,
                                 null,
@@ -156,13 +163,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     public void sendKeybind(Player target, String key,
                             org.bukkit.command.CommandSender dbg) {
         Map<String, String> single = Collections.singletonMap(key, key);
+        // Manual keybind tests will always use SIGN for simplicity.
         beginProbe(target, single, ProbeType.SIGN, 0, true, dbg, true);
     }
 
     public void runMods(Player target) {
         beginProbe(target,
                 cfg.getTranslatableModsWithLabels(),
-                ProbeType.SIGN,
+                getInitialProbeType(), // MODIFIED: Use the config option
                 cfg.getTranslatableRetryCount(),
                 true,
                 null,
@@ -438,7 +446,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         NBTCompound tag = new NBTCompound();
         tag.setTag("display", display);
         
-        // CORRECTED: Use the ItemStack.Builder, which is the proper way.
         ItemStack probeItem = ItemStack.builder()
                 .type(ItemTypes.PAPER)
                 .amount(1)

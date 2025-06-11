@@ -841,6 +841,20 @@ public class ConfigManager {
     }
     
     /**
+     * Gets the initial probe method for translatable key detection
+     * @return Either "SIGN" or "ANVIL", defaulting to "SIGN" if invalid
+     */
+    public String getInitialProbeMethod() {
+        // Reads the initial probe method, defaulting to "SIGN" if invalid or missing.
+        String method = config.getString("translatable-keys.check.initial-probe-method", "SIGN").toUpperCase();
+        if (method.equals("SIGN") || method.equals("ANVIL")) {
+            return method;
+        }
+        // Fallback to SIGN if the config value is something else.
+        return "SIGN";
+    }
+    
+    /**
      * Checks if update checking is enabled
      * @return True if update checking is enabled, false otherwise
      */
