@@ -3,7 +3,7 @@ package com.gigazelensky.antispoof.managers;
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract; // Correct class to extend
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.item.ItemStack;
 import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
@@ -14,7 +14,7 @@ import com.github.retrooper.packetevents.protocol.world.blockentity.BlockEntityT
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3i;
-import com.github.retrooper.packetevents.wrapper.PacketWrapper; // <-- NEW IMPORT
+import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.*;
 import net.kyori.adventure.text.Component;
@@ -34,6 +34,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
+// CORRECTED: Extends PacketListenerAbstract, not ListenerAbstract
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     /* --------------------------------------------------------------------- */
@@ -292,7 +293,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void handleAnvilUpdate(PacketReceiveEvent e, Player p, Probe probe) {
-        // CORRECTED: Create a generic PacketWrapper from the event to access the buffer.
         String newName = new PacketWrapper<>(e).readString();
 
         if (newName == null || newName.contains(probe.uid)) return;
@@ -415,13 +415,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             nbt.setTag("Text4", new NBTString(uid));
         }
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
+        
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
-
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (target.isOnline()) {
-                PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
-            }
-        }, 1L);
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
 
         return pos;
     }
@@ -434,7 +430,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         int containerId = 1;
         Component title = Component.text(" ");
-        WrapperPlayServerOpenWindow openWindow = new WrapperPlayServerOpenWindow(containerId, 10, title);
+        WrapperPlayServerOpenWindow openWindow = new WrapperPlayServerOpenWindow(containerId, 8, title);
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, openWindow);
 
         Component itemName = Component.text()
@@ -461,7 +457,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(containerId));
                 sendAir(target, pos);
             }
-        }, 2L);
+        }, 1L);
 
         return pos;
     }
