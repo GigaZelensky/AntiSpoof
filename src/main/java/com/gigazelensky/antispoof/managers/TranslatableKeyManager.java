@@ -33,18 +33,23 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger; // NEW: For thread-safe counter
 
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
     /* --------------------------------------------------------------------- */
-    private static final int TIMEOUT_TICKS = 20;  // 1 s
-    private static final int AIR_ID = 0;   // block id for air
-    private static final double MOVE_EPSILON = 0.0001; // ~1cm^2
+    private static final int TIMEOUT_TICKS = 40; // INCREASED TIMEOUT FOR SAFETY
+    private static final int AIR_ID = 0;
+    private static final double MOVE_EPSILON = 0.0001;
     private static final float ROT_EPSILON = 1.5f;
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
     private final ConfigManager cfg;
+
+    // NEW: A thread-safe counter for our custom window IDs.
+    // We start from 100 to avoid conflicts with vanilla IDs (0=player, 1-? for chests etc.)
+    private final AtomicInteger nextContainerId = new AtomicInteger(100);
 
     public enum ProbeType {
         SIGN, ANVIL
@@ -68,6 +73,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean forceSend = false;
 
         ProbeType currentProbeType;
+        int containerId; // Store the containerId with the probe
     }
 
     private final Map<UUID, Probe> probes = new HashMap<>();
@@ -172,7 +178,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 cfg.getTranslatableRetryCount(),
                 true,
                 null,
-                true); // Manually running mods should always be forced
+                true);
     }
 
     public void stopMods(Player target) {
@@ -241,6 +247,18 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
         probe.uid = randomUID();
 
+        // Assign a unique container ID for this specific probe attempt if it's an anvil
+        if (probe.currentProbeType == ProbeType.ANVIL) {
+            probe.containerId = nextContainerId.getAndIncrement();
+            // Reset counter to prevent overflow, 100-199 is a safe range
+            if (nextContainerId.get() > 199) {
+                nextContainerId.set(100);
+            }
+        } else {
+            probe.containerId = 0; // Signs use containerId 0
+        }
+
+
         if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
             probe.waitingForMove = true;
         } else {
@@ -252,7 +270,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe.currentProbeType == ProbeType.SIGN) {
             probe.lastBlockPos = buildFakeSign(player, probe.keys, probe.uid);
         } else {
-            probe.lastBlockPos = buildFakeAnvil(player, probe.keys[0], probe.uid);
+            probe.lastBlockPos = buildFakeAnvil(player, probe.keys[0], probe.uid, probe.containerId);
         }
 
         if (cfg.isDebugMode()) {
@@ -262,10 +280,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            for (Map.Entry<String, String> entry : probe.currentEntries) {
-                handleResult(player, probe, entry.getKey(), entry.getValue(), false, null);
+            Probe currentProbe = probes.get(player.getUniqueId());
+            // Only timeout if the probe is still the same one we set the timeout for
+            if (currentProbe != null && currentProbe.uid.equals(probe.uid)) {
+                for (Map.Entry<String, String> entry : probe.currentEntries) {
+                    handleResult(player, probe, entry.getKey(), entry.getValue(), false, null);
+                }
+                advance(player, probe);
             }
-            advance(player, probe);
         }, TIMEOUT_TICKS);
     }
 
@@ -348,7 +370,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 plugin.getLogger().info("[Debug] Sign probe round finished for " + p.getName() +
                         ". Retrying " + probe.failedForNext.size() + " failed keys with ANVIL probe.");
             }
-            // CORRECTED: The anvil follow-up probe should ALWAYS be forced, ignoring the move check.
             beginProbe(p, probe.failedForNext, ProbeType.ANVIL, probe.retriesLeft, true, probe.debug, true);
             return;
         }
@@ -361,7 +382,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
             final ProbeType nextRetryType = probe.currentProbeType;
-            // CORRECTED: A retry should also be forced to run immediately.
             Bukkit.getScheduler().runTaskLater(plugin, () ->
                             beginProbe(p, probe.failedForNext, nextRetryType, probe.retriesLeft - 1, true, probe.debug, true),
                     interval);
@@ -429,7 +449,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         return pos;
     }
 
-    private Vector3i buildFakeAnvil(Player target, String key, String uid) {
+    private Vector3i buildFakeAnvil(Player target, String key, String uid, int containerId) {
         Vector3i pos = getBlockPos(target);
 
         WrappedBlockState anvilState = StateTypes.ANVIL.createBlockState(PacketEvents.getAPI().getPlayerManager().getClientVersion(target));
@@ -452,7 +472,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 .nbt(tag)
                 .build();
 
-        int containerId = 1;
         Component title = Component.text(" ");
         WrapperPlayServerOpenWindow openWindow = new WrapperPlayServerOpenWindow(containerId, 8, title);
         WrapperPlayServerSetSlot setSlot = new WrapperPlayServerSetSlot(containerId, 0, 0, probeItem);
