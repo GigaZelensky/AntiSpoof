@@ -735,8 +735,9 @@ public class ConfigManager {
                 cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
                 cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
                 cfg.punishments = m.getStringList("punishments");
-                cfg.alertMessage = defaultTranslatableConfig.alertMessage;
-                cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
+                // Load per-mod alert messages with fallback to defaults
+                cfg.alertMessage = m.getString("alert-message", defaultTranslatableConfig.alertMessage);
+                cfg.consoleAlertMessage = m.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
                 translatableMods.put(key, cfg);
             }
         }
@@ -765,8 +766,9 @@ public class ConfigManager {
             cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
             cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
             cfg.punishments = m.getStringList("punishments");
-            cfg.alertMessage = defaultTranslatableConfig.alertMessage;
-            cfg.consoleAlertMessage = defaultTranslatableConfig.consoleAlertMessage;
+            // Load per-mod alert messages with fallback to defaults
+            cfg.alertMessage = m.getString("alert-message", defaultTranslatableConfig.alertMessage);
+            cfg.consoleAlertMessage = m.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
             translatableMods.put(key, cfg);
             return cfg;
         }
