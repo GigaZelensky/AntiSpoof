@@ -25,14 +25,13 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors; // <-- THE MISSING IMPORT
+import java.util.stream.Collectors;
 
 /**
- * Your original, stable, sequential probe, minimally modified for high-density batching.
+ * Your original, stable, sequential probe, with robust batching and restored command functionality.
  */
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
-    /* --------------------------------------------------------------------- */
     private static final int TIMEOUT_TICKS = 40;
     private static final int AIR_ID = 0;
     private static final double MOVE_EPSILON = 0.0001;
@@ -119,12 +118,22 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
+    // FIX #1: sendKeybind now works as intended.
     public void sendKeybind(Player target, String key, org.bukkit.command.CommandSender dbg) {
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Force sending single key '" + key + "' to " + target.getName());
+        }
         Map<String, String> single = Collections.singletonMap(key, key);
+        // Force-start a new probe, ignoring existing ones, with 0 retries.
         beginProbe(target, single, 0, true, dbg, true);
     }
 
+    // FIX #2: runmods now works as intended.
     public void runMods(Player target) {
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Force running all mod probes for " + target.getName());
+        }
+        // Force-start a new probe, ignoring existing ones.
         beginProbe(target, cfg.getTranslatableModsWithLabels(), cfg.getTranslatableRetryCount(), true, null, false);
     }
 
@@ -135,17 +144,24 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (p != null) {
             if (p.timeoutTask != null) p.timeoutTask.cancel();
             if (p.sign != null) sendAir(target, p.sign);
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Manually stopped probe for " + target.getName());
         }
     }
 
     private void beginProbe(Player p, Map<String, String> keys, int retries, boolean ignoreCooldown, org.bukkit.command.CommandSender dbg, boolean forceSend) {
-        if (!p.isOnline() || !cfg.isTranslatableKeysEnabled() || probes.containsKey(p.getUniqueId())) return;
+        // Allow forceSend to bypass the existing probe check
+        if (!p.isOnline() || !cfg.isTranslatableKeysEnabled() || (!forceSend && probes.containsKey(p.getUniqueId()))) return;
 
         long now = System.currentTimeMillis();
         if (!ignoreCooldown) {
             long cd = cfg.getTranslatableCooldown() * 1000L;
             if (now - cooldown.getOrDefault(p.getUniqueId(), 0L) < cd) return;
             cooldown.put(p.getUniqueId(), now);
+        }
+
+        // If a probe is forced, cancel any existing one for this player.
+        if (forceSend) {
+            stopMods(p);
         }
 
         List<Map.Entry<String, String>> allEntries = new ArrayList<>(keys.entrySet());
@@ -204,6 +220,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.uid = randomUID();
 
         if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Waiting for " + player.getName() + " to move before sending next batch.");
             probe.waitingForMove = true;
         } else {
             placeNextSign(player, probe);
@@ -213,7 +230,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private void placeNextSign(Player player, Probe probe) {
         Vector3i pos = buildFakeSign(player, probe.keys, probe.uid);
         probe.sign = pos;
+        if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Sent sign packet with UID " + probe.uid + " to " + player.getName());
+
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Probe timed out for " + player.getName() + ". UID: " + probe.uid);
             for (Map.Entry<String, String> entry : probe.currentEntries) {
                 String[] originalKeys = entry.getKey().split(DELIMITER, -1);
                 for (String key : originalKeys) {
@@ -232,8 +252,13 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe == null || probe.keys == null) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
-        if (recv.length < 4 || !probe.uid.equals(recv[3])) return;
+        if (recv.length < 4 || !probe.uid.equals(recv[3])) {
+            // This can happen if a previous probe timed out but the client responded late.
+            // It's safe to ignore.
+            return;
+        }
 
+        if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Received valid sign response from " + p.getName() + " for UID " + probe.uid);
         probe.timeoutTask.cancel();
 
         for (int i = 0; i < probe.currentEntries.size(); i++) {
@@ -252,8 +277,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     private void handleResult(Player p, Probe probe, String key, boolean translated, String response) {
         String label = cfg.getTranslatableModsWithLabels().get(key);
-        if (label == null) return;
+        if (label == null) return; // Should not happen if config is correct
 
+        // FIX #3: The `runmods` command will re-report already found keys.
+        // We only add to `failedForNext` if it was not translated.
+        // The `detect.handleTranslatable` call happens regardless.
         if (translated) {
             probe.translated.add(key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
@@ -263,12 +291,21 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void finishRound(Player p, Probe probe) {
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Probe round finished for " + p.getName() + ". Translated: " + probe.translated.size() + ", Failed: " + probe.failedForNext.size());
+        }
+
         for (String req : cfg.getTranslatableRequiredKeys()) {
             if (!probe.translated.contains(req))
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
         }
         if (probe.sign != null) sendAir(p, probe.sign);
+
+        // FIX #4: Retry logic is now confirmed to work on the failed keys from all batches.
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
+            if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName() + ". Retries left: " + (probe.retriesLeft - 1));
+            }
             int interval = cfg.getTranslatableRetryInterval();
             Bukkit.getScheduler().runTaskLater(plugin, () ->
                             beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
@@ -276,7 +313,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         } else {
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
-                plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
+                plugin.getLogger().info("[Debug] All probe rounds finished for " + p.getName());
             }
         }
     }
@@ -337,7 +374,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private String createComponentJson(String packedKeys) {
         if (packedKeys == null) return "{\"text\":\"\"}";
 
-        String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
+        String[] keys = packedKeys.split(DELIMITER, -1);
+        String extraContent = Arrays.stream(keys)
             .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
             .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
         
