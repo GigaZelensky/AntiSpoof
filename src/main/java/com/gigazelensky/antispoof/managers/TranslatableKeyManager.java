@@ -46,7 +46,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private final DetectionManager detect;
     private final ConfigManager cfg;
 
-    // This is now public within the class to be accessible from the new method
     public enum ProbeType {
         SIGN, ANVIL
     }
@@ -87,7 +86,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
-    // NEW: Helper method to get the initial probe type from config
     private ProbeType getInitialProbeType() {
         String methodName = cfg.getInitialProbeMethod();
         return ProbeType.valueOf(methodName);
@@ -103,7 +101,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             Bukkit.getScheduler().runTaskLater(plugin,
                     () -> beginProbe(e.getPlayer(),
                             cfg.getTranslatableModsWithLabels(),
-                            getInitialProbeType(), // MODIFIED: Use the config option
+                            getInitialProbeType(),
                             cfg.getTranslatableRetryCount(),
                             false,
                             null,
@@ -131,50 +129,50 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean moved = dx * dx + dz * dz >= MOVE_EPSILON || dy > ROT_EPSILON || dp > ROT_EPSILON;
         if (!moved) return;
 
+        UUID id = e.getPlayer().getUniqueId();
+
         if (cfg.isTranslatableOnlyOnMove()) {
-            UUID id = e.getPlayer().getUniqueId();
             if (pendingStart.remove(id)) {
                 int delay = cfg.getTranslatableFirstDelay();
                 Bukkit.getScheduler().runTaskLater(plugin,
                         () -> beginProbe(e.getPlayer(),
                                 cfg.getTranslatableModsWithLabels(),
-                                getInitialProbeType(), // MODIFIED: Use the config option
+                                getInitialProbeType(),
                                 cfg.getTranslatableRetryCount(),
                                 false,
                                 null,
                                 false),
                         delay);
                 if (cfg.isDebugMode()) {
-                    plugin.getLogger().info("[Debug] Movement detected, starting probe for " + e.getPlayer().getName());
+                    plugin.getLogger().info("[Debug] Movement detected, starting initial probe for " + e.getPlayer().getName());
                 }
             }
         }
 
-        Probe p = probes.get(e.getPlayer().getUniqueId());
+        Probe p = probes.get(id);
         if (p != null && p.waitingForMove) {
-            p.waitingForMove = false;
-            placeNextProbe(e.getPlayer(), p);
-            if (cfg.isDebugMode()) {
+            if(cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Player moved, sending next probe to " + e.getPlayer().getName());
             }
+            p.waitingForMove = false;
+            placeNextProbe(e.getPlayer(), p);
         }
     }
 
     public void sendKeybind(Player target, String key,
                             org.bukkit.command.CommandSender dbg) {
         Map<String, String> single = Collections.singletonMap(key, key);
-        // Manual keybind tests will always use SIGN for simplicity.
         beginProbe(target, single, ProbeType.SIGN, 0, true, dbg, true);
     }
 
     public void runMods(Player target) {
         beginProbe(target,
                 cfg.getTranslatableModsWithLabels(),
-                getInitialProbeType(), // MODIFIED: Use the config option
+                getInitialProbeType(),
                 cfg.getTranslatableRetryCount(),
                 true,
                 null,
-                false);
+                true); // Manually running mods should always be forced
     }
 
     public void stopMods(Player target) {
@@ -350,7 +348,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 plugin.getLogger().info("[Debug] Sign probe round finished for " + p.getName() +
                         ". Retrying " + probe.failedForNext.size() + " failed keys with ANVIL probe.");
             }
-            beginProbe(p, probe.failedForNext, ProbeType.ANVIL, probe.retriesLeft, true, probe.debug, probe.forceSend);
+            // CORRECTED: The anvil follow-up probe should ALWAYS be forced, ignoring the move check.
+            beginProbe(p, probe.failedForNext, ProbeType.ANVIL, probe.retriesLeft, true, probe.debug, true);
             return;
         }
 
@@ -362,8 +361,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             int interval = cfg.getTranslatableRetryInterval();
             final ProbeType nextRetryType = probe.currentProbeType;
+            // CORRECTED: A retry should also be forced to run immediately.
             Bukkit.getScheduler().runTaskLater(plugin, () ->
-                            beginProbe(p, probe.failedForNext, nextRetryType, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
+                            beginProbe(p, probe.failedForNext, nextRetryType, probe.retriesLeft - 1, true, probe.debug, true),
                     interval);
         } else {
             probes.remove(p.getUniqueId());
