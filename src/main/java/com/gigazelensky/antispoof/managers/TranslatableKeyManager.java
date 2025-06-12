@@ -368,12 +368,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos = signPos(target);
 
-        WrappedBlockState signState;
-        try {
-            signState = (WrappedBlockState) StateTypes.OAK_SIGN.getClass().getMethod("createBlockData").invoke(StateTypes.OAK_SIGN);
-        } catch (Throwable t) {
-            signState = StateTypes.OAK_SIGN.createBlockState(cv);
-        }
+        WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState();
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockChange(pos, signState.getGlobalId()));
 
         NBTCompound nbt = new NBTCompound();
