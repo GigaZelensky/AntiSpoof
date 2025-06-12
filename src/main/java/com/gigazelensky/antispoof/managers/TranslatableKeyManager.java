@@ -369,8 +369,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
-        // ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
-        // boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos = signPos(target);
 
         WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState();
@@ -381,13 +379,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
         String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
         String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
-        // String uid_json = "{\"text\":\"" + uid + "\"}";
 
-        // Forcing legacy Text1-4 NBT format. It is backwards-compatible with modern clients
-        // and more reliable than the modern `front_text` format, which fails on some versions.
-        nbt.setTag("Text1", new NBTString(lines.size() > 0 ? key1_json : ""));
-        nbt.setTag("Text2", new NBTString(lines.size() > 1 ? key2_json : ""));
-        nbt.setTag("Text3", new NBTString(lines.size() > 2 ? key3_json : ""));
+        // Force the legacy Text1-4 NBT format. It is supported by all modern clients for backward compatibility
+        // and is more stable across versions than the modern `front_text` format.
+        nbt.setTag("Text1", new NBTString(key1_json));
+        nbt.setTag("Text2", new NBTString(key2_json));
+        nbt.setTag("Text3", new NBTString(key3_json));
         nbt.setTag("Text4", new NBTString(uid));
 
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
