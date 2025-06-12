@@ -41,6 +41,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     // --- CONSTANT FOR BATCHING ---
     private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
 
+    // --- SERVER-SIDE FORMAT DETECTION ---
+    // 1.21.5+ inlines chat components directly (no JSON-string wrapper)
+    private static final boolean INLINE_COMPONENTS = detectInlineComponentFormat();
+
+
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
     private final ConfigManager    cfg;
@@ -369,7 +374,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     /* ---------------------------------------------------------------------
-     *  VERSION‑ROBUST FORMAT SELECTION
+     *  VERSION-ROBUST FORMAT SELECTION & HELPERS
      * ------------------------------------------------------------------- */
     private static boolean shouldUseModernFormat(ClientVersion cv) {
         if (cv == null) return true;                            // default: assume new
@@ -383,9 +388,46 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         return false;                                           // definitely legacy
     }
 
+    private static boolean detectInlineComponentFormat() {
+        try {
+            // e.g., "1.21.5-R0.1-SNAPSHOT" -> "1.21.5"
+            String ver = Bukkit.getBukkitVersion().split("-", 2)[0];
+            String[] p = ver.split("\\.");
+            int major = (p.length > 1) ? Integer.parseInt(p[1]) : 0;
+            int patch = (p.length > 2) ? Integer.parseInt(p[2]) : 0;
+            // True for 1.22+ or 1.21.5+
+            return major > 21 || (major == 21 && patch >= 5);
+        } catch (Throwable ignored) {
+            return true; // safe default – assume new servers expect the new format
+        }
+    }
+
+    private static NBTCompound translateComponent(String key) {
+        NBTCompound c = new NBTCompound();
+        c.setTag("translate", new NBTString(key));
+        return c;
+    }
+    private static NBTCompound textComponent(String text) {
+        NBTCompound c = new NBTCompound();
+        c.setTag("text", new NBTString(text));
+        return c;
+    }
+    private static NBTCompound createComponentNbt(String packedKeys) {
+        if (packedKeys == null || packedKeys.isEmpty()) return textComponent("");
+        NBTCompound root = textComponent("");
+        NBTList<NBTCompound> extra = new NBTList<>(NBTType.COMPOUND);
+        String[] parts = packedKeys.split(DELIMITER, -1);
+        for (int i = 0; i < parts.length; i++) {
+            extra.addTag(translateComponent(parts[i]));
+            if (i < parts.length - 1) extra.addTag(textComponent(DELIMITER));
+        }
+        root.setTag("extra", extra);
+        return root;
+    }
+
     private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
         ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
-        boolean modern   = shouldUseModernFormat(cv);           // <<<< single‑point decision
+        boolean modern   = shouldUseModernFormat(cv);
 
         Vector3i pos = signPos(target);
 
@@ -394,33 +436,66 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
-        String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
-        String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
-        String uid_json  = "{\"text\":\"" + uid + "\"}";
+        
+        String l1 = lines.size() > 0 ? lines.get(0) : null;
+        String l2 = lines.size() > 1 ? lines.get(1) : null;
+        String l3 = lines.size() > 2 ? lines.get(2) : null;
 
         if (modern) {
-            NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
-            msgs.addTag(new NBTString(key1_json));
-            msgs.addTag(new NBTString(key2_json));
-            msgs.addTag(new NBTString(key3_json));
-            msgs.addTag(new NBTString(uid_json));
-            NBTCompound front = new NBTCompound();
-            front.setTag("messages", msgs);
-            front.setTag("color", new NBTString("black"));
-            front.setTag("has_glowing_text", new NBTByte((byte)0));
-            nbt.setTag("front_text", front);
-            NBTCompound back = new NBTCompound();
-            back.setTag("messages", msgs);
-            back.setTag("color", new NBTString("black"));
-            back.setTag("has_glowing_text", new NBTByte((byte)0));
-            nbt.setTag("back_text", back);
+            if (INLINE_COMPONENTS) {
+                // Modern (1.21.5+) format: list of NBT Compounds
+                NBTList<NBTCompound> msgs = new NBTList<>(NBTType.COMPOUND);
+                msgs.addTag(createComponentNbt(l1));
+                msgs.addTag(createComponentNbt(l2));
+                msgs.addTag(createComponentNbt(l3));
+                msgs.addTag(textComponent(uid));
+
+                NBTCompound front = new NBTCompound();
+                front.setTag("messages", msgs);
+                front.setTag("color", new NBTString("black"));
+                front.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("front_text", front);
+
+                NBTCompound back = new NBTCompound();
+                back.setTag("messages", msgs);
+                back.setTag("color", new NBTString("black"));
+                back.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("back_text", back);
+
+            } else {
+                // Modern (1.20 - 1.21.4) format: list of JSON Strings
+                String key1_json = createComponentJson(l1);
+                String key2_json = createComponentJson(l2);
+                String key3_json = createComponentJson(l3);
+                String uid_json  = "{\"text\":\"" + uid + "\"}";
+
+                NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
+                msgs.addTag(new NBTString(key1_json));
+                msgs.addTag(new NBTString(key2_json));
+                msgs.addTag(new NBTString(key3_json));
+                msgs.addTag(new NBTString(uid_json));
+                NBTCompound front = new NBTCompound();
+                front.setTag("messages", msgs);
+                front.setTag("color", new NBTString("black"));
+                front.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("front_text", front);
+                NBTCompound back = new NBTCompound();
+                back.setTag("messages", msgs);
+                back.setTag("color", new NBTString("black"));
+                back.setTag("has_glowing_text", new NBTByte((byte)0));
+                back.setTag("back_text", back);
+            }
         } else {
-            nbt.setTag("Text1", new NBTString(lines.size() > 0 ? key1_json : ""));
-            nbt.setTag("Text2", new NBTString(lines.size() > 1 ? key2_json : ""));
-            nbt.setTag("Text3", new NBTString(lines.size() > 2 ? key3_json : ""));
+            // Legacy (<1.20) format
+            String key1_json = createComponentJson(l1);
+            String key2_json = createComponentJson(l2);
+            String key3_json = createComponentJson(l3);
+            nbt.setTag("Text1", new NBTString(key1_json));
+            nbt.setTag("Text2", new NBTString(key2_json));
+            nbt.setTag("Text3", new NBTString(key3_json));
             nbt.setTag("Text4", new NBTString(uid));
         }
+
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
@@ -432,6 +507,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             PacketEvents.getAPI().getPlayerManager().sendPacket(p, new WrapperPlayServerBlockChange(pos, AIR_ID));
         }
     }
+
+
 
     private Vector3i signPos(Player p) {
         // Place the sign at the corner of an adjacent chunk, high up, to keep it out of sight.
