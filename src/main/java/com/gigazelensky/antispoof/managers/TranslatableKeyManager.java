@@ -40,7 +40,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     // --- NEW CONSTANTS FOR BATCHING ---
     private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
-    private static final int MAX_COMPONENT_LENGTH = 80; // A safe length for each packed line to avoid packet issues
+    // A safe length for a single sign line to avoid exceeding protocol limits on the client's response.
+    private static final int MAX_COMPONENT_LENGTH = 80;
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
@@ -48,15 +49,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     /* ACTIVE PROBES (Original structure is preserved) */
     private static final class Probe {
-        Iterator<List<Map.Entry<String, String>>> iterator;
+        Iterator<List<String>> iterator;
         final Set<String> translated = new HashSet<>();
         final Map<String, String> failedForNext = new LinkedHashMap<>();
         int retriesLeft;
         int totalBatches;
         int currentBatchNum = 0;
         /* per-round state */
-        List<Map.Entry<String, String>> currentEntries = null;
-        String[]  keys   = null; // This will hold PACKED keys
+        List<String> currentKeyLines = null;
         String  uid   = null;
         Vector3i sign = null;
         BukkitTask timeoutTask;
@@ -192,43 +192,53 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             if (now - cooldown.getOrDefault(p.getUniqueId(),0L) < cd) return;
             cooldown.put(p.getUniqueId(), now);
         }
-        
-        // --- BATCHING LOGIC ---
-        List<Map.Entry<String, String>> packedEntries = new ArrayList<>();
-        StringBuilder currentLine = new StringBuilder();
-        List<String> keysInCurrentLine = new ArrayList<>();
 
-        // Using entrySet() preserves the key-value link for labels
-        for (Map.Entry<String, String> entry : keys.entrySet()) {
-            if (currentLine.length() > 0 && currentLine.length() + entry.getKey().length() + DELIMITER.length() > MAX_COMPONENT_LENGTH) {
-                packedEntries.add(new AbstractMap.SimpleEntry<>(String.join(DELIMITER, keysInCurrentLine), ""));
-                currentLine.setLength(0);
-                keysInCurrentLine.clear();
+        // --- BATCHING LOGIC: Fills all 3 lines of a sign before moving to the next ---
+        List<List<String>> allSignBatches = new ArrayList<>();
+        if (!keys.isEmpty()) {
+            List<StringBuilder> currentSignBuilders = new ArrayList<>(Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder()));
+            int currentLineIndex = 0;
+
+            for (Map.Entry<String, String> entry : keys.entrySet()) {
+                String key = entry.getKey();
+
+                // If current line is full, try next line.
+                if (currentSignBuilders.get(currentLineIndex).length() > 0 &&
+                    currentSignBuilders.get(currentLineIndex).length() + DELIMITER.length() + key.length() > MAX_COMPONENT_LENGTH) {
+                    currentLineIndex++;
+                }
+
+                // If all lines on this sign are full, finalize the sign and start a new one.
+                if (currentLineIndex >= 3) {
+                    allSignBatches.add(currentSignBuilders.stream().map(StringBuilder::toString).collect(Collectors.toList()));
+                    currentSignBuilders = new ArrayList<>(Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder()));
+                    currentLineIndex = 0;
+                }
+
+                // Add the key to the current line.
+                if (currentSignBuilders.get(currentLineIndex).length() > 0) {
+                    currentSignBuilders.get(currentLineIndex).append(DELIMITER);
+                }
+                currentSignBuilders.get(currentLineIndex).append(key);
             }
-            if (!keysInCurrentLine.isEmpty()) currentLine.append(DELIMITER);
-            currentLine.append(entry.getKey());
-            keysInCurrentLine.add(entry.getKey());
-        }
-        if (!keysInCurrentLine.isEmpty()) {
-            packedEntries.add(new AbstractMap.SimpleEntry<>(String.join(DELIMITER, keysInCurrentLine), ""));
-        }
 
-        List<List<Map.Entry<String, String>>> keyGroups = new ArrayList<>();
-        for (int i = 0; i < packedEntries.size(); i += 3) {
-            keyGroups.add(new ArrayList<>(packedEntries.subList(i, Math.min(packedEntries.size(), i + 3))));
+            // Add the last sign if it has any content.
+            if (currentSignBuilders.get(0).length() > 0) {
+                allSignBatches.add(currentSignBuilders.stream().map(StringBuilder::toString).collect(Collectors.toList()));
+            }
         }
         // --- END BATCHING LOGIC ---
 
         Probe probe = new Probe();
-        probe.iterator = keyGroups.iterator();
+        probe.iterator = allSignBatches.iterator();
         probe.retriesLeft = retries;
         probe.debug = dbg;
         probe.forceSend = forceSend;
-        probe.totalBatches = keyGroups.size(); // Store total for debug messages
+        probe.totalBatches = allSignBatches.size(); // Store total for debug messages
         probes.put(p.getUniqueId(), probe);
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Starting translatable probe for " + p.getName() + " with " + keys.size() + " keys in " + keyGroups.size() + " sign packets.");
+            plugin.getLogger().info("[Debug] Starting translatable probe for " + p.getName() + " with " + keys.size() + " keys in " + allSignBatches.size() + " sign packets.");
         }
         advance(p, probe);
     }
@@ -243,16 +253,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         if (probe.sign != null) sendAir(player, probe.sign);
 
-        probe.currentEntries = probe.iterator.next();
-        probe.keys = new String[3]; // This now holds PACKED keys
-        for (int i = 0; i < probe.currentEntries.size(); i++) {
-            probe.keys[i] = probe.currentEntries.get(i).getKey();
-        }
-        for (int i = probe.currentEntries.size(); i < 3; i++) {
-            probe.keys[i] = null;
-        }
+        probe.currentKeyLines = probe.iterator.next();
         probe.uid = randomUID();
-        probe.currentBatchNum++; // Increment batch number
+        probe.currentBatchNum++;
 
         if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
             probe.waitingForMove = true;
@@ -262,7 +265,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private void placeNextSign(Player player, Probe probe) {
-        Vector3i pos = buildFakeSign(player, probe.keys, probe.uid);
+        Vector3i pos = buildFakeSign(player, probe.currentKeyLines, probe.uid);
         probe.sign = pos;
 
         if (cfg.isDebugMode()) {
@@ -273,10 +276,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
             // Unpack and handle each key as a failure on timeout
-            for (Map.Entry<String, String> entry : probe.currentEntries) {
-                String[] originalKeys = entry.getKey().split(DELIMITER, -1);
+            for (String line : probe.currentKeyLines) {
+                String[] originalKeys = line.split(DELIMITER, -1);
                 for (String key : originalKeys) {
-                    handleResult(player, probe, key, false, null);
+                    if (!key.isEmpty()) handleResult(player, probe, key, false, null);
                 }
             }
             advance(player, probe);
@@ -288,19 +291,21 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player p = (Player) e.getPlayer();
         Probe probe = probes.get(p.getUniqueId());
-        if (probe == null || probe.keys == null) return;
+        if (probe == null || probe.currentKeyLines == null) return;
 
         String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
         if (recv.length < 4 || !probe.uid.equals(recv[3])) return;
 
         probe.timeoutTask.cancel();
 
-        for (int i = 0; i < probe.currentEntries.size(); i++) {
-            String[] originalKeys = probe.currentEntries.get(i).getKey().split(DELIMITER, -1);
+        for (int i = 0; i < probe.currentKeyLines.size(); i++) {
+            if (i >= recv.length) break;
+            String[] originalKeys = probe.currentKeyLines.get(i).split(DELIMITER, -1);
             String[] receivedTranslations = recv[i].split(DELIMITER, -1);
 
             for (int j = 0; j < originalKeys.length; j++) {
                 String key = originalKeys[j];
+                if (key.isEmpty()) continue;
                 String received = (j < receivedTranslations.length) ? receivedTranslations[j] : key;
                 boolean translated = !received.isEmpty() && !received.equals(key) && !received.startsWith("{\"translate\"");
                 handleResult(p, probe, key, translated, received);
@@ -356,14 +361,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private String createComponentJson(String packedKeys) {
-        if (packedKeys == null) return "{\"text\":\"\"}";
+        if (packedKeys == null || packedKeys.isEmpty()) return "{\"text\":\"\"}";
         String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
             .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
             .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
         return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
-    private Vector3i buildFakeSign(Player target, String[] keys, String uid) {
+    private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
         ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
         boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos = signPos(target);
@@ -373,9 +378,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        String key1_json = createComponentJson(keys[0]);
-        String key2_json = createComponentJson(keys[1]);
-        String key3_json = createComponentJson(keys[2]);
+        String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
+        String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
+        String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
         String uid_json = "{\"text\":\"" + uid + "\"}";
 
         if (modern) {
@@ -395,9 +400,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             back.setTag("has_glowing_text", new NBTByte((byte)0));
             nbt.setTag("back_text", back);
         } else {
-            nbt.setTag("Text1", new NBTString(keys[0] != null ? key1_json : ""));
-            nbt.setTag("Text2", new NBTString(keys[1] != null ? key2_json : ""));
-            nbt.setTag("Text3", new NBTString(keys[2] != null ? key3_json : ""));
+            nbt.setTag("Text1", new NBTString(lines.size() > 0 ? key1_json : ""));
+            nbt.setTag("Text2", new NBTString(lines.size() > 1 ? key2_json : ""));
+            nbt.setTag("Text3", new NBTString(lines.size() > 2 ? key3_json : ""));
             nbt.setTag("Text4", new NBTString(uid));
         }
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
