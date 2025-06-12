@@ -40,7 +40,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     // --- NEW CONSTANTS FOR BATCHING ---
     private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
-    private static final int MAX_COMPONENT_LENGTH = 256; // A safe length for each packed line to avoid packet issues
+    private static final int MAX_COMPONENT_LENGTH = 80; // A safe length for each packed line to avoid packet issues
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
