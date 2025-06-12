@@ -865,4 +865,20 @@ public class ConfigManager {
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
     }
+
+    // Add enum for scan order
+    public enum ScanOrder {
+        SIGN_THEN_ANVIL,
+        ANVIL_THEN_SIGN
+    }
+
+    // Add method to get scan order from config
+    public ScanOrder getTranslatableScanOrder() {
+        try {
+            return ScanOrder.valueOf(config.getString("translatable-keys.scan-order", "SIGN_THEN_ANVIL").toUpperCase());
+        } catch (IllegalArgumentException e) {
+            // Fallback to default if the config value is invalid
+            return ScanOrder.SIGN_THEN_ANVIL;
+        }
+    }
 }
