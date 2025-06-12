@@ -365,7 +365,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private String createComponentJson(String packedKeys) {
-        if (packedKeys == null || packedKeys.isEmpty()) return "{\"text\":\"\"}";
+        // Correctly handle null or empty input to prevent malformed JSON
+        if (packedKeys == null || packedKeys.isEmpty()) {
+            return "{\"text\":\"\"}";
+        }
         String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
             .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
             .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
@@ -380,11 +383,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-        String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : "");
-        String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : "");
-        String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : "");
+        String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
+        String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
+        String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
         
-        // Always use the legacy format as it appears more compatible with the sign editor
+        // Unconditionally use the legacy Text1-4 format, as it's proven to be compatible.
         nbt.setTag("Text1", new NBTString(key1_json));
         nbt.setTag("Text2", new NBTString(key2_json));
         nbt.setTag("Text3", new NBTString(key3_json));
