@@ -223,7 +223,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             }
 
             // Add the last sign if it has any content.
-            if (currentSignBuilders.stream().anyMatch(sb -> sb.length() > 0)) {
+            if (currentSignBuilders.get(0).length() > 0) {
                 allSignBatches.add(currentSignBuilders.stream().map(StringBuilder::toString).collect(Collectors.toList()));
             }
         }
@@ -277,7 +277,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
             // Unpack and handle each key as a failure on timeout
             for (String line : probe.currentKeyLines) {
-                if (line.isEmpty()) continue;
                 String[] originalKeys = line.split(DELIMITER, -1);
                 for (String key : originalKeys) {
                     if (!key.isEmpty()) handleResult(player, probe, key, false, null);
@@ -301,10 +300,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         for (int i = 0; i < probe.currentKeyLines.size(); i++) {
             if (i >= recv.length) break;
-            String line = probe.currentKeyLines.get(i);
-            if (line.isEmpty()) continue;
-            
-            String[] originalKeys = line.split(DELIMITER, -1);
+            String[] originalKeys = probe.currentKeyLines.get(i).split(DELIMITER, -1);
             String[] receivedTranslations = recv[i].split(DELIMITER, -1);
 
             for (int j = 0; j < originalKeys.length; j++) {
@@ -365,10 +361,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private String createComponentJson(String packedKeys) {
-        // Correctly handle null or empty input to prevent malformed JSON
-        if (packedKeys == null || packedKeys.isEmpty()) {
-            return "{\"text\":\"\"}";
-        }
+        if (packedKeys == null || packedKeys.isEmpty()) return "{\"text\":\"\"}";
         String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
             .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
             .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
@@ -376,6 +369,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
+        // ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+        // boolean modern = cv.isNewerThanOrEquals(ClientVersion.V_1_20);
         Vector3i pos = signPos(target);
 
         WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState();
@@ -386,12 +381,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
         String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
         String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
-        
-        // Unconditionally use the legacy Text1-4 format, as it's proven to be compatible.
-        nbt.setTag("Text1", new NBTString(key1_json));
-        nbt.setTag("Text2", new NBTString(key2_json));
-        nbt.setTag("Text3", new NBTString(key3_json));
-        nbt.setTag("Text4", new NBTString(uid)); // Send UID as plain text
+        // String uid_json = "{\"text\":\"" + uid + "\"}";
+
+        // Forcing legacy Text1-4 NBT format. It is backwards-compatible with modern clients
+        // and more reliable than the modern `front_text` format, which fails on some versions.
+        nbt.setTag("Text1", new NBTString(lines.size() > 0 ? key1_json : ""));
+        nbt.setTag("Text2", new NBTString(lines.size() > 1 ? key2_json : ""));
+        nbt.setTag("Text3", new NBTString(lines.size() > 2 ? key3_json : ""));
+        nbt.setTag("Text4", new NBTString(uid));
 
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
