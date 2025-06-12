@@ -825,6 +825,14 @@ public class ConfigManager {
         return config.getInt("translatable-keys.check.key-delay", 2);
     }
 
+    /**
+     * Gets the maximum character length for a single line of keys sent to the client.
+     * @return The maximum line length.
+     */
+    public int getTranslatableMaxLineLength() {
+        return config.getInt("translatable-keys.check.max-line-length", 80);
+    }
+
     // Added retry settings
     public int getTranslatableRetryCount() {
         return config.getInt("translatable-keys.check.retry-count", 0);

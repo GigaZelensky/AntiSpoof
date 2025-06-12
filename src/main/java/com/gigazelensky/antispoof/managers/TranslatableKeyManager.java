@@ -38,10 +38,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private static final double MOVE_EPSILON    = 0.0001;
     private static final float ROT_EPSILON     = 1.5f;
 
-    // --- NEW CONSTANTS FOR BATCHING ---
+    // --- CONSTANT FOR BATCHING ---
     private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
-    // A safe length for a single sign line to avoid exceeding protocol limits on the client's response.
-    private static final int MAX_COMPONENT_LENGTH = 80;
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
@@ -193,6 +191,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             cooldown.put(p.getUniqueId(), now);
         }
 
+        final int maxLineLength = cfg.getTranslatableMaxLineLength();
+
         // --- BATCHING LOGIC: Fills all 3 lines of a sign before moving to the next ---
         List<List<String>> allSignBatches = new ArrayList<>();
         if (!keys.isEmpty()) {
@@ -204,7 +204,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
                 // If current line is full, try next line.
                 if (currentSignBuilders.get(currentLineIndex).length() > 0 &&
-                    currentSignBuilders.get(currentLineIndex).length() + DELIMITER.length() + key.length() > MAX_COMPONENT_LENGTH) {
+                    currentSignBuilders.get(currentLineIndex).length() + DELIMITER.length() + key.length() > maxLineLength) {
                     currentLineIndex++;
                 }
 
