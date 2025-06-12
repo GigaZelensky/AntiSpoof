@@ -368,7 +368,25 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
+    /* ---------------------------------------------------------------------
+     *  VERSION‑ROBUST FORMAT SELECTION
+     * ------------------------------------------------------------------- */
+    private static boolean shouldUseModernFormat(ClientVersion cv) {
+        if (cv == null) return true;                            // default: assume new
+        try {
+            if (cv.isNewerThanOrEquals(ClientVersion.V_1_20))   // recognised modern
+                return true;
+        } catch (Throwable ignored) { }
+        try {                                                   // unknown but higher protocol
+            return cv.getProtocolVersion() >= ClientVersion.V_1_20.getProtocolVersion();
+        } catch (Throwable ignored) { }
+        return false;                                           // definitely legacy
+    }
+
     private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
+        ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
+        boolean modern   = shouldUseModernFormat(cv);           // <<<< single‑point decision
+
         Vector3i pos = signPos(target);
 
         WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState();
@@ -379,14 +397,30 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String key1_json = createComponentJson(lines.size() > 0 ? lines.get(0) : null);
         String key2_json = createComponentJson(lines.size() > 1 ? lines.get(1) : null);
         String key3_json = createComponentJson(lines.size() > 2 ? lines.get(2) : null);
+        String uid_json  = "{\"text\":\"" + uid + "\"}";
 
-        // Force the legacy Text1-4 NBT format. It is supported by all modern clients for backward compatibility
-        // and is more stable across versions than the modern `front_text` format.
-        nbt.setTag("Text1", new NBTString(key1_json));
-        nbt.setTag("Text2", new NBTString(key2_json));
-        nbt.setTag("Text3", new NBTString(key3_json));
-        nbt.setTag("Text4", new NBTString(uid));
-
+        if (modern) {
+            NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
+            msgs.addTag(new NBTString(key1_json));
+            msgs.addTag(new NBTString(key2_json));
+            msgs.addTag(new NBTString(key3_json));
+            msgs.addTag(new NBTString(uid_json));
+            NBTCompound front = new NBTCompound();
+            front.setTag("messages", msgs);
+            front.setTag("color", new NBTString("black"));
+            front.setTag("has_glowing_text", new NBTByte((byte)0));
+            nbt.setTag("front_text", front);
+            NBTCompound back = new NBTCompound();
+            back.setTag("messages", msgs);
+            back.setTag("color", new NBTString("black"));
+            back.setTag("has_glowing_text", new NBTByte((byte)0));
+            nbt.setTag("back_text", back);
+        } else {
+            nbt.setTag("Text1", new NBTString(lines.size() > 0 ? key1_json : ""));
+            nbt.setTag("Text2", new NBTString(lines.size() > 1 ? key2_json : ""));
+            nbt.setTag("Text3", new NBTString(lines.size() > 2 ? key3_json : ""));
+            nbt.setTag("Text4", new NBTString(uid));
+        }
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
         PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
