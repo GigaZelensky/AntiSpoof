@@ -375,7 +375,14 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
 
         if (!data.getDetectedMods().isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "Detected Mods:");
-            data.getDetectedMods().forEach(m -> sender.sendMessage(ChatColor.WHITE + m));
+            Set<String> flagged = data.getFlaggedMods();
+            for (String mod : data.getDetectedMods()) {
+                if (flagged.contains(mod)) {
+                    sender.sendMessage(ChatColor.RED + "- " + mod + " (Flagged)");
+                } else {
+                    sender.sendMessage(ChatColor.WHITE + "- " + mod);
+                }
+            }
         }
         
         // Determine all reasons for flagging
