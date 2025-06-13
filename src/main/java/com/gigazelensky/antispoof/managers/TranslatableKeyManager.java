@@ -372,48 +372,65 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 detect.handleTranslatable(p, TranslatableEventType.TIMEOUT_ALL, "timeout-all");
             }
             PlayerData pdata = plugin.getPlayerDataMap().get(p.getUniqueId());
-            if (pdata != null && !pdata.getDiscordAlertMods().isEmpty()) {
-                plugin.getAlertManager().sendDiscordModBatch(p, pdata.getDiscordAlertMods());
-                pdata.getDiscordAlertMods().clear();
-                for (ConfigManager.CustomCombination cc : cfg.getCustomCombinations()) {
-                    boolean match = true;
-                    if (cc.withChannel != null) {
-                        match &= pdata.getChannels().stream().anyMatch(ch -> ch.matches(cc.withChannel));
-                    }
-                    if (cc.withoutChannel != null) {
-                        match &= pdata.getChannels().stream().noneMatch(ch -> ch.matches(cc.withoutChannel));
-                    }
-                    if (cc.withKey != null) {
-                        match &= pdata.getTranslatedKeys().stream().anyMatch(k -> k.matches(cc.withKey));
-                    }
-                    if (cc.withoutKey != null) {
-                        match &= pdata.getTranslatedKeys().stream().noneMatch(k -> k.matches(cc.withoutKey));
-                    }
-                    String brand = plugin.getClientBrand(p);
-                    if (cc.withBrand != null && brand != null) {
-                        match &= brand.matches(cc.withBrand);
-                    }
-                    if (cc.withoutBrand != null && brand != null) {
-                        match &= !brand.matches(cc.withoutBrand);
-                    }
-                    if (match) {
-                        if (cc.alert) {
-                            plugin.getAlertManager().sendCustomAlert(p, cc.alertMessage.replace("%channel%", cc.withChannel == null ? "" : cc.withChannel).replace("%mod_label%", String.join(",", pdata.getDiscordAlertMods())),
-                                    cc.consoleAlertMessage.replace("%channel%", cc.withChannel == null ? "" : cc.withChannel).replace("%mod_label%", String.join(",", pdata.getDiscordAlertMods())),
-                                    "CUSTOM_COMBO");
-                        }
-                        if (cc.discordAlert) {
-                            plugin.getAlertManager().sendDiscordModBatch(p, pdata.getDiscordAlertMods());
-                        }
-                        if (cc.punish) {
-                            plugin.getAlertManager().executeCustomPunishments(p, cc.punishments);
-                        }
-                    }
+            if (pdata != null) {
+                Set<String> batch = new LinkedHashSet<>(pdata.getDiscordAlertMods());
+                if (!batch.isEmpty()) {
+                    plugin.getAlertManager().sendDiscordModBatch(p, batch);
                 }
+                processCustomCombinations(p, pdata, batch);
+                pdata.getDiscordAlertMods().clear();
             }
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
+            }
+        }
+    }
+
+    private void processCustomCombinations(Player p, PlayerData pdata, Set<String> batch) {
+        for (ConfigManager.CustomCombination cc : cfg.getCustomCombinations()) {
+            boolean match = true;
+            if (cc.withChannel != null) {
+                match &= pdata.getChannels().stream().anyMatch(ch -> ch.matches(cc.withChannel));
+            }
+            if (cc.withoutChannel != null) {
+                match &= pdata.getChannels().stream().noneMatch(ch -> ch.matches(cc.withoutChannel));
+            }
+            if (cc.withKey != null) {
+                match &= pdata.getTranslatedKeys().stream().anyMatch(k -> k.matches(cc.withKey));
+            }
+            if (cc.withoutKey != null) {
+                match &= pdata.getTranslatedKeys().stream().noneMatch(k -> k.matches(cc.withoutKey));
+            }
+            String brand = plugin.getClientBrand(p);
+            if (cc.withBrand != null && brand != null) {
+                match &= brand.matches(cc.withBrand);
+            }
+            if (cc.withoutBrand != null && brand != null) {
+                match &= !brand.matches(cc.withoutBrand);
+            }
+            if (!match) continue;
+
+            String modsStr = String.join(",", batch);
+            String alertMsg = cc.alertMessage
+                    .replace("%player%", p.getName())
+                    .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
+            String consoleMsg = cc.consoleAlertMessage
+                    .replace("%player%", p.getName())
+                    .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
+
+            if (cc.alert) {
+                plugin.getAlertManager().sendCustomAlert(p, alertMsg, consoleMsg, "CUSTOM_COMBO");
+            }
+            if (cc.discordAlert) {
+                plugin.getAlertManager().sendDiscordModBatch(p, batch);
+            }
+            if (cc.punish) {
+                plugin.getAlertManager().executeCustomPunishments(p, cc.punishments);
             }
         }
     }

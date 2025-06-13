@@ -673,8 +673,10 @@ public class ConfigManager {
     private boolean alertOnTimeoutAny;
     private boolean punishOnTimeoutAll;
     private boolean punishOnTimeoutAny;
+    public enum ComboMethod { CHANNEL, BRAND, KEY, ANY }
+
     public static class CustomCombination {
-        String method;
+        ComboMethod method = ComboMethod.ANY;
         String withChannel;
         String withoutChannel;
         String withKey;
@@ -687,6 +689,21 @@ public class ConfigManager {
         String alertMessage;
         String consoleAlertMessage;
         List<String> punishments = new ArrayList<>();
+    }
+
+    private String defaultComboAlert(CustomCombination cc, boolean console) {
+        String base = console ? "%player% triggered custom combo" : "&8[&cAntiSpoof&8] &e%player% flagged";
+        String suffix = "";
+        if (cc.withChannel != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!";
+        } else if (cc.withChannel != null && cc.withoutBrand != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%brand% &cbrand!";
+        } else if (cc.withBrand != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%brand% &cwithout &f%mod_label% &ckey!";
+        } else {
+            suffix = "!";
+        }
+        return base + suffix;
     }
 
     private final List<CustomCombination> customCombinations = new ArrayList<>();
@@ -800,7 +817,12 @@ public class ConfigManager {
                 ConfigurationSection csec = combos.getConfigurationSection(cKey);
                 if (csec == null) continue;
                 CustomCombination cc = new CustomCombination();
-                cc.method = csec.getString("method", "");
+                String methodStr = csec.getString("method", "ANY").toUpperCase();
+                try {
+                    cc.method = ComboMethod.valueOf(methodStr);
+                } catch (IllegalArgumentException e) {
+                    cc.method = ComboMethod.ANY;
+                }
                 cc.withChannel = csec.getString("with-channel");
                 cc.withoutChannel = csec.getString("without-channel");
                 cc.withKey = csec.getString("with-key");
@@ -810,8 +832,10 @@ public class ConfigManager {
                 cc.alert = csec.getBoolean("alert", true);
                 cc.discordAlert = csec.getBoolean("discord-alert", false);
                 cc.punish = csec.getBoolean("punish", false);
-                cc.alertMessage = csec.getString("alert-message", getAlertMessage());
-                cc.consoleAlertMessage = csec.getString("console-alert-message", getConsoleAlertMessage());
+                cc.alertMessage = csec.contains("alert-message") ?
+                        csec.getString("alert-message") : defaultComboAlert(cc, false);
+                cc.consoleAlertMessage = csec.contains("console-alert-message") ?
+                        csec.getString("console-alert-message") : defaultComboAlert(cc, true);
                 cc.punishments = csec.getStringList("punishments");
                 customCombinations.add(cc);
             }

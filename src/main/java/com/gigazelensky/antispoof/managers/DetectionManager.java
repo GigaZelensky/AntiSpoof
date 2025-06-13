@@ -902,7 +902,8 @@ public class DetectionManager {
                 }
             }
             if (modConfig.shouldAlert()) {
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
+                boolean sendDiscord = !modConfig.shouldDiscordAlert();
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig, sendDiscord);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "TRANSLATED_KEY", modConfig);
@@ -921,7 +922,8 @@ public class DetectionManager {
                 }
             }
             if (modConfig.shouldAlert()) {
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
+                boolean sendDiscord = !modConfig.shouldDiscordAlert();
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig, sendDiscord);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "REQUIRED_KEY_MISS", modConfig);
@@ -939,7 +941,8 @@ public class DetectionManager {
                 }
             }
             if (modConfig.shouldAlert()) {
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "KEY_TIMEOUT", modConfig);
+                boolean sendDiscord = !modConfig.shouldDiscordAlert();
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "KEY_TIMEOUT", modConfig, sendDiscord);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "KEY_TIMEOUT", modConfig);
@@ -957,7 +960,8 @@ public class DetectionManager {
                 }
             }
             if (modConfig.shouldAlert()) {
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "ALL_TIMEOUT", modConfig);
+                boolean sendDiscord = !modConfig.shouldDiscordAlert();
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "ALL_TIMEOUT", modConfig, sendDiscord);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "ALL_TIMEOUT", modConfig);
