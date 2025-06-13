@@ -320,7 +320,17 @@ public class AlertManager {
 
     public void sendDiscordModBatch(Player player, Set<String> labels) {
         if (!config.isDiscordWebhookEnabled() || labels.isEmpty()) return;
-        plugin.getDiscordWebhookHandler().sendAlert(player, "Detected Mods", null, null, new ArrayList<>(labels));
+        PlayerData pd = plugin.getPlayerDataMap().get(player.getUniqueId());
+        List<String> list = new ArrayList<>();
+        for (String label : labels) {
+            boolean flagged = pd != null && pd.getFlaggedMods().contains(label);
+            if (flagged) {
+                list.add(label + " (Flagged!)");
+            } else {
+                list.add(label);
+            }
+        }
+        plugin.getDiscordWebhookHandler().sendAlert(player, "Detected Mods", null, null, list);
     }
 
     public void executeCustomPunishments(Player player, List<String> commands) {
