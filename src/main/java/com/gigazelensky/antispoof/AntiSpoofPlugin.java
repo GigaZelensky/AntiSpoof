@@ -339,6 +339,10 @@ public class AntiSpoofPlugin extends JavaPlugin {
         UUID uuid = player.getUniqueId();
         PlayerData data = playerDataMap.get(uuid);
         if (data == null) return false;
+
+        if (!data.getFlaggedMods().isEmpty()) {
+            return true;
+        }
         
         // Exclude ignored channels (like minecraft:brand or MC|Brand) from detection logic
         Set<String> filteredChannels = detectionManager.getFilteredChannels(data.getChannels());

@@ -22,6 +22,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.scheduler.BukkitTask;
+import com.gigazelensky.antispoof.data.PlayerData;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -67,6 +68,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         org.bukkit.command.CommandSender debug;
         long sendTime;
         boolean forceSend = false;
+        boolean anyTimeout = false;
     }
 
     private final Map<UUID, Probe> probes   = new HashMap<>();
@@ -280,6 +282,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
+            probe.anyTimeout = true;
             // Unpack and handle each key as a failure on timeout
             for (String line : probe.currentKeyLines) {
                 String[] originalKeys = line.split(DELIMITER, -1);
@@ -358,6 +361,56 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
                     interval);
         } else {
+            boolean anyTimedOut = !probe.failedForNext.isEmpty();
+            boolean allTimedOut = probe.translated.isEmpty();
+            if (anyTimedOut && (cfg.shouldAlertOnTimeoutAny() || cfg.shouldPunishOnTimeoutAny())) {
+                for (String k : probe.failedForNext.keySet()) {
+                    detect.handleTranslatable(p, TranslatableEventType.TIMEOUT_ANY, k);
+                }
+            }
+            if (allTimedOut && (cfg.shouldAlertOnTimeoutAll() || cfg.shouldPunishOnTimeoutAll())) {
+                detect.handleTranslatable(p, TranslatableEventType.TIMEOUT_ALL, "timeout-all");
+            }
+            PlayerData pdata = plugin.getPlayerDataMap().get(p.getUniqueId());
+            if (pdata != null && !pdata.getDiscordAlertMods().isEmpty()) {
+                plugin.getAlertManager().sendDiscordModBatch(p, pdata.getDiscordAlertMods());
+                pdata.getDiscordAlertMods().clear();
+                for (ConfigManager.CustomCombination cc : cfg.getCustomCombinations()) {
+                    boolean match = true;
+                    if (cc.withChannel != null) {
+                        match &= pdata.getChannels().stream().anyMatch(ch -> ch.matches(cc.withChannel));
+                    }
+                    if (cc.withoutChannel != null) {
+                        match &= pdata.getChannels().stream().noneMatch(ch -> ch.matches(cc.withoutChannel));
+                    }
+                    if (cc.withKey != null) {
+                        match &= pdata.getTranslatedKeys().stream().anyMatch(k -> k.matches(cc.withKey));
+                    }
+                    if (cc.withoutKey != null) {
+                        match &= pdata.getTranslatedKeys().stream().noneMatch(k -> k.matches(cc.withoutKey));
+                    }
+                    String brand = plugin.getClientBrand(p);
+                    if (cc.withBrand != null && brand != null) {
+                        match &= brand.matches(cc.withBrand);
+                    }
+                    if (cc.withoutBrand != null && brand != null) {
+                        match &= !brand.matches(cc.withoutBrand);
+                    }
+                    if (match) {
+                        if (cc.alert) {
+                            plugin.getAlertManager().sendCustomAlert(p, cc.alertMessage.replace("%channel%", cc.withChannel == null ? "" : cc.withChannel).replace("%mod_label%", String.join(",", pdata.getDiscordAlertMods())),
+                                    cc.consoleAlertMessage.replace("%channel%", cc.withChannel == null ? "" : cc.withChannel).replace("%mod_label%", String.join(",", pdata.getDiscordAlertMods())),
+                                    "CUSTOM_COMBO");
+                        }
+                        if (cc.discordAlert) {
+                            plugin.getAlertManager().sendDiscordModBatch(p, pdata.getDiscordAlertMods());
+                        }
+                        if (cc.punish) {
+                            plugin.getAlertManager().executeCustomPunishments(p, cc.punishments);
+                        }
+                    }
+                }
+            }
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Probe finished for " + p.getName());

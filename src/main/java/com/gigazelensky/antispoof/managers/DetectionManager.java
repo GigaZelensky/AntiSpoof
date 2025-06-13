@@ -890,7 +890,17 @@ public class DetectionManager {
         }
 
         if (type == TranslatableEventType.TRANSLATED) {
-            if (pdata != null) pdata.addDetectedMod(label);
+            if (pdata != null) {
+                pdata.addDetectedMod(label);
+                pdata.addTranslatedKey(key);
+                if (modConfig.shouldFlag()) {
+                    pdata.addFlaggedMod(label);
+                    pdata.addFlaggedKey(key);
+                }
+                if (modConfig.shouldDiscordAlert()) {
+                    pdata.addDiscordAlertMod(label);
+                }
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
@@ -900,12 +910,57 @@ public class DetectionManager {
                 if (data != null) data.setAlreadyPunished(true);
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
-            if (pdata != null) pdata.addDetectedMod(label);
+            if (pdata != null) {
+                pdata.addDetectedMod(label);
+                if (modConfig.shouldFlag()) {
+                    pdata.addFlaggedMod(label);
+                    pdata.addFlaggedKey(key);
+                }
+                if (modConfig.shouldDiscordAlert()) {
+                    pdata.addDiscordAlertMod(label);
+                }
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "REQUIRED_KEY_MISS", modConfig);
+                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                if (data != null) data.setAlreadyPunished(true);
+            }
+        } else if (type == TranslatableEventType.TIMEOUT_ANY) {
+            if (pdata != null) {
+                if (modConfig.shouldFlag()) {
+                    pdata.addFlaggedMod(label);
+                    pdata.addFlaggedKey(key);
+                }
+                if (modConfig.shouldDiscordAlert()) {
+                    pdata.addDiscordAlertMod(label);
+                }
+            }
+            if (modConfig.shouldAlert()) {
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "KEY_TIMEOUT", modConfig);
+            }
+            if (modConfig.shouldPunish()) {
+                plugin.getAlertManager().executeTranslatablePunishment(player, label, "KEY_TIMEOUT", modConfig);
+                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+                if (data != null) data.setAlreadyPunished(true);
+            }
+        } else if (type == TranslatableEventType.TIMEOUT_ALL) {
+            if (pdata != null) {
+                if (modConfig.shouldFlag()) {
+                    pdata.addFlaggedMod(label);
+                    pdata.addFlaggedKey(key);
+                }
+                if (modConfig.shouldDiscordAlert()) {
+                    pdata.addDiscordAlertMod(label);
+                }
+            }
+            if (modConfig.shouldAlert()) {
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "ALL_TIMEOUT", modConfig);
+            }
+            if (modConfig.shouldPunish()) {
+                plugin.getAlertManager().executeTranslatablePunishment(player, label, "ALL_TIMEOUT", modConfig);
                 PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
                 if (data != null) data.setAlreadyPunished(true);
             }

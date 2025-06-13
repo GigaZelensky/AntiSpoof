@@ -329,6 +329,7 @@ translatable-keys:
     console-alert-message: "%player% flagged: %label%"
     discord-alert: false
     punish: false
+    flag: false
     punishments: []
   mods:
     sodium.option_impact.low:
@@ -341,7 +342,11 @@ translatable-keys:
       alert: true
       punish: false
       punishments: []
-  required: []
+  required:
+    'item.minecraft.bone':
+      label: "Vanilla"
+      alert: true
+      flag: false
   check:
     first-delay: 40
     gui-visible-ticks: 1
@@ -350,11 +355,23 @@ translatable-keys:
     retry-count: 0
     retry-interval: 60
     only-on-move: false
+    alert-on-timeout-any: false
+    punish-on-timeout-any: false
+    alert-on-timeout-all: false
+    punish-on-timeout-all: false
     # When true, delay the probes until the player moves and continue only
     # while they keep moving.
   # When enabled, each mod label will only alert once per player even if
   # the probes are triggered again during the same session.
   alert-once-per-label: false
+
+custom-combinations:
+  example:
+    method: CHANNEL
+    with-channel: "(?i).*xaero.*"
+    without-key: "(?i).*xaero.*"
+    alert: true
+    alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!"
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
