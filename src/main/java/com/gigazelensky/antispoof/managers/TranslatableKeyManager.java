@@ -339,10 +339,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String label = cfg.getTranslatableModsWithLabels().get(key);
         if (label == null) return;
 
+        boolean isRequired = cfg.getTranslatableRequiredMods().containsKey(key);
+
         if (translated) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
-            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+
+            // For required mods, just mark the translation but do not alert
+            if (!isRequired) {
+                detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+            } else {
+                PlayerData pd = plugin.getPlayerDataMap().get(p.getUniqueId());
+                if (pd != null) pd.addTranslatedKey(key);
+            }
         } else {
             probe.failedForNext.put(key, label);
         }
