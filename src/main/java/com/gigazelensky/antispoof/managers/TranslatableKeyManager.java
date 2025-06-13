@@ -415,11 +415,13 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             String alertMsg = cc.alertMessage
                     .replace("%player%", p.getName())
                     .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
-                    .replace("%mod_label%", modsStr);
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
             String consoleMsg = cc.consoleAlertMessage
                     .replace("%player%", p.getName())
                     .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
-                    .replace("%mod_label%", modsStr);
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
 
             if (cc.alert) {
                 plugin.getAlertManager().sendCustomAlert(p, alertMsg, consoleMsg, "CUSTOM_COMBO");

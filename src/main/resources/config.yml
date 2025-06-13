@@ -372,6 +372,14 @@ custom-combinations:
     without-key: "(?i).*xaero.*"
     alert: true
     alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!"
+  brandcheck:
+    method: CHANNEL
+    with-channel: "mods:?example"
+    without-brand: "vanilla"
+    alert: true
+    punish: true
+    punishments:
+      - "kick %player% bad boy"
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings

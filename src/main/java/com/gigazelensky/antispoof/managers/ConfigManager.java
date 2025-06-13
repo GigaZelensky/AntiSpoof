@@ -691,6 +691,21 @@ public class ConfigManager {
         List<String> punishments = new ArrayList<>();
     }
 
+    private String defaultComboAlert(CustomCombination cc, boolean console) {
+        String base = console ? "%player% triggered custom combo" : "&8[&cAntiSpoof&8] &e%player% flagged";
+        String suffix = "";
+        if (cc.withChannel != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!";
+        } else if (cc.withChannel != null && cc.withoutBrand != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%brand% &cbrand!";
+        } else if (cc.withBrand != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%brand% &cwithout &f%mod_label% &ckey!";
+        } else {
+            suffix = "!";
+        }
+        return base + suffix;
+    }
+
     private final List<CustomCombination> customCombinations = new ArrayList<>();
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
     private final Map<String, TranslatableModConfig> requiredTranslatableMods = new HashMap<>();
@@ -817,8 +832,10 @@ public class ConfigManager {
                 cc.alert = csec.getBoolean("alert", true);
                 cc.discordAlert = csec.getBoolean("discord-alert", false);
                 cc.punish = csec.getBoolean("punish", false);
-                cc.alertMessage = csec.getString("alert-message", getAlertMessage());
-                cc.consoleAlertMessage = csec.getString("console-alert-message", getConsoleAlertMessage());
+                cc.alertMessage = csec.contains("alert-message") ?
+                        csec.getString("alert-message") : defaultComboAlert(cc, false);
+                cc.consoleAlertMessage = csec.contains("console-alert-message") ?
+                        csec.getString("console-alert-message") : defaultComboAlert(cc, true);
                 cc.punishments = csec.getStringList("punishments");
                 customCombinations.add(cc);
             }
