@@ -28,8 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /**
- * Updated TranslatableKeyManager with NBT‑component wrapping to bypass client‑side
- * filters such as ModDetectionPreventer while keeping the original batching logic intact.
+ * Your original, stable, sequential probe, minimally modified for high-density batching.
  */
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
@@ -39,10 +38,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private static final double MOVE_EPSILON    = 0.0001;
     private static final float ROT_EPSILON     = 1.5f;
 
-    // Original delimiter for packing multiple keys on one sign line
-    private static final String DELIMITER = "\t";     // non‑printable tab keeps line length low
+    // --- CONSTANT FOR BATCHING ---
+    private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
 
-    // 1.21.5+ servers send NBT compounds instead of JSON strings for sign messages
+    // --- SERVER-SIDE FORMAT DETECTION ---
+    // 1.21.5+ inlines chat components directly (no JSON-string wrapper)
     private static final boolean INLINE_COMPONENTS = detectInlineComponentFormat();
 
 
@@ -177,7 +177,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     /* ======================================================================
-     *  MAIN PROBE LIFECYCLE (UNCHANGED)
+     *  MAIN PROBE LIFECYCLE (EDITED FOR BATCHING)
      * ==================================================================== */
     private void beginProbe(Player p,
                             Map<String, String> keys,
@@ -365,74 +365,12 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
-    /* =====================================================================
-     *                              KEY WRAPPING
-     *  Every key sent to the client is now wrapped inside an NBT component so
-     *  filters that only inspect top‑level Translatable/Keybind components do
-     *  not see it. All probe/detection logic later still compares the raw key
-     *  literal against the client’s reply, so no downstream changes needed.
-     * ===================================================================*/
-
-    /**
-     * {"nbt":"","interpret":false,"extra":[{"translate":"<key>"}]}
-     */
-    private static NBTCompound wrappedTranslateComponent(String key) {
-        NBTCompound root = new NBTCompound();
-        root.setTag("nbt", new NBTString(""));            // dummy path
-        root.setTag("interpret", new NBTByte((byte)0));    // don’t resolve the path, we only need the wrapper type
-        // build inner translate component
-        NBTCompound translate = new NBTCompound();
-        translate.setTag("translate", new NBTString(key));
-        // add it as extra list
-        NBTList<NBTCompound> extra = new NBTList<>(NBTType.COMPOUND);
-        extra.addTag(translate);
-        root.setTag("extra", extra);
-        return root;
-    }
-
-    /** Plain text component helper */
-    private static NBTCompound textComponent(String text) {
-        NBTCompound c = new NBTCompound();
-        c.setTag("text", new NBTString(text));
-        return c;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /**
-     * Build full component list for 1.21.5+ (NBT compound version)
-     */
-    private static NBTCompound createComponentNbt(String packedKeys) {
-        if (packedKeys == null || packedKeys.isEmpty()) return textComponent("");
-        NBTCompound root = textComponent("");
-        NBTList<NBTCompound> extra = new NBTList<>(NBTType.COMPOUND);
-        String[] parts = packedKeys.split(DELIMITER, -1);
-        for (int i = 0; i < parts.length; i++) {
-            extra.addTag(wrappedTranslateComponent(parts[i]));
-            if (i < parts.length - 1) extra.addTag(textComponent(DELIMITER));
-        }
-        root.setTag("extra", extra);
-        return root;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /**
-     * JSON string variant used on 1.20 – 1.21.4 and legacy (<1.20) paths
-     * Returns something like:
-     * {"text":"","extra":[{"nbt":"","interpret":false,"extra":[{"translate":"key"}]}, {"text":"\t"}, ...]}
-     */
-    private static String createComponentJson(String packedKeys) {
+    private String createComponentJson(String packedKeys) {
         if (packedKeys == null || packedKeys.isEmpty()) return "{\"text\":\"\"}";
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"text\":\"\",\"extra\":[");
-        String[] parts = packedKeys.split(DELIMITER, -1);
-        for (int i = 0; i < parts.length; i++) {
-            if (i > 0) sb.append(',').append("{\"text\":\"").append(DELIMITER).append("\"}");
-            sb.append("{\"nbt\":\"\",\"interpret\":false,\"extra\":[{\"translate\":\"")
-              .append(parts[i].replace("\"", "\\\""))
-              .append("\"}]}");
-        }
-        sb.append("]}");
-        return sb.toString();
+        String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
+            .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
+            .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
+        return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
     /* ---------------------------------------------------------------------
@@ -464,6 +402,29 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
+    private static NBTCompound translateComponent(String key) {
+        NBTCompound c = new NBTCompound();
+        c.setTag("translate", new NBTString(key));
+        return c;
+    }
+    private static NBTCompound textComponent(String text) {
+        NBTCompound c = new NBTCompound();
+        c.setTag("text", new NBTString(text));
+        return c;
+    }
+    private static NBTCompound createComponentNbt(String packedKeys) {
+        if (packedKeys == null || packedKeys.isEmpty()) return textComponent("");
+        NBTCompound root = textComponent("");
+        NBTList<NBTCompound> extra = new NBTList<>(NBTType.COMPOUND);
+        String[] parts = packedKeys.split(DELIMITER, -1);
+        for (int i = 0; i < parts.length; i++) {
+            extra.addTag(translateComponent(parts[i]));
+            if (i < parts.length - 1) extra.addTag(textComponent(DELIMITER));
+        }
+        root.setTag("extra", extra);
+        return root;
+    }
+
     private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
         ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
         boolean modern   = shouldUseModernFormat(cv);
@@ -475,7 +436,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
-
+        
         String l1 = lines.size() > 0 ? lines.get(0) : null;
         String l2 = lines.size() > 1 ? lines.get(1) : null;
         String l3 = lines.size() > 2 ? lines.get(2) : null;
