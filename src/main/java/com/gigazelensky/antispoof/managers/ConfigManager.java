@@ -673,8 +673,10 @@ public class ConfigManager {
     private boolean alertOnTimeoutAny;
     private boolean punishOnTimeoutAll;
     private boolean punishOnTimeoutAny;
+    public enum ComboMethod { CHANNEL, BRAND, KEY, ANY }
+
     public static class CustomCombination {
-        String method;
+        ComboMethod method = ComboMethod.ANY;
         String withChannel;
         String withoutChannel;
         String withKey;
@@ -800,7 +802,12 @@ public class ConfigManager {
                 ConfigurationSection csec = combos.getConfigurationSection(cKey);
                 if (csec == null) continue;
                 CustomCombination cc = new CustomCombination();
-                cc.method = csec.getString("method", "");
+                String methodStr = csec.getString("method", "ANY").toUpperCase();
+                try {
+                    cc.method = ComboMethod.valueOf(methodStr);
+                } catch (IllegalArgumentException e) {
+                    cc.method = ComboMethod.ANY;
+                }
                 cc.withChannel = csec.getString("with-channel");
                 cc.withoutChannel = csec.getString("without-channel");
                 cc.withKey = csec.getString("with-key");
