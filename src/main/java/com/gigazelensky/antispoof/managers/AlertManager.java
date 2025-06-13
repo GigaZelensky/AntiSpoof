@@ -317,6 +317,20 @@ public class AlertManager {
         }
     }
 
+    public void sendDiscordModBatch(Player player, Set<String> labels) {
+        if (!config.isDiscordWebhookEnabled() || labels.isEmpty()) return;
+        plugin.getDiscordWebhookHandler().sendAlert(player, "Detected Mods", null, null, new ArrayList<>(labels));
+    }
+
+    public void executeCustomPunishments(Player player, List<String> commands) {
+        if (commands == null || commands.isEmpty()) return;
+        for (String cmd : commands) {
+            final String formatted = cmd.replace("%player%", player.getName());
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), formatted));
+        }
+    }
+
     /**
      * Executes punishment for a translatable key violation
      */
