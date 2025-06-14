@@ -890,20 +890,9 @@ public class DetectionManager {
         }
 
         if (type == TranslatableEventType.TRANSLATED) {
-            if (pdata != null) {
-                pdata.addDetectedMod(label);
-                pdata.addTranslatedKey(key);
-                if (modConfig.shouldFlag()) {
-                    pdata.addFlaggedMod(label);
-                    pdata.addFlaggedKey(key);
-                }
-                if (modConfig.shouldDiscordAlert()) {
-                    pdata.addDiscordAlertMod(label);
-                }
-            }
+            if (pdata != null) pdata.addDetectedMod(label);
             if (modConfig.shouldAlert()) {
-                boolean sendDiscord = !modConfig.shouldDiscordAlert();
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig, sendDiscord);
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "TRANSLATED_KEY", modConfig);
@@ -911,60 +900,12 @@ public class DetectionManager {
                 if (data != null) data.setAlreadyPunished(true);
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
-            if (pdata != null) {
-                pdata.addDetectedMod(label);
-                if (modConfig.shouldFlag()) {
-                    pdata.addFlaggedMod(label);
-                    pdata.addFlaggedKey(key);
-                }
-                if (modConfig.shouldDiscordAlert()) {
-                    pdata.addDiscordAlertMod(label);
-                }
-            }
+            if (pdata != null) pdata.addDetectedMod(label);
             if (modConfig.shouldAlert()) {
-                boolean sendDiscord = !modConfig.shouldDiscordAlert();
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig, sendDiscord);
+                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }
             if (modConfig.shouldPunish()) {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "REQUIRED_KEY_MISS", modConfig);
-                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-                if (data != null) data.setAlreadyPunished(true);
-            }
-        } else if (type == TranslatableEventType.TIMEOUT_ANY) {
-            if (pdata != null) {
-                if (modConfig.shouldFlag()) {
-                    pdata.addFlaggedMod(label);
-                    pdata.addFlaggedKey(key);
-                }
-                if (modConfig.shouldDiscordAlert()) {
-                    pdata.addDiscordAlertMod(label);
-                }
-            }
-            if (modConfig.shouldAlert()) {
-                boolean sendDiscord = !modConfig.shouldDiscordAlert();
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "KEY_TIMEOUT", modConfig, sendDiscord);
-            }
-            if (modConfig.shouldPunish()) {
-                plugin.getAlertManager().executeTranslatablePunishment(player, label, "KEY_TIMEOUT", modConfig);
-                PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
-                if (data != null) data.setAlreadyPunished(true);
-            }
-        } else if (type == TranslatableEventType.TIMEOUT_ALL) {
-            if (pdata != null) {
-                if (modConfig.shouldFlag()) {
-                    pdata.addFlaggedMod(label);
-                    pdata.addFlaggedKey(key);
-                }
-                if (modConfig.shouldDiscordAlert()) {
-                    pdata.addDiscordAlertMod(label);
-                }
-            }
-            if (modConfig.shouldAlert()) {
-                boolean sendDiscord = !modConfig.shouldDiscordAlert();
-                plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "ALL_TIMEOUT", modConfig, sendDiscord);
-            }
-            if (modConfig.shouldPunish()) {
-                plugin.getAlertManager().executeTranslatablePunishment(player, label, "ALL_TIMEOUT", modConfig);
                 PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
                 if (data != null) data.setAlreadyPunished(true);
             }
