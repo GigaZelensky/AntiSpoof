@@ -48,7 +48,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     private static final String DELIMITER       = "\t";    // sign line delimiter
 
     private static final int ANVIL_WINDOW_ID    = 239;
-    private static final short STATE_ID_ZERO    = 0;
+    private static final short STATE_ID_ZERO    = 0;       // kept for sign path
     private static final int   ANVIL_INPUT_SLOT = 0;
     private static final int   CONTAINER_SIZE   = 3;
 
@@ -333,7 +333,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     }
 
     /* ────────────────────────────────────────────────────────────────── */
-    /*  ANVIL PATH (rewritten for 1.20.5+)                               */
+    /*  ANVIL PATH (fixed to auto‑close)                                 */
     /* ────────────────────────────────────────────────────────────────── */
 
     private void advanceAnvil(Player player, Probe pr) {
@@ -353,14 +353,18 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
+    /**
+     * Opens the anvil, injects the custom‑named item, then auto‑closes the
+     * container one tick later. Client still emits NAME_ITEM if the key
+     * translates; otherwise we rely on the watchdog.
+     */
     private void placeNextAnvil(Player player, Probe probe, String key) {
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Sending ANVIL probe for key '"
-                                    + key + "' to " + player.getName());
+            plugin.getLogger().info("[Debug] Sending ANVIL probe for key '" + key + "' to " + player.getName());
         }
 
-        /* 1. open window */
+        /* 1 ─ open the window */
         PacketEvents.getAPI().getPlayerManager().sendPacket(
                 player,
                 new WrapperPlayServerOpenWindow(
@@ -368,52 +372,48 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         ANVIL_CONTAINER_ID,
                         Component.text("Repair & Name")));
 
-        /* 2. build test stack */
+        /* 2 ─ build the custom‑named stack */
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("display", new NBTCompound());
         nbt.getCompoundTagOrNull("display")
-                .setTag("Name", new NBTString(
-                        "{\"translate\":\"" + key.replace("\"","\\\"") + "\"}"));
+                .setTag("Name", new NBTString("{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}"));
 
-        ItemStack testStack = ItemStack.builder()
-                .type(ItemTypes.IRON_SWORD)
-                .amount(1)
-                .nbt(nbt)
-                .build();
+        ItemStack test = ItemStack.builder()
+                                  .type(ItemTypes.IRON_SWORD)
+                                  .amount(1)
+                                  .nbt(nbt)
+                                  .build();
 
-        /* 3. full container snapshot */
-        List<ItemStack> slots = new ArrayList<>(CONTAINER_SIZE);
-        slots.add(testStack);        // slot 0
-        slots.add(emptyStack());     // slot 1
-        slots.add(emptyStack());     // slot 2
+        /* 3 ─ complete snapshot (three slots) with state‑id 1 */
+        List<ItemStack> contents = Arrays.asList(test, emptyStack(), emptyStack());
 
         PacketEvents.getAPI().getPlayerManager().sendPacket(
                 player,
                 new WrapperPlayServerWindowItems(
                         ANVIL_WINDOW_ID,
-                        STATE_ID_ZERO,
-                        slots,
-                        emptyStack()));                        // carried
+                        1,                // state id >0 : “changed”
+                        contents,
+                        emptyStack()));   // carried item
 
-        /* 4. level‑cost property (visual) */
+        /* 4 ─ cost = 0 to remove the red X */
         PacketEvents.getAPI().getPlayerManager().sendPacket(
                 player,
-                new WrapperPlayServerWindowProperty(
-                        ANVIL_WINDOW_ID, 0, 0));
+                new WrapperPlayServerWindowProperty(ANVIL_WINDOW_ID, 0, 0));
 
-        /* 5. timeout scheduler */
+        /* 5 ─ close the GUI one tick later so the client can process it */
+        Bukkit.getScheduler().runTaskLater(plugin, () ->
+                PacketEvents.getAPI().getPlayerManager()
+                            .sendPacket(player, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID)), 1L);
+
+        /* 6 ─ standard timeout */
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(
                 plugin,
                 () -> {
                     if (cfg.isDebugMode()) {
-                        plugin.getLogger().warning("[Debug] ANVIL probe for key '"
-                                + key + "' timed out for "
-                                + player.getName());
+                        plugin.getLogger().warning("[Debug] ANVIL probe for key '" + key + "' timed out for " + player.getName());
                     }
                     handleResult(player, probe, key, false, null);
-                    PacketEvents.getAPI().getPlayerManager().sendPacket(
-                            player, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID));
                     advanceAnvil(player, probe);
                 },
                 TIMEOUT_TICKS);
@@ -465,9 +465,6 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
             boolean translated = !newName.isEmpty() && !newName.equals(key);
             handleResult(p, pr, key, translated, newName);
-
-            PacketEvents.getAPI().getPlayerManager().sendPacket(
-                    p, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID));
 
             advanceAnvil(p, pr);
         }
