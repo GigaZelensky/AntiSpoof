@@ -846,6 +846,10 @@ public class ConfigManager {
         return config.getBoolean("translatable-keys.check.only-on-move", false);
     }
 
+    public boolean isTranslatableStartWithAnvil() {
+        return config.getBoolean("translatable-keys.check.start-with-anvil", false);
+    }
+
     public boolean isTranslatableAlertOnce() {
         return translatableAlertOnce;
     }

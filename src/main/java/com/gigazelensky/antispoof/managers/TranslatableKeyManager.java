@@ -217,9 +217,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.retriesLeft = retries;
         probe.debug = dbg;
         probe.forceSend = forceSend;
-        probe.anvilMode = anvilMode;
+        probe.anvilMode = anvilMode || cfg.isTranslatableStartWithAnvil();
 
-        if (!anvilMode) {
+        if (!probe.anvilMode) {
             /* -------- sign batching -------- */
             final int maxLineLength = cfg.getTranslatableMaxLineLength();
             List<List<String>> allSignBatches = new ArrayList<>();
@@ -253,9 +253,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probes.put(p.getUniqueId(), probe);
 
         if (cfg.isDebugMode()) {
-            plugin.getLogger().info("[Debug] Starting " + (anvilMode ? "anvil" : "sign") +
+            plugin.getLogger().info("[Debug] Starting " + (probe.anvilMode ? "anvil" : "sign") +
                     " probe for " + p.getName() + " with " + keys.size() +
-                    (anvilMode ? " keys" : " keys in " + probe.totalBatches + " sign packets."));
+                    (probe.anvilMode ? " keys" : " keys in " + probe.totalBatches + " sign packets."));
         }
         advance(p, probe);
     }
@@ -436,7 +436,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (probe.sign != null) sendAir(p, probe.sign);
 
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
-            boolean nextAnvil = !probe.anvilMode;   // first retry switches to anvil
+            boolean nextAnvil = !probe.anvilMode;
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " +
                     probe.failedForNext.size() + " failed keys for " + p.getName() +
                     " using " + (nextAnvil ? "anvil" : "sign") + " mode");
