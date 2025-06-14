@@ -397,7 +397,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         /* 5 ─ close window next tick */
         Bukkit.getScheduler().runTaskLater(plugin, () ->
                 PacketEvents.getAPI().getPlayerManager()
-                        .sendPacket(player, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID)), 1L);
+                        .sendPacket(player, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID)), 4L);
 
         /* 6 ─ timeout watchdog */
         probe.sendTime = System.currentTimeMillis();
