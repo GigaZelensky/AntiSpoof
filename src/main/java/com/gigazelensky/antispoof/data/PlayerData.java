@@ -51,6 +51,20 @@ public class PlayerData {
     }
 
     /**
+     * Removes a detected mod label from this player's session
+     */
+    public void removeDetectedMod(String label) {
+        detectedMods.remove(label);
+    }
+
+    /**
+     * Removes an alerted mod label from this player's session
+     */
+    public void removeAlertedMod(String label) {
+        alertedMods.remove(label);
+    }
+
+    /**
      * @return Mods that triggered alerts for this player
      */
     public Set<String> getAlertedMods() {

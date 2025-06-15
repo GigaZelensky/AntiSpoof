@@ -348,7 +348,13 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             probe.translated.add(key);
             probe.failedForNext.remove(key); // clear any earlier failure
             probe.timedOut.remove(key);
-            if (!isRequired) {
+            if (isRequired) {
+                PlayerData data = plugin.getPlayerDataMap().get(p.getUniqueId());
+                if (data != null) {
+                    data.removeDetectedMod(label);
+                    data.removeAlertedMod(label);
+                }
+            } else {
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
             }
         } else {
