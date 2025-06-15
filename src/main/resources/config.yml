@@ -349,6 +349,9 @@ translatable-keys:
       label: Vanilla
       alert: true
       flag: false
+      # Optional custom messages when the key is missing
+      # alert-message: "&8[&cAntiSpoof&8] &7%player% failed to translate %label%"
+      # console-alert-message: "%player% failed to translate %label%"
   check:
     first-delay: 40
     gui-visible-ticks: 1
