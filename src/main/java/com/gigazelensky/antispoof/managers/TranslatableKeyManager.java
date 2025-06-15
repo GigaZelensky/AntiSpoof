@@ -5,8 +5,6 @@ import com.gigazelensky.antispoof.enums.TranslatableEventType;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.protocol.item.ItemStack;
-import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
 import com.github.retrooper.packetevents.protocol.nbt.*;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
@@ -14,127 +12,72 @@ import com.github.retrooper.packetevents.protocol.world.blockentity.BlockEntityT
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import com.github.retrooper.packetevents.util.Vector3i;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientNameItem;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUpdateSign;
 import com.github.retrooper.packetevents.wrapper.play.server.*;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
-import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /**
- * Handles translatable‑key probing using signs and anvils.
- * This version restores silent anvil probing for 1.20.5+ by
- * sending the test stack with SET_SLOT instead of the initial
- * WINDOW_ITEMS frame and by using the modern custom‑name component.
+ * Your original, stable, sequential probe, minimally modified for high-density batching.
  */
 public final class TranslatableKeyManager extends PacketListenerAbstract implements Listener {
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  CONSTANTS                                                        */
-    /* ────────────────────────────────────────────────────────────────── */
-    private static final int    TIMEOUT_TICKS   = 40;      // 2 s
-    private static final int    AIR_ID          = 0;
+    /* --------------------------------------------------------------------- */
+    private static final int   TIMEOUT_TICKS   = 40;  // 2s, safer for potentially slow clients
+    private static final int   AIR_ID          = 0;
     private static final double MOVE_EPSILON    = 0.0001;
-    private static final float  ROT_EPSILON     = 1.5f;
+    private static final float ROT_EPSILON     = 1.5f;
 
-    private static final String DELIMITER       = "\t";    // sign line delimiter
+    // --- CONSTANT FOR BATCHING ---
+    private static final String DELIMITER = "\t"; // Tab character is a safe, non-printable delimiter
 
-    private static final int ANVIL_WINDOW_ID    = 239;
-    private static final int   ANVIL_INPUT_SLOT = 0;       // left slot
-    private static final int   CONTAINER_SIZE   = 3;
-
+    // --- SERVER-SIDE FORMAT DETECTION ---
+    // 1.21.5+ inlines chat components directly (no JSON-string wrapper)
     private static final boolean INLINE_COMPONENTS = detectInlineComponentFormat();
-    private static final int ANVIL_CONTAINER_ID    = getAnvilId();
+
 
     private final AntiSpoofPlugin plugin;
     private final DetectionManager detect;
     private final ConfigManager    cfg;
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  INTERNAL HELPERS                                                 */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    /** Returns a truly empty stack that works on every PacketEvents build. */
-    private static ItemStack emptyStack() {
-        return ItemStack.builder().type(ItemTypes.AIR).amount(0).build();
-    }
-
-    /** Test stack that triggers the rename box on 1.20.5+. */
-    private static ItemStack makeTestStack(String translateKey) {
-        String json = "{\"translate\":\"" + translateKey.replace("\"", "\\\"") + "\"}";
-
-        // legacy path
-        NBTCompound display = new NBTCompound();
-        display.setTag("Name", new NBTString(json));
-
-        // modern component path
-        NBTCompound components = new NBTCompound();
-        components.setTag("minecraft:custom_name", new NBTString(json));
-
-        NBTCompound root = new NBTCompound();
-        root.setTag("display", display);
-        root.setTag("components", components);
-
-        return ItemStack.builder()
-                .type(ItemTypes.PAPER)
-                .amount(1)
-                .nbt(root)
-                .build();
-    }
-
-    private enum ProbeMethod { SIGN, ANVIL }
-
+    /* ACTIVE PROBES (Original structure is preserved) */
     private static final class Probe {
-        final Map<String,String> failedForNext = new LinkedHashMap<>();
-        final Set<String>        translated    = new HashSet<>();
-
-        int        retriesLeft;
+        Iterator<List<String>> iterator;
+        final Set<String> translated = new HashSet<>();
+        final Map<String, String> failedForNext = new LinkedHashMap<>();
+        int retriesLeft;
+        int totalBatches;
+        int currentBatchNum = 0;
+        /* per-round state */
+        List<String> currentKeyLines = null;
+        String  uid   = null;
+        Vector3i sign = null;
         BukkitTask timeoutTask;
-        boolean    waitingForMove;
-        boolean    forceSend;
-        long       sendTime;
-        ProbeMethod method = ProbeMethod.SIGN;
-
+        boolean waitingForMove = false;
         org.bukkit.command.CommandSender debug;
-
-        // sign fields
-        Iterator<List<String>> signBatchIterator;
-        List<String>  currentKeyLines;
-        String        uid;
-        Vector3i      signPos;
-        int           totalSignBatches;
-        int           currentSignBatchNum;
-
-        // anvil fields
-        Iterator<String> anvilKeyIterator;
-        String           currentAnvilKey;
+        long sendTime;
+        boolean forceSend = false;
     }
 
-    private final Map<UUID, Probe> probes       = new HashMap<>();
-    private final Map<UUID, Long>  cooldown     = new HashMap<>();
-    private final Set<UUID>        pendingStart = new HashSet<>();
+    private final Map<UUID, Probe> probes   = new HashMap<>();
+    private final Map<UUID, Long>  cooldown = new HashMap<>();
+    private final Set<UUID> pendingStart = new HashSet<>();
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  CONSTRUCTOR / LIFECYCLE                                          */
-    /* ────────────────────────────────────────────────────────────────── */
-
+    /* --------------------------------------------------------------------- */
     public TranslatableKeyManager(AntiSpoofPlugin pl,
                                   DetectionManager det,
-                                  ConfigManager cfg) {
+                                  ConfigManager cfg)
+    {
         this.plugin = pl;
         this.detect = det;
         this.cfg    = cfg;
@@ -143,29 +86,30 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         PacketEvents.getAPI().getEventManager().registerListener(this);
     }
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  JOIN / QUIT / MOVE (unchanged)                                   */
-    /* ────────────────────────────────────────────────────────────────── */
-
+    /* ======================================================================
+     *  UNCHANGED LIFECYCLE & COMMAND METHODS
+     * ==================================================================== */
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         if (!cfg.isTranslatableKeysEnabled()) return;
-
         if (cfg.isTranslatableOnlyOnMove()) {
             pendingStart.add(e.getPlayer().getUniqueId());
         } else {
             int delay = cfg.getTranslatableFirstDelay();
             Bukkit.getScheduler().runTaskLater(plugin,
-                    () -> beginProbe(e.getPlayer(),
-                                     cfg.getTranslatableModsWithLabels(),
-                                     cfg.getTranslatableRetryCount(),
-                                     false, null, false),
-                    delay);
+                   () -> beginProbe(e.getPlayer(),
+                                    cfg.getTranslatableModsWithLabels(),
+                                    cfg.getTranslatableRetryCount(),
+                                    false,
+                                    null,
+                                    false),
+                   delay);
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent e) {
+        // This now calls the restored stopMods method for clean cleanup
         stopMods(e.getPlayer());
     }
 
@@ -173,10 +117,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
     public void onMove(PlayerMoveEvent e) {
         double dx = e.getTo().getX() - e.getFrom().getX();
         double dz = e.getTo().getZ() - e.getFrom().getZ();
-        float dy  = Math.abs(e.getTo().getYaw()   - e.getFrom().getYaw());
-        float dp  = Math.abs(e.getTo().getPitch() - e.getFrom().getPitch());
-
-        boolean moved = dx*dx + dz*dz >= MOVE_EPSILON || dy > ROT_EPSILON || dp > ROT_EPSILON;
+        float dy = Math.abs(e.getTo().getYaw() - e.getFrom().getYaw());
+        float dp = Math.abs(e.getTo().getPitch() - e.getFrom().getPitch());
+        boolean moved = dx * dx + dz * dz >= MOVE_EPSILON || dy > ROT_EPSILON || dp > ROT_EPSILON;
         if (!moved) return;
 
         if (cfg.isTranslatableOnlyOnMove()) {
@@ -187,7 +130,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         () -> beginProbe(e.getPlayer(),
                                          cfg.getTranslatableModsWithLabels(),
                                          cfg.getTranslatableRetryCount(),
-                                         false, null, false),
+                                         false,
+                                         null,
+                                         false),
                         delay);
             }
         }
@@ -195,24 +140,30 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Probe p = probes.get(e.getPlayer().getUniqueId());
         if (p != null && p.waitingForMove) {
             p.waitingForMove = false;
-            if (p.method == ProbeMethod.SIGN) placeNextSign(e.getPlayer(), p);
-            else placeNextAnvil(e.getPlayer(), p, p.currentAnvilKey);
+            placeNextSign(e.getPlayer(), p);
         }
     }
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  PUBLIC CONTROL METHODS (unchanged)                               */
-    /* ────────────────────────────────────────────────────────────────── */
-
     public void sendKeybind(Player target, String key, org.bukkit.command.CommandSender dbg) {
-        if (probes.containsKey(target.getUniqueId())) stopMods(target);
-        beginProbe(target, Collections.singletonMap(key,key), 0, true, dbg, true);
+        Map<String,String> single = Collections.singletonMap(key, key);
+        // Force re-probe for debug command
+        if (probes.containsKey(target.getUniqueId())) {
+            stopMods(target);
+        }
+        beginProbe(target, single, 0, true, dbg, true);
     }
 
     public void runMods(Player target) {
-        if (probes.containsKey(target.getUniqueId())) stopMods(target);
-        beginProbe(target, cfg.getTranslatableModsWithLabels(),
-                   cfg.getTranslatableRetryCount(), true, null, false);
+        // Force re-probe by stopping any existing probe first
+        if (probes.containsKey(target.getUniqueId())) {
+            stopMods(target);
+        }
+        beginProbe(target,
+                   cfg.getTranslatableModsWithLabels(),
+                   cfg.getTranslatableRetryCount(),
+                   true,
+                   null,
+                   false);
     }
 
     public void stopMods(Player target) {
@@ -221,358 +172,234 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Probe p = probes.remove(id);
         if (p != null) {
             if (p.timeoutTask != null) p.timeoutTask.cancel();
-            if (p.signPos != null) sendAir(target, p.signPos);
+            if (p.sign != null) sendAir(target, p.sign);
         }
     }
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  PROBE DISPATCH                                                   */
-    /* ────────────────────────────────────────────────────────────────── */
-
+    /* ======================================================================
+     *  MAIN PROBE LIFECYCLE (EDITED FOR BATCHING)
+     * ==================================================================== */
     private void beginProbe(Player p,
-                            Map<String,String> keys,
+                            Map<String, String> keys,
                             int retries,
                             boolean ignoreCooldown,
                             org.bukkit.command.CommandSender dbg,
-                            boolean forceSend) {
-
+                            boolean forceSend)
+    {
         if (!p.isOnline() || !cfg.isTranslatableKeysEnabled()) return;
 
+        // Cooldown check
         long now = System.currentTimeMillis();
         if (!ignoreCooldown) {
-            long cd = cfg.getTranslatableCooldown() * 1000L;
-            if (now - cooldown.getOrDefault(p.getUniqueId(), 0L) < cd) return;
+            long cd  = cfg.getTranslatableCooldown()*1000L;
+            if (now - cooldown.getOrDefault(p.getUniqueId(),0L) < cd) return;
             cooldown.put(p.getUniqueId(), now);
         }
 
-        if (cfg.isTranslatableStartWithAnvil()) {
-            beginAnvilProbe(p, keys, retries, dbg, forceSend);
-        } else {
-            beginSignProbe(p, keys, retries, dbg, forceSend);
+        final int maxLineLength = cfg.getTranslatableMaxLineLength();
+
+        // --- BATCHING LOGIC: Fills all 3 lines of a sign before moving to the next ---
+        List<List<String>> allSignBatches = new ArrayList<>();
+        if (!keys.isEmpty()) {
+            List<StringBuilder> currentSignBuilders = new ArrayList<>(Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder()));
+            int currentLineIndex = 0;
+
+            for (Map.Entry<String, String> entry : keys.entrySet()) {
+                String key = entry.getKey();
+
+                // If current line is full, try next line.
+                if (currentSignBuilders.get(currentLineIndex).length() > 0 &&
+                    currentSignBuilders.get(currentLineIndex).length() + DELIMITER.length() + key.length() > maxLineLength) {
+                    currentLineIndex++;
+                }
+
+                // If all lines on this sign are full, finalize the sign and start a new one.
+                if (currentLineIndex >= 3) {
+                    allSignBatches.add(currentSignBuilders.stream().map(StringBuilder::toString).collect(Collectors.toList()));
+                    currentSignBuilders = new ArrayList<>(Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder()));
+                    currentLineIndex = 0;
+                }
+
+                // Add the key to the current line.
+                if (currentSignBuilders.get(currentLineIndex).length() > 0) {
+                    currentSignBuilders.get(currentLineIndex).append(DELIMITER);
+                }
+                currentSignBuilders.get(currentLineIndex).append(key);
+            }
+
+            // Add the last sign if it has any content.
+            if (currentSignBuilders.get(0).length() > 0) {
+                allSignBatches.add(currentSignBuilders.stream().map(StringBuilder::toString).collect(Collectors.toList()));
+            }
         }
+        // --- END BATCHING LOGIC ---
+
+        Probe probe = new Probe();
+        probe.iterator = allSignBatches.iterator();
+        probe.retriesLeft = retries;
+        probe.debug = dbg;
+        probe.forceSend = forceSend;
+        probe.totalBatches = allSignBatches.size(); // Store total for debug messages
+        probes.put(p.getUniqueId(), probe);
+
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Starting translatable probe for " + p.getName() + " with " + keys.size() + " keys in " + allSignBatches.size() + " sign packets.");
+        }
+        advance(p, probe);
     }
 
-    private void beginSignProbe(Player p, Map<String,String> keys,
-                                int retries,
-                                org.bukkit.command.CommandSender dbg,
-                                boolean forceSend) {
+    private void advance(Player player, Probe probe) {
+        if (probe.timeoutTask != null) probe.timeoutTask.cancel();
 
-        List<List<String>> batches = batchKeysForSign(keys);
-
-        Probe pr = new Probe();
-        pr.method            = ProbeMethod.SIGN;
-        pr.signBatchIterator = batches.iterator();
-        pr.retriesLeft       = retries;
-        pr.debug             = dbg;
-        pr.forceSend         = forceSend;
-        pr.totalSignBatches  = batches.size();
-
-        probes.put(p.getUniqueId(), pr);
-
-        if (cfg.isDebugMode())
-            plugin.getLogger().info("[Debug] SIGN start " + p.getName()
-                    + " keys=" + keys.size());
-
-        advanceSign(p, pr);
-    }
-
-    private void beginAnvilProbe(Player p, Map<String,String> keys,
-                                 int retries,
-                                 org.bukkit.command.CommandSender dbg,
-                                 boolean forceSend) {
-
-        Probe pr = new Probe();
-        pr.method           = ProbeMethod.ANVIL;
-        pr.anvilKeyIterator = new ArrayList<>(keys.keySet()).iterator();
-        pr.retriesLeft      = retries;
-        pr.debug            = dbg;
-        pr.forceSend        = forceSend;
-
-        probes.put(p.getUniqueId(), pr);
-
-        if (cfg.isDebugMode())
-            plugin.getLogger().info("[Debug] ANVIL start " + p.getName()
-                    + " keys=" + keys.size());
-
-        advanceAnvil(p, pr);
-    }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  SIGN PATH (unchanged from previous compile‑ready version)        */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    private void advanceSign(Player player, Probe pr) {
-        if (pr.timeoutTask != null) pr.timeoutTask.cancel();
-
-        if (!pr.signBatchIterator.hasNext()) {
-            finishRound(player, pr);
+        if (!probe.iterator.hasNext()) {
+            finishRound(player, probe);
             return;
         }
 
-        if (pr.signPos != null) sendAir(player, pr.signPos);
+        if (probe.sign != null) sendAir(player, probe.sign);
 
-        pr.currentKeyLines = pr.signBatchIterator.next();
-        pr.uid             = randomUID();
-        pr.currentSignBatchNum++;
+        probe.currentKeyLines = probe.iterator.next();
+        probe.uid = randomUID();
+        probe.currentBatchNum++;
 
-        if (cfg.isTranslatableOnlyOnMove() && !pr.forceSend) {
-            pr.waitingForMove = true;
+        if (cfg.isTranslatableOnlyOnMove() && !probe.forceSend) {
+            probe.waitingForMove = true;
         } else {
-            placeNextSign(player, pr);
+            placeNextSign(player, probe);
         }
     }
 
-    private void placeNextSign(Player player, Probe pr) {
-        pr.signPos = buildFakeSign(player, pr.currentKeyLines, pr.uid);
+    private void placeNextSign(Player player, Probe probe) {
+        Vector3i pos = buildFakeSign(player, probe.currentKeyLines, probe.uid);
+        probe.sign = pos;
 
-        if (cfg.isDebugMode())
-            plugin.getLogger().info("[Debug] SIGN batch "
-                    + pr.currentSignBatchNum + "/" + pr.totalSignBatches
-                    + " → " + player.getName());
-
-        pr.sendTime = System.currentTimeMillis();
-        pr.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (cfg.isDebugMode())
-                plugin.getLogger().warning("[Debug] SIGN timeout batch "
-                        + pr.currentSignBatchNum + " → " + player.getName());
-            for (String line : pr.currentKeyLines)
-                for (String key : line.split(DELIMITER,-1))
-                    if (!key.isEmpty()) handleResult(player, pr, key,false,null);
-            advanceSign(player, pr);
-        }, TIMEOUT_TICKS);
-    }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  ANVIL PATH – revised for 1.20.5+                                */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    private void advanceAnvil(Player player, Probe pr) {
-        if (pr.timeoutTask != null) pr.timeoutTask.cancel();
-
-        if (!pr.anvilKeyIterator.hasNext()) {
-            finishRound(player, pr);
-            return;
+        if (cfg.isDebugMode()) {
+            plugin.getLogger().info("[Debug] Sending batch " + probe.currentBatchNum + "/" + probe.totalBatches + " to " + player.getName());
         }
 
-        pr.currentAnvilKey = pr.anvilKeyIterator.next();
-
-        if (cfg.isTranslatableOnlyOnMove() && !pr.forceSend) {
-            pr.waitingForMove = true;
-        } else {
-            placeNextAnvil(player, pr, pr.currentAnvilKey);
-        }
-    }
-
-    /** Silent anvil probe that works on 1.17–1.21.5. */
-    private void placeNextAnvil(Player player, Probe probe, String key) {
-
-        if (cfg.isDebugMode())
-            plugin.getLogger().info("[Debug] ANVIL probe '" + key + "' → " + player.getName());
-
-        /* 1 ─ open container */
-        PacketEvents.getAPI().getPlayerManager().sendPacket(
-                player,
-                new WrapperPlayServerOpenWindow(
-                        ANVIL_WINDOW_ID, ANVIL_CONTAINER_ID,
-                        Component.text("Repair & Name")));
-
-        /* 2 ─ empty snapshot */
-        List<ItemStack> empt = Arrays.asList(emptyStack(), emptyStack(), emptyStack());
-        PacketEvents.getAPI().getPlayerManager().sendPacket(
-                player,
-                new WrapperPlayServerWindowItems(
-                        ANVIL_WINDOW_ID, 0, empt, emptyStack()));
-
-        /* 3 ─ send the test stack via SET_SLOT (slot 0) */
-        ItemStack test = makeTestStack(key);
-        PacketEvents.getAPI().getPlayerManager().sendPacket(
-                player,
-                new WrapperPlayServerSetSlot(ANVIL_WINDOW_ID, (short) 1, ANVIL_INPUT_SLOT, test));
-
-        /* 4 ─ cost property = 0 */
-        PacketEvents.getAPI().getPlayerManager().sendPacket(
-                player,
-                new WrapperPlayServerWindowProperty(ANVIL_WINDOW_ID, 0, 0));
-
-        /* 5 ─ close window next tick */
-        Bukkit.getScheduler().runTaskLater(plugin, () ->
-                PacketEvents.getAPI().getPlayerManager()
-                        .sendPacket(player, new WrapperPlayServerCloseWindow(ANVIL_WINDOW_ID)), 4L);
-
-        /* 6 ─ timeout watchdog */
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (cfg.isDebugMode())
-                plugin.getLogger().warning("[Debug] ANVIL timeout '" + key + "' → " + player.getName());
-            handleResult(player, probe, key, false, null);
-            advanceAnvil(player, probe);
+            if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
+            // Unpack and handle each key as a failure on timeout
+            for (String line : probe.currentKeyLines) {
+                String[] originalKeys = line.split(DELIMITER, -1);
+                for (String key : originalKeys) {
+                    if (!key.isEmpty()) handleResult(player, probe, key, false, null);
+                }
+            }
+            advance(player, probe);
         }, TIMEOUT_TICKS);
     }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  PACKET LISTENER (unchanged)                                      */
-    /* ────────────────────────────────────────────────────────────────── */
 
     @Override
     public void onPacketReceive(PacketReceiveEvent e) {
+        if (e.getPacketType() != PacketType.Play.Client.UPDATE_SIGN) return;
         Player p = (Player) e.getPlayer();
-        Probe pr = probes.get(p.getUniqueId());
-        if (pr == null) return;
+        Probe probe = probes.get(p.getUniqueId());
+        if (probe == null || probe.currentKeyLines == null) return;
 
-        if (e.getPacketType() == PacketType.Play.Client.UPDATE_SIGN &&
-            pr.method == ProbeMethod.SIGN) {
+        String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
+        if (recv.length < 4 || !probe.uid.equals(recv[3])) return;
 
-            if (pr.currentKeyLines == null) return;
-            String[] recv = new WrapperPlayClientUpdateSign(e).getTextLines();
-            if (recv.length < 4 || !pr.uid.equals(recv[3])) return;
+        probe.timeoutTask.cancel();
 
-            pr.timeoutTask.cancel();
+        for (int i = 0; i < probe.currentKeyLines.size(); i++) {
+            if (i >= recv.length) break;
+            String[] originalKeys = probe.currentKeyLines.get(i).split(DELIMITER, -1);
+            String[] receivedTranslations = recv[i].split(DELIMITER, -1);
 
-            for (int i=0;i<pr.currentKeyLines.size();i++) {
-                String[] keys = pr.currentKeyLines.get(i).split(DELIMITER,-1);
-                String[] rx   = i < recv.length ? recv[i].split(DELIMITER,-1) : new String[0];
-                for (int j=0;j<keys.length;j++) {
-                    String key = keys[j];
-                    if (key.isEmpty()) continue;
-                    String got = j<rx.length ? rx[j] : key;
-                    boolean translated = !got.isEmpty() && !got.equals(key) && !got.startsWith("{\"translate\"");
-                    handleResult(p, pr, key, translated, got);
-                }
+            for (int j = 0; j < originalKeys.length; j++) {
+                String key = originalKeys[j];
+                if (key.isEmpty()) continue;
+                String received = (j < receivedTranslations.length) ? receivedTranslations[j] : key;
+                boolean translated = !received.isEmpty() && !received.equals(key) && !received.startsWith("{\"translate\"");
+                handleResult(p, probe, key, translated, received);
             }
-            advanceSign(p, pr);
-
-        } else if (e.getPacketType() == PacketType.Play.Client.NAME_ITEM &&
-                   pr.method == ProbeMethod.ANVIL) {
-
-            pr.timeoutTask.cancel();
-
-            String name = new WrapperPlayClientNameItem(e).getItemName();
-            String key  = pr.currentAnvilKey;
-            boolean translated = !name.isEmpty() && !name.equals(key);
-            handleResult(p, pr, key, translated, name);
-
-            advanceAnvil(p, pr);
         }
+        advance(p, probe);
     }
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  RESULT LOGIC / RETRIES  (unchanged)                              */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    private void handleResult(Player p, Probe pr, String key,
-                               boolean translated, String response) {
-
-        long ms = System.currentTimeMillis()-pr.sendTime;
-        if (pr.debug != null) {
-            String txt = translated ? response : "";
-            pr.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
+    private void handleResult(Player p, Probe probe, String key, boolean translated, String response) {
+        long ms = System.currentTimeMillis() - probe.sendTime;
+        if (probe.debug != null) {
+            String text = translated ? response : "";
+            probe.debug.sendMessage(org.bukkit.ChatColor.AQUA + p.getName() +
                     org.bukkit.ChatColor.DARK_GRAY + " | " +
                     org.bukkit.ChatColor.GRAY + "Key: \"" +
                     org.bukkit.ChatColor.WHITE + key +
-                    org.bukkit.ChatColor.GRAY + "\" → \"" +
-                    org.bukkit.ChatColor.AQUA + txt +
-                    org.bukkit.ChatColor.GRAY + "\" (" + ms + " ms)");
+                    org.bukkit.ChatColor.GRAY + "\" Response: \"" +
+                    org.bukkit.ChatColor.AQUA + text +
+                    org.bukkit.ChatColor.GRAY + "\" Time: " +
+                    org.bukkit.ChatColor.AQUA + ms + "ms");
         }
 
         String label = cfg.getTranslatableModsWithLabels().get(key);
         if (label == null) return;
 
         if (translated) {
-            pr.translated.add(key);
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
+            probe.translated.add(key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
         } else {
-            pr.failedForNext.put(key, label);
+            probe.failedForNext.put(key, label);
         }
     }
 
-    private void finishRound(Player p, Probe pr) {
-        if (pr.retriesLeft > 0 && !pr.failedForNext.isEmpty()) {
-            if (pr.method == ProbeMethod.SIGN) beginAnvilRetry(p, pr);
-            else beginSignRetry(p, pr);
-            return;
-        }
-
-        for (String req : cfg.getTranslatableRequiredKeys())
-            if (!pr.translated.contains(req))
+    private void finishRound(Player p, Probe probe) {
+        for (String req : cfg.getTranslatableRequiredKeys()) {
+            if (!probe.translated.contains(req))
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
-
-        if (pr.signPos != null) sendAir(p, pr.signPos);
-        probes.remove(p.getUniqueId());
-    }
-
-    private void beginAnvilRetry(Player player, Probe pr) {
-        pr.method           = ProbeMethod.ANVIL;
-        pr.anvilKeyIterator = new ArrayList<>(pr.failedForNext.keySet()).iterator();
-        pr.failedForNext.clear();
-        pr.retriesLeft--;
-        advanceAnvil(player, pr);
-    }
-
-    private void beginSignRetry(Player player, Probe pr) {
-        List<List<String>> batches = batchKeysForSign(new LinkedHashMap<>(pr.failedForNext));
-        pr.failedForNext.clear();
-        pr.method             = ProbeMethod.SIGN;
-        pr.signBatchIterator  = batches.iterator();
-        pr.totalSignBatches   = batches.size();
-        pr.currentSignBatchNum = 0;
-        pr.retriesLeft--;
-        advanceSign(player, pr);
-    }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  SIGN Helpers, NBT helpers, Random UID, etc. (unchanged)          */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    private List<List<String>> batchKeysForSign(Map<String,String> keys) {
-        final int max = cfg.getTranslatableMaxLineLength();
-        List<List<String>> out = new ArrayList<>();
-        if (keys.isEmpty()) return out;
-
-        List<StringBuilder> lines = Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder());
-        int idx = 0;
-
-        for (String key : keys.keySet()) {
-            if (lines.get(idx).length() > 0 &&
-                lines.get(idx).length() + DELIMITER.length() + key.length() > max) idx++;
-            if (idx >= 3) {
-                out.add(lines.stream().map(StringBuilder::toString).collect(Collectors.toList()));
-                lines = Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder());
-                idx = 0;
-            }
-            if (lines.get(idx).length() > 0) lines.get(idx).append(DELIMITER);
-            lines.get(idx).append(key);
         }
-        if (lines.get(0).length() > 0)
-            out.add(lines.stream().map(StringBuilder::toString).collect(Collectors.toList()));
-        return out;
+        if (probe.sign != null) sendAir(p, probe.sign);
+        if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
+            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName());
+            int interval = cfg.getTranslatableRetryInterval();
+            Bukkit.getScheduler().runTaskLater(plugin, () ->
+                    beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
+                    interval);
+        } else {
+            probes.remove(p.getUniqueId());
+            if (cfg.isDebugMode()) {
+                plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
+            }
+        }
     }
 
-    private String createComponentJson(String packed) {
-        if (packed == null || packed.isEmpty()) return "{\"text\":\"\"}";
-        String extras = Arrays.stream(packed.split(DELIMITER,-1))
-                .map(k -> "{\"translate\":\"" + k.replace("\"","\\\"") + "\"}")
-                .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
-        return "{\"text\":\"\",\"extra\":[" + extras + "]}";
+    private String createComponentJson(String packedKeys) {
+        if (packedKeys == null || packedKeys.isEmpty()) return "{\"text\":\"\"}";
+        String extraContent = Arrays.stream(packedKeys.split(DELIMITER, -1))
+            .map(key -> "{\"translate\":\"" + key.replace("\"", "\\\"") + "\"}")
+            .collect(Collectors.joining("," + "{\"text\":\"" + DELIMITER + "\"}" + ","));
+        return "{\"text\":\"\",\"extra\":[" + extraContent + "]}";
     }
 
+    /* ---------------------------------------------------------------------
+     *  VERSION-ROBUST FORMAT SELECTION & HELPERS
+     * ------------------------------------------------------------------- */
     private static boolean shouldUseModernFormat(ClientVersion cv) {
-        if (cv == null) return true;
+        if (cv == null) return true;                            // default: assume new
         try {
-            if (cv.isNewerThanOrEquals(ClientVersion.V_1_20)) return true;
-        } catch (Throwable ignored) {}
-        try {
+            if (cv.isNewerThanOrEquals(ClientVersion.V_1_20))   // recognised modern
+                return true;
+        } catch (Throwable ignored) { }
+        try {                                                   // unknown but higher protocol
             return cv.getProtocolVersion() >= ClientVersion.V_1_20.getProtocolVersion();
-        } catch (Throwable ignored) {}
-        return false;
+        } catch (Throwable ignored) { }
+        return false;                                           // definitely legacy
     }
 
     private static boolean detectInlineComponentFormat() {
         try {
-            String[] p = Bukkit.getBukkitVersion().split("-",2)[0].split("\\.");
-            int major = p.length>1 ? Integer.parseInt(p[1]) : 0;
-            int patch = p.length>2 ? Integer.parseInt(p[2]) : 0;
+            // e.g., "1.21.5-R0.1-SNAPSHOT" -> "1.21.5"
+            String ver = Bukkit.getBukkitVersion().split("-", 2)[0];
+            String[] p = ver.split("\\.");
+            int major = (p.length > 1) ? Integer.parseInt(p[1]) : 0;
+            int patch = (p.length > 2) ? Integer.parseInt(p[2]) : 0;
+            // True for 1.22+ or 1.21.5+
             return major > 21 || (major == 21 && patch >= 5);
-        } catch (Throwable ignored) { return true; }
+        } catch (Throwable ignored) {
+            return true; // safe default – assume new servers expect the new format
+        }
     }
 
     private static NBTCompound translateComponent(String key) {
@@ -580,133 +407,120 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         c.setTag("translate", new NBTString(key));
         return c;
     }
-
-    private static NBTCompound textComponent(String txt) {
+    private static NBTCompound textComponent(String text) {
         NBTCompound c = new NBTCompound();
-        c.setTag("text", new NBTString(txt));
+        c.setTag("text", new NBTString(text));
         return c;
     }
-
-    private static NBTCompound createComponentNbt(String packed) {
-        if (packed == null || packed.isEmpty()) return textComponent("");
+    private static NBTCompound createComponentNbt(String packedKeys) {
+        if (packedKeys == null || packedKeys.isEmpty()) return textComponent("");
         NBTCompound root = textComponent("");
         NBTList<NBTCompound> extra = new NBTList<>(NBTType.COMPOUND);
-        String[] parts = packed.split(DELIMITER,-1);
-        for (int i=0;i<parts.length;i++) {
+        String[] parts = packedKeys.split(DELIMITER, -1);
+        for (int i = 0; i < parts.length; i++) {
             extra.addTag(translateComponent(parts[i]));
-            if (i<parts.length-1) extra.addTag(textComponent(DELIMITER));
+            if (i < parts.length - 1) extra.addTag(textComponent(DELIMITER));
         }
         root.setTag("extra", extra);
         return root;
     }
 
-    private Vector3i buildFakeSign(Player target,
-                                   List<String> lines,
-                                   String uid) {
-
+    private Vector3i buildFakeSign(Player target, List<String> lines, String uid) {
         ClientVersion cv = PacketEvents.getAPI().getPlayerManager().getClientVersion(target);
-        boolean modern = shouldUseModernFormat(cv);
-        Vector3i pos   = signPos(target);
+        boolean modern   = shouldUseModernFormat(cv);
+
+        Vector3i pos = signPos(target);
 
         WrappedBlockState signState = StateTypes.OAK_SIGN.createBlockState();
-        PacketEvents.getAPI().getPlayerManager()
-                .sendPacket(target, new WrapperPlayServerBlockChange(pos, signState.getGlobalId()));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockChange(pos, signState.getGlobalId()));
 
         NBTCompound nbt = new NBTCompound();
         nbt.setTag("id", new NBTString("minecraft:sign"));
+        
+        String l1 = lines.size() > 0 ? lines.get(0) : null;
+        String l2 = lines.size() > 1 ? lines.get(1) : null;
+        String l3 = lines.size() > 2 ? lines.get(2) : null;
 
-        String l1 = lines.size()>0 ? lines.get(0) : null;
-        String l2 = lines.size()>1 ? lines.get(1) : null;
-        String l3 = lines.size()>2 ? lines.get(2) : null;
+        if (modern) {
+            if (INLINE_COMPONENTS) {
+                // Modern (1.21.5+) format: list of NBT Compounds
+                NBTList<NBTCompound> msgs = new NBTList<>(NBTType.COMPOUND);
+                msgs.addTag(createComponentNbt(l1));
+                msgs.addTag(createComponentNbt(l2));
+                msgs.addTag(createComponentNbt(l3));
+                msgs.addTag(textComponent(uid));
 
-        if (modern && INLINE_COMPONENTS) {
-            NBTList<NBTCompound> msgs = new NBTList<>(NBTType.COMPOUND);
-            msgs.addTag(createComponentNbt(l1));
-            msgs.addTag(createComponentNbt(l2));
-            msgs.addTag(createComponentNbt(l3));
-            msgs.addTag(textComponent(uid));
-            for (String side : new String[]{"front_text","back_text"}) {
-                NBTCompound t = new NBTCompound();
-                t.setTag("messages", msgs);
-                t.setTag("color", new NBTString("black"));
-                t.setTag("has_glowing_text", new NBTByte((byte)0));
-                nbt.setTag(side, t);
-            }
-        } else if (modern) {
-            String j1 = createComponentJson(l1);
-            String j2 = createComponentJson(l2);
-            String j3 = createComponentJson(l3);
-            String ju = "{\"text\":\"" + uid + "\"}";
-            NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
-            msgs.addTag(new NBTString(j1));
-            msgs.addTag(new NBTString(j2));
-            msgs.addTag(new NBTString(j3));
-            msgs.addTag(new NBTString(ju));
-            for (String side : new String[]{"front_text","back_text"}) {
-                NBTCompound t = new NBTCompound();
-                t.setTag("messages", msgs);
-                t.setTag("color", new NBTString("black"));
-                t.setTag("has_glowing_text", new NBTByte((byte)0));
-                nbt.setTag(side, t);
+                NBTCompound front = new NBTCompound();
+                front.setTag("messages", msgs);
+                front.setTag("color", new NBTString("black"));
+                front.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("front_text", front);
+
+                NBTCompound back = new NBTCompound();
+                back.setTag("messages", msgs);
+                back.setTag("color", new NBTString("black"));
+                back.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("back_text", back);
+
+            } else {
+                // Modern (1.20 - 1.21.4) format: list of JSON Strings
+                String key1_json = createComponentJson(l1);
+                String key2_json = createComponentJson(l2);
+                String key3_json = createComponentJson(l3);
+                String uid_json  = "{\"text\":\"" + uid + "\"}";
+
+                NBTList<NBTString> msgs = new NBTList<>(NBTType.STRING);
+                msgs.addTag(new NBTString(key1_json));
+                msgs.addTag(new NBTString(key2_json));
+                msgs.addTag(new NBTString(key3_json));
+                msgs.addTag(new NBTString(uid_json));
+                NBTCompound front = new NBTCompound();
+                front.setTag("messages", msgs);
+                front.setTag("color", new NBTString("black"));
+                front.setTag("has_glowing_text", new NBTByte((byte)0));
+                nbt.setTag("front_text", front);
+                NBTCompound back = new NBTCompound();
+                back.setTag("messages", msgs);
+                back.setTag("color", new NBTString("black"));
+                back.setTag("has_glowing_text", new NBTByte((byte)0));
+                back.setTag("back_text", back);
             }
         } else {
-            nbt.setTag("Text1", new NBTString(createComponentJson(l1)));
-            nbt.setTag("Text2", new NBTString(createComponentJson(l2)));
-            nbt.setTag("Text3", new NBTString(createComponentJson(l3)));
+            // Legacy (<1.20) format
+            String key1_json = createComponentJson(l1);
+            String key2_json = createComponentJson(l2);
+            String key3_json = createComponentJson(l3);
+            nbt.setTag("Text1", new NBTString(key1_json));
+            nbt.setTag("Text2", new NBTString(key2_json));
+            nbt.setTag("Text3", new NBTString(key3_json));
             nbt.setTag("Text4", new NBTString(uid));
         }
 
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
-                new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
-                new WrapperPlayServerOpenSignEditor(pos, true));
-        PacketEvents.getAPI().getPlayerManager().sendPacket(target,
-                new WrapperPlayServerCloseWindow(0));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerBlockEntityData(pos, BlockEntityTypes.SIGN, nbt));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerOpenSignEditor(pos, true));
+        PacketEvents.getAPI().getPlayerManager().sendPacket(target, new WrapperPlayServerCloseWindow(0));
         return pos;
     }
 
     private void sendAir(Player p, Vector3i pos) {
-        if (p != null && p.isOnline())
-            PacketEvents.getAPI().getPlayerManager()
-                    .sendPacket(p, new WrapperPlayServerBlockChange(pos, AIR_ID));
+        if (p != null && p.isOnline()) {
+            PacketEvents.getAPI().getPlayerManager().sendPacket(p, new WrapperPlayServerBlockChange(pos, AIR_ID));
+        }
     }
 
+
+
     private Vector3i signPos(Player p) {
+        // Place the sign at the corner of an adjacent chunk, high up, to keep it out of sight.
         World w = p.getWorld();
-        org.bukkit.Chunk c = p.getLocation().getChunk();
-        int x = (c.getX()+1)*16;
-        int z = (c.getZ()+1)*16;
+        org.bukkit.Chunk playerChunk = p.getLocation().getChunk();
+        int x = (playerChunk.getX() + 1) * 16;
+        int z = (playerChunk.getZ() + 1) * 16;
         int y = w.getMaxHeight() - 5;
-        return new Vector3i(x,y,z);
+        return new Vector3i(x, y, z);
     }
 
     private static String randomUID() {
         return Integer.toHexString(ThreadLocalRandom.current().nextInt(0x10000));
-    }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /*  Reflection helper to discover the anvil container ID             */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    private static int getAnvilId() {
-        try {
-            Inventory inv = Bukkit.createInventory(null, InventoryType.ANVIL);
-            Method m = Class.forName(cbClass("inventory.CraftContainer"))
-                    .getMethod("getNotchInventoryType", Inventory.class);
-            Object val = m.invoke(null, inv);
-
-            try {
-                for (Field f : Class.forName("net.minecraft.world.inventory.Containers").getFields())
-                    if (f.get(null) == val) return f.getInt(null);
-            } catch (Exception ignored) {}
-            try {
-                for (Field f : Class.forName("net.minecraft.world.inventory.MenuType").getFields())
-                    if (f.get(null) == val) return f.getInt(null);
-            } catch (Exception ignored) {}
-        } catch (Exception ignored) {}
-        return 8; // fallback for 1.20.3+
-    }
-    private static String cbClass(String c) {
-        return Bukkit.getServer().getClass().getPackage().getName() + "." + c;
     }
 }
