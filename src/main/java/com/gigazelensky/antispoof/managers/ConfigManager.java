@@ -759,19 +759,27 @@ public class ConfigManager {
 
         ConfigurationSection req = main.getConfigurationSection("required");
         if (req != null) {
-            for (String key : req.getKeys(false)) {
-                ConfigurationSection r = req.getConfigurationSection(key);
+            for (String path : req.getKeys(true)) {
+                ConfigurationSection r = config.getConfigurationSection("translatable-keys.required." + path);
                 if (r == null) continue;
+                if (!r.contains("label") && !r.contains("alert") && !r.contains("flag") &&
+                    !r.contains("discord-alert") && !r.contains("punish") &&
+                    !r.contains("punishments") && !r.contains("alert-message") &&
+                    !r.contains("console-alert-message")) {
+                    continue; // Skip intermediate sections
+                }
+
                 TranslatableModConfig cfg = new TranslatableModConfig();
-                cfg.label = r.getString("label", key);
+                cfg.label = r.getString("label", path);
                 cfg.alert = r.getBoolean("alert", true);
                 cfg.flag = r.getBoolean("flag", false);
                 cfg.discordAlert = r.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
                 cfg.punish = r.getBoolean("punish", defaultTranslatableConfig.punish);
                 cfg.punishments = r.getStringList("punishments");
-                cfg.alertMessage = r.getString("alert-message", defaultTranslatableConfig.alertMessage);
-                cfg.consoleAlertMessage = r.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
-                requiredMods.put(key, cfg);
+                cfg.alertMessage = r.getString("alert-message", "&8[&cAntiSpoof&8] &7%player% failed to translate %label%");
+                cfg.consoleAlertMessage = r.getString("console-alert-message", "%player% failed to translate %label%");
+
+                requiredMods.put(path, cfg);
             }
         }
 
@@ -867,12 +875,16 @@ public class ConfigManager {
         Map<String, String> out = new LinkedHashMap<>();
         ConfigurationSection req = config.getConfigurationSection("translatable-keys.required");
         if (req == null) return out;
-        for (String key : req.getKeys(false)) {
-            ConfigurationSection sec = req.getConfigurationSection(key);
-            if (sec != null && sec.isString("label")) {
-                out.put(key, sec.getString("label"));
+
+        for (String path : req.getKeys(true)) {
+            ConfigurationSection sec = config.getConfigurationSection("translatable-keys.required." + path);
+            if (sec == null) continue;
+            if (sec.isString("label")) {
+                out.put(path, sec.getString("label"));
+            } else if (!sec.getKeys(false).isEmpty()) {
+                // skip intermediate nodes
             } else {
-                out.put(key, key);
+                out.put(path, path);
             }
         }
         return out;
