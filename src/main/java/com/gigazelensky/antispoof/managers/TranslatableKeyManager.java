@@ -339,13 +339,17 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     org.bukkit.ChatColor.AQUA + ms + "ms");
         }
 
-        String label = cfg.getTranslatableModsWithLabels().get(key);
-        if (label == null) return;
+        boolean isMod = cfg.getTranslatableModsWithLabels().containsKey(key);
+        boolean isRequired = cfg.isRequiredKey(key);
+        if (!isMod && !isRequired) return;
+
+        String label = cfg.getAllTranslatableLabels().getOrDefault(key, key);
 
         if (translated) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
-            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+            if (isMod)
+                detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
         } else {
             if (timedOut) probe.timedOut.add(key);
             probe.failedForNext.put(key, label);
