@@ -309,12 +309,6 @@ public class AlertManager {
 
         plugin.getLogger().info(consoleMessage);
         sendAlertToRecipients(alertMessage);
-
-        if (config.isDiscordWebhookEnabled() && modConfig.shouldDiscordAlert()) {
-            List<String> single = new ArrayList<>();
-            single.add(label);
-            plugin.getDiscordWebhookHandler().sendAlert(player, label, null, null, single);
-        }
     }
 
     /**
@@ -334,6 +328,18 @@ public class AlertManager {
             final String cmd = formatted;
             plugin.getServer().getScheduler().runTask(plugin, () ->
                 plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), cmd));
+        }
+    }
+
+    /**
+     * Executes a list of punishments directly.
+     */
+    public void executeGenericPunishments(Player player, List<String> punishments, String violationType) {
+        if (punishments == null || punishments.isEmpty()) return;
+        for (String cmd : punishments) {
+            final String formatted = cmd.replace("%player%", player.getName());
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), formatted));
         }
     }
     

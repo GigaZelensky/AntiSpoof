@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PlayerData {
     private final Set<String> channels = ConcurrentHashMap.newKeySet();
     private final Set<String> detectedMods = ConcurrentHashMap.newKeySet();
+    private final Set<String> alertedMods = ConcurrentHashMap.newKeySet();
     private boolean alreadyPunished = false;
     private long joinTime = System.currentTimeMillis();
     private boolean initialChannelsRegistered = false;
@@ -40,6 +41,20 @@ public class PlayerData {
      */
     public void addDetectedMod(String label) {
         detectedMods.add(label);
+    }
+
+    /**
+     * Marks a mod as having triggered an alert for this player
+     */
+    public void addAlertedMod(String label) {
+        alertedMods.add(label);
+    }
+
+    /**
+     * @return Mods that triggered alerts for this player
+     */
+    public Set<String> getAlertedMods() {
+        return Collections.unmodifiableSet(alertedMods);
     }
 
     /**

@@ -670,11 +670,23 @@ public class ConfigManager {
     private boolean translatableKeysEnabled;
     private boolean translatableAlertOnce;
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
+    private final Map<String, TranslatableModConfig> requiredMods = new HashMap<>();
     private TranslatableModConfig defaultTranslatableConfig;
+    // Required translatable keys
+    
+    // Timeout handling
+    private boolean timeoutAlertAny;
+    private boolean timeoutAlertAll;
+    private boolean timeoutPunishAny;
+    private boolean timeoutPunishAll;
+    private String timeoutAlertMessageAny;
+    private String timeoutAlertMessageAll;
+    private List<String> timeoutPunishments = new ArrayList<>();
 
     public static class TranslatableModConfig {
         private String label;
         private boolean alert;
+        private boolean flag;
         private boolean discordAlert;
         private boolean punish;
         private String alertMessage;
@@ -683,6 +695,7 @@ public class ConfigManager {
 
         public String getLabel() { return label; }
         public boolean shouldAlert() { return alert; }
+        public boolean shouldFlag() { return flag; }
         public boolean shouldDiscordAlert() { return discordAlert; }
         public boolean shouldPunish() { return punish; }
         public String getAlertMessage() { return alertMessage; }
@@ -692,6 +705,7 @@ public class ConfigManager {
 
     private void loadTranslatableKeyConfigs() {
         translatableMods.clear();
+        requiredMods.clear();
         ConfigurationSection main = config.getConfigurationSection("translatable-keys");
         if (main == null) {
             translatableKeysEnabled = false;
@@ -732,6 +746,7 @@ public class ConfigManager {
                 TranslatableModConfig cfg = new TranslatableModConfig();
                 cfg.label = m.getString("label", key);
                 cfg.alert = m.getBoolean("alert", true);
+                cfg.flag = m.getBoolean("flag", true);
                 cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
                 cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
                 cfg.punishments = m.getStringList("punishments");
@@ -740,6 +755,51 @@ public class ConfigManager {
                 cfg.consoleAlertMessage = m.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
                 translatableMods.put(key, cfg);
             }
+        }
+
+        ConfigurationSection req = main.getConfigurationSection("required");
+        if (req != null) {
+            for (String path : req.getKeys(true)) {
+                ConfigurationSection r = config.getConfigurationSection("translatable-keys.required." + path);
+                if (r == null) continue;
+                if (!r.contains("label") && !r.contains("alert") && !r.contains("flag") &&
+                    !r.contains("discord-alert") && !r.contains("punish") &&
+                    !r.contains("punishments") && !r.contains("alert-message") &&
+                    !r.contains("console-alert-message")) {
+                    continue; // Skip intermediate sections
+                }
+
+                TranslatableModConfig cfg = new TranslatableModConfig();
+                cfg.label = r.getString("label", path);
+                cfg.alert = r.getBoolean("alert", true);
+                cfg.flag = r.getBoolean("flag", false);
+                cfg.discordAlert = r.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
+                cfg.punish = r.getBoolean("punish", defaultTranslatableConfig.punish);
+                cfg.punishments = r.getStringList("punishments");
+                cfg.alertMessage = r.getString("alert-message", "&8[&cAntiSpoof&8] &7%player% failed to translate %label%");
+                cfg.consoleAlertMessage = r.getString("console-alert-message", "%player% failed to translate %label%");
+
+                requiredMods.put(path, cfg);
+            }
+        }
+
+        ConfigurationSection timeout = main.getConfigurationSection("timeout");
+        if (timeout != null) {
+            timeoutAlertAny = timeout.getBoolean("alert-on-any", true);
+            timeoutAlertAll = timeout.getBoolean("alert-on-all", true);
+            timeoutPunishAny = timeout.getBoolean("punish-on-any", false);
+            timeoutPunishAll = timeout.getBoolean("punish-on-all", false);
+            timeoutAlertMessageAny = timeout.getString("alert-message-any", "&8[&cAntiSpoof&8] &7%player% experienced some key timeouts");
+            timeoutAlertMessageAll = timeout.getString("alert-message-all", "&8[&cAntiSpoof&8] &7%player% experienced all key timeouts");
+            timeoutPunishments = timeout.getStringList("punishments");
+        } else {
+            timeoutAlertAny = true;
+            timeoutAlertAll = true;
+            timeoutPunishAny = false;
+            timeoutPunishAll = false;
+            timeoutAlertMessageAny = "&8[&cAntiSpoof&8] &7%player% experienced some key timeouts";
+            timeoutAlertMessageAll = "&8[&cAntiSpoof&8] &7%player% experienced all key timeouts";
+            timeoutPunishments = new ArrayList<>();
         }
     }
 
@@ -763,6 +823,7 @@ public class ConfigManager {
             cfg = new TranslatableModConfig();
             cfg.label = m.getString("label", key);
             cfg.alert = m.getBoolean("alert", true);
+            cfg.flag = m.getBoolean("flag", true);
             cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
             cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
             cfg.punishments = m.getStringList("punishments");
@@ -800,12 +861,45 @@ public class ConfigManager {
         return modsWithLabels;
     }
 
+    public Map<String, String> getAllTranslatableLabels() {
+        Map<String, String> out = new LinkedHashMap<>(getTranslatableModsWithLabels());
+        out.putAll(getTranslatableRequiredLabels());
+        return out;
+    }
+
     // ===================================================================================
     // END OF FIX
     // ===================================================================================
 
+    public Map<String, String> getTranslatableRequiredLabels() {
+        Map<String, String> out = new LinkedHashMap<>();
+        ConfigurationSection req = config.getConfigurationSection("translatable-keys.required");
+        if (req == null) return out;
+
+        for (String path : req.getKeys(true)) {
+            ConfigurationSection sec = config.getConfigurationSection("translatable-keys.required." + path);
+            if (sec == null) continue;
+            if (sec.isString("label")) {
+                out.put(path, sec.getString("label"));
+            } else if (!sec.getKeys(false).isEmpty()) {
+                // skip intermediate nodes
+            } else {
+                out.put(path, path);
+            }
+        }
+        return out;
+    }
+
+    public boolean isRequiredKey(String key) {
+        return requiredMods.containsKey(key);
+    }
+
+    public TranslatableModConfig getRequiredModConfig(String key) {
+        return requiredMods.getOrDefault(key, defaultTranslatableConfig);
+    }
+
     public List<String> getTranslatableRequiredKeys() {
-        return config.getStringList("translatable-keys.required");
+        return new ArrayList<>(requiredMods.keySet());
     }
 
     public int getTranslatableFirstDelay() {
@@ -849,6 +943,14 @@ public class ConfigManager {
     public boolean isTranslatableAlertOnce() {
         return translatableAlertOnce;
     }
+
+    public boolean isTimeoutAlertOnAny() { return timeoutAlertAny; }
+    public boolean isTimeoutAlertOnAll() { return timeoutAlertAll; }
+    public boolean isTimeoutPunishOnAny() { return timeoutPunishAny; }
+    public boolean isTimeoutPunishOnAll() { return timeoutPunishAll; }
+    public String getTimeoutAlertMessageAny() { return timeoutAlertMessageAny; }
+    public String getTimeoutAlertMessageAll() { return timeoutAlertMessageAll; }
+    public List<String> getTimeoutPunishments() { return timeoutPunishments; }
     
     /**
      * Checks if update checking is enabled
