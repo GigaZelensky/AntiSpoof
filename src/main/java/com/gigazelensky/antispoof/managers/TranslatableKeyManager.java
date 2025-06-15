@@ -26,6 +26,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import com.gigazelensky.antispoof.utils.MessageUtil;
 
 /**
  * Your original, stable, sequential probe, minimally modified for high-density batching.
@@ -55,6 +56,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         Iterator<List<String>> iterator;
         final Set<String> translated = new HashSet<>();
         final Map<String, String> failedForNext = new LinkedHashMap<>();
+        final Set<String> timedOut = new HashSet<>();
+        final Set<String> allKeys = new HashSet<>();
         int retriesLeft;
         int totalBatches;
         int currentBatchNum = 0;
@@ -98,7 +101,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             int delay = cfg.getTranslatableFirstDelay();
             Bukkit.getScheduler().runTaskLater(plugin,
                    () -> beginProbe(e.getPlayer(),
-                                    cfg.getTranslatableModsWithLabels(),
+                                    cfg.getAllTranslatableLabels(),
                                     cfg.getTranslatableRetryCount(),
                                     false,
                                     null,
@@ -128,7 +131,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 int delay = cfg.getTranslatableFirstDelay();
                 Bukkit.getScheduler().runTaskLater(plugin,
                         () -> beginProbe(e.getPlayer(),
-                                         cfg.getTranslatableModsWithLabels(),
+                                         cfg.getAllTranslatableLabels(),
                                          cfg.getTranslatableRetryCount(),
                                          false,
                                          null,
@@ -159,7 +162,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             stopMods(target);
         }
         beginProbe(target,
-                   cfg.getTranslatableModsWithLabels(),
+                   cfg.getAllTranslatableLabels(),
                    cfg.getTranslatableRetryCount(),
                    true,
                    null,
@@ -200,12 +203,14 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
         // --- BATCHING LOGIC: Fills all 3 lines of a sign before moving to the next ---
         List<List<String>> allSignBatches = new ArrayList<>();
+        Set<String> allKeysSet = new HashSet<>();
         if (!keys.isEmpty()) {
             List<StringBuilder> currentSignBuilders = new ArrayList<>(Arrays.asList(new StringBuilder(), new StringBuilder(), new StringBuilder()));
             int currentLineIndex = 0;
 
             for (Map.Entry<String, String> entry : keys.entrySet()) {
                 String key = entry.getKey();
+                allKeysSet.add(key);
 
                 // If current line is full, try next line.
                 if (currentSignBuilders.get(currentLineIndex).length() > 0 &&
@@ -235,6 +240,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         // --- END BATCHING LOGIC ---
 
         Probe probe = new Probe();
+        probe.allKeys.addAll(allKeysSet);
         probe.iterator = allSignBatches.iterator();
         probe.retriesLeft = retries;
         probe.debug = dbg;
@@ -284,7 +290,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             for (String line : probe.currentKeyLines) {
                 String[] originalKeys = line.split(DELIMITER, -1);
                 for (String key : originalKeys) {
-                    if (!key.isEmpty()) handleResult(player, probe, key, false, null);
+                    if (!key.isEmpty()) handleResult(player, probe, key, false, null, true);
                 }
             }
             advance(player, probe);
@@ -313,13 +319,13 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 if (key.isEmpty()) continue;
                 String received = (j < receivedTranslations.length) ? receivedTranslations[j] : key;
                 boolean translated = !received.isEmpty() && !received.equals(key) && !received.startsWith("{\"translate\"");
-                handleResult(p, probe, key, translated, received);
+                handleResult(p, probe, key, translated, received, false);
             }
         }
         advance(p, probe);
     }
 
-    private void handleResult(Player p, Probe probe, String key, boolean translated, String response) {
+    private void handleResult(Player p, Probe probe, String key, boolean translated, String response, boolean timedOut) {
         long ms = System.currentTimeMillis() - probe.sendTime;
         if (probe.debug != null) {
             String text = translated ? response : "";
@@ -341,6 +347,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             probe.translated.add(key);
             detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
         } else {
+            if (timedOut) probe.timedOut.add(key);
             probe.failedForNext.put(key, label);
         }
     }
@@ -350,6 +357,8 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             if (!probe.translated.contains(req))
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
         }
+        boolean anyTimeout = !probe.timedOut.isEmpty();
+        boolean allTimeout = anyTimeout && probe.timedOut.containsAll(probe.allKeys);
         if (probe.sign != null) sendAir(p, probe.sign);
         if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName());
@@ -361,6 +370,27 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
+            }
+            if (anyTimeout) {
+                if (allTimeout) {
+                    if (cfg.isTimeoutAlertOnAll()) {
+                        String msg = cfg.getTimeoutAlertMessageAll().replace("%player%", p.getName());
+                        String console = org.bukkit.ChatColor.stripColor(MessageUtil.miniMessage(msg));
+                        plugin.getAlertManager().sendCustomAlert(p, msg, console, "TRANSLATE_TIMEOUT_ALL");
+                    }
+                    if (cfg.isTimeoutPunishOnAll()) {
+                        plugin.getAlertManager().executeGenericPunishments(p, cfg.getTimeoutPunishments(), "TRANSLATE_TIMEOUT_ALL");
+                    }
+                } else {
+                    if (cfg.isTimeoutAlertOnAny()) {
+                        String msg = cfg.getTimeoutAlertMessageAny().replace("%player%", p.getName());
+                        String console = org.bukkit.ChatColor.stripColor(MessageUtil.miniMessage(msg));
+                        plugin.getAlertManager().sendCustomAlert(p, msg, console, "TRANSLATE_TIMEOUT_ANY");
+                    }
+                    if (cfg.isTimeoutPunishOnAny()) {
+                        plugin.getAlertManager().executeGenericPunishments(p, cfg.getTimeoutPunishments(), "TRANSLATE_TIMEOUT_ANY");
+                    }
+                }
             }
         }
     }

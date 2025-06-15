@@ -336,6 +336,18 @@ public class AlertManager {
                 plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), cmd));
         }
     }
+
+    /**
+     * Executes a list of punishments directly.
+     */
+    public void executeGenericPunishments(Player player, List<String> punishments, String violationType) {
+        if (punishments == null || punishments.isEmpty()) return;
+        for (String cmd : punishments) {
+            final String formatted = cmd.replace("%player%", player.getName());
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), formatted));
+        }
+    }
     
     /**
      * Sends a violation alert for a player

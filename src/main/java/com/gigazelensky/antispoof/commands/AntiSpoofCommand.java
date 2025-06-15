@@ -366,6 +366,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         PlayerData data = plugin.getPlayerDataMap().get(target.getUniqueId());
         boolean hasChannels = data != null && !data.getChannels().isEmpty();
         boolean claimsVanilla = brand != null && brand.equalsIgnoreCase("vanilla");
+
+        if (data != null && !data.getAlertedMods().isEmpty()) {
+            flagReasons.addAll(data.getAlertedMods());
+        }
         
         // Display channels first regardless of spoof status
         if (hasChannels) {
@@ -375,7 +379,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
 
         if (!data.getDetectedMods().isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "Detected Mods:");
-            data.getDetectedMods().forEach(m -> sender.sendMessage(ChatColor.WHITE + m));
+            data.getDetectedMods().forEach(m -> {
+                ChatColor color = data.getAlertedMods().contains(m) ? ChatColor.RED : ChatColor.WHITE;
+                sender.sendMessage(color + m);
+            });
         }
         
         // Determine all reasons for flagging
@@ -734,7 +741,10 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (data.getDetectedMods().isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "None detected.");
         } else {
-            data.getDetectedMods().forEach(mod -> sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod));
+            data.getDetectedMods().forEach(mod -> {
+                ChatColor color = data.getAlertedMods().contains(mod) ? ChatColor.RED : ChatColor.WHITE;
+                sender.sendMessage(ChatColor.GRAY + "- " + color + mod);
+            });
         }
     }
     

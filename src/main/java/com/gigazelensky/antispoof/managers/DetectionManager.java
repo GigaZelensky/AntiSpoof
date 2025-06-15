@@ -879,7 +879,9 @@ public class DetectionManager {
 
     // Handle translatable key events with per-mod config
     public void handleTranslatable(Player player, com.gigazelensky.antispoof.enums.TranslatableEventType type, String key) {
-        ConfigManager.TranslatableModConfig modConfig = config.getTranslatableModConfig(key);
+        boolean isRequired = config.isRequiredKey(key);
+        ConfigManager.TranslatableModConfig modConfig = isRequired ?
+                config.getRequiredModConfig(key) : config.getTranslatableModConfig(key);
         String label = modConfig.getLabel() != null && !modConfig.getLabel().isEmpty() ? modConfig.getLabel() : key;
 
         PlayerData pdata = plugin.getPlayerDataMap().get(player.getUniqueId());
@@ -890,7 +892,8 @@ public class DetectionManager {
         }
 
         if (type == TranslatableEventType.TRANSLATED) {
-            if (pdata != null) pdata.addDetectedMod(label);
+            if (pdata != null && modConfig.shouldFlag() && !isRequired) pdata.addDetectedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
@@ -900,7 +903,8 @@ public class DetectionManager {
                 if (data != null) data.setAlreadyPunished(true);
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
-            if (pdata != null) pdata.addDetectedMod(label);
+            if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }
