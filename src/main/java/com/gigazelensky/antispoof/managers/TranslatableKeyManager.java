@@ -180,6 +180,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         }
     }
 
+    /**
+     * Checks if a probe is currently active or pending for a player.
+     * This is used by the Discord webhook handler to delay alerts until
+     * the translatable check has finished.
+     */
+    public boolean isProbeRunning(UUID id) {
+        return probes.containsKey(id) || pendingStart.contains(id);
+    }
+
     /* ======================================================================
      *  MAIN PROBE LIFECYCLE (EDITED FOR BATCHING)
      * ==================================================================== */
@@ -373,12 +382,22 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         boolean anyTimeout = !probe.timedOut.isEmpty();
         boolean allTimeout = anyTimeout && probe.timedOut.containsAll(probe.allKeys);
         if (probe.sign != null) sendAir(p, probe.sign);
-        if (probe.retriesLeft > 0 && !probe.failedForNext.isEmpty()) {
-            if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " + probe.failedForNext.size() + " failed keys for " + p.getName());
-            int interval = cfg.getTranslatableRetryInterval();
-            Bukkit.getScheduler().runTaskLater(plugin, () ->
-                    beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
-                    interval);
+
+        if (probe.retriesLeft > 0 && anyTimeout) {
+            Map<String, String> retryKeys = new LinkedHashMap<>();
+            for (String key : probe.timedOut) {
+                String lbl = probe.failedForNext.get(key);
+                if (lbl != null) retryKeys.put(key, lbl);
+            }
+
+            if(!retryKeys.isEmpty()) {
+                if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] Retrying " + retryKeys.size() + " timed out keys for " + p.getName());
+                int interval = cfg.getTranslatableRetryInterval();
+                Bukkit.getScheduler().runTaskLater(plugin, () ->
+                        beginProbe(p, retryKeys, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
+                        interval);
+                return;
+            }
         } else {
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
@@ -407,8 +426,9 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
             }
 
             PlayerData pdata = plugin.getPlayerDataMap().get(p.getUniqueId());
-            if (pdata != null && !pdata.getAlertedMods().isEmpty() && cfg.isDiscordWebhookEnabled()) {
-                plugin.getDiscordWebhookHandler().sendAlert(p, "Translatable key violations", plugin.getClientBrand(p), null, new ArrayList<>(pdata.getAlertedMods()));
+            List<String> mods = pdata != null ? new ArrayList<>(pdata.getAlertedMods()) : new ArrayList<>();
+            if (cfg.isDiscordWebhookEnabled()) {
+                plugin.getDiscordWebhookHandler().sendAlert(p, "Translatable key violations", plugin.getClientBrand(p), null, mods);
             }
         }
     }

@@ -118,12 +118,24 @@ public class DiscordWebhookHandler {
                 blockedChannels.put(playerUuid, channel);
             }
             
-            // Add this violation to the pending list
+            // Add this violation and any provided sub-violations to the pending list
             List<String> pendingList = pendingViolations.computeIfAbsent(playerUuid, k -> new ArrayList<>());
             if (!pendingList.contains(reason)) {
                 pendingList.add(reason);
             }
+            if (violations != null) {
+                for (String v : violations) {
+                    if (!pendingList.contains(v)) {
+                        pendingList.add(v);
+                    }
+                }
+            }
             
+            // If a translatable probe is running, wait until it finishes before sending
+            boolean probeActive = plugin.getConfigManager().isTranslatableKeysEnabled() &&
+                    plugin.getTranslatableKeyManager() != null &&
+                    plugin.getTranslatableKeyManager().isProbeRunning(playerUuid);
+
             // Skip if player has already been alerted for spoofing in this session
             if (alertedPlayers.getOrDefault(playerUuid, false)) {
                 if (config.isDebugMode()) {
@@ -136,6 +148,11 @@ public class DiscordWebhookHandler {
                     checkForModifiedChannels(player, currentChannels);
                 }
                 
+                return;
+            }
+
+            // Delay initial alert until probe is finished
+            if (probeActive) {
                 return;
             }
             
