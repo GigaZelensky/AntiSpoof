@@ -7,6 +7,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PlayerData {
     private final Set<String> channels = ConcurrentHashMap.newKeySet();
     private final Set<String> detectedMods = ConcurrentHashMap.newKeySet();
+    private final Set<String> flaggedMods = ConcurrentHashMap.newKeySet();
+    private final Set<String> flaggedKeys = ConcurrentHashMap.newKeySet();
+    private final Set<String> translatedKeys = ConcurrentHashMap.newKeySet();
+    private final Set<String> discordAlertMods = ConcurrentHashMap.newKeySet();
     private boolean alreadyPunished = false;
     private long joinTime = System.currentTimeMillis();
     private boolean initialChannelsRegistered = false;
@@ -42,11 +46,43 @@ public class PlayerData {
         detectedMods.add(label);
     }
 
+    public void addFlaggedMod(String label) {
+        flaggedMods.add(label);
+    }
+
+    public void addFlaggedKey(String key) {
+        flaggedKeys.add(key);
+    }
+
+    public void addTranslatedKey(String key) {
+        translatedKeys.add(key);
+    }
+
+    public void addDiscordAlertMod(String label) {
+        discordAlertMods.add(label);
+    }
+
     /**
      * @return An unmodifiable view of detected mod labels
      */
     public Set<String> getDetectedMods() {
         return Collections.unmodifiableSet(detectedMods);
+    }
+
+    public Set<String> getFlaggedMods() {
+        return Collections.unmodifiableSet(flaggedMods);
+    }
+
+    public Set<String> getFlaggedKeys() {
+        return Collections.unmodifiableSet(flaggedKeys);
+    }
+
+    public Set<String> getTranslatedKeys() {
+        return Collections.unmodifiableSet(translatedKeys);
+    }
+
+    public Set<String> getDiscordAlertMods() {
+        return Collections.unmodifiableSet(discordAlertMods);
     }
     
     /**
@@ -84,5 +120,12 @@ public class PlayerData {
      */
     public void setInitialChannelsRegistered(boolean registered) {
         this.initialChannelsRegistered = registered;
+    }
+
+    public void clearTransientData() {
+        flaggedMods.clear();
+        flaggedKeys.clear();
+        translatedKeys.clear();
+        discordAlertMods.clear();
     }
 }

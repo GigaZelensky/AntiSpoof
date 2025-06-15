@@ -518,6 +518,13 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
             for (String reason : flagReasons) {
                 sender.sendMessage(ChatColor.RED + "• " + reason);
             }
+
+            if (!data.getFlaggedMods().isEmpty()) {
+                sender.sendMessage(ChatColor.RED + "Flagged Mods:");
+                for (String mod : data.getFlaggedMods()) {
+                    sender.sendMessage(ChatColor.RED + "- " + mod);
+                }
+            }
             
             // Check if the brand is blocked/not whitelisted and display with appropriate color
             if (plugin.getConfigManager().isBlockedBrandsEnabled()) {
@@ -734,7 +741,13 @@ public class AntiSpoofCommand implements CommandExecutor, TabCompleter {
         if (data.getDetectedMods().isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "None detected.");
         } else {
-            data.getDetectedMods().forEach(mod -> sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod));
+            for (String mod : data.getDetectedMods()) {
+                if (data.getFlaggedMods().contains(mod)) {
+                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.RED + mod);
+                } else {
+                    sender.sendMessage(ChatColor.GRAY + "- " + ChatColor.WHITE + mod);
+                }
+            }
         }
     }
     

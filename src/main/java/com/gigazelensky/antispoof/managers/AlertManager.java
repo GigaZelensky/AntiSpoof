@@ -293,7 +293,8 @@ public class AlertManager {
      * Sends a translatable key violation alert using per-mod settings
      */
     public void sendTranslatableViolationAlert(Player player, String label, String violationType,
-                                               ConfigManager.TranslatableModConfig modConfig) {
+                                               ConfigManager.TranslatableModConfig modConfig,
+                                               boolean sendDiscord) {
         String combinedType = violationType + ":" + label;
         if (!canSendAlert(player.getUniqueId(), combinedType)) {
             return;
@@ -310,10 +311,34 @@ public class AlertManager {
         plugin.getLogger().info(consoleMessage);
         sendAlertToRecipients(alertMessage);
 
-        if (config.isDiscordWebhookEnabled() && modConfig.shouldDiscordAlert()) {
+        if (sendDiscord && config.isDiscordWebhookEnabled() && modConfig.shouldDiscordAlert()) {
             List<String> single = new ArrayList<>();
             single.add(label);
             plugin.getDiscordWebhookHandler().sendAlert(player, label, null, null, single);
+        }
+    }
+
+    public void sendDiscordModBatch(Player player, Set<String> labels) {
+        if (!config.isDiscordWebhookEnabled() || labels.isEmpty()) return;
+        PlayerData pd = plugin.getPlayerDataMap().get(player.getUniqueId());
+        List<String> list = new ArrayList<>();
+        for (String label : labels) {
+            boolean flagged = pd != null && pd.getFlaggedMods().contains(label);
+            if (flagged) {
+                list.add(label + " (Flagged!)");
+            } else {
+                list.add(label);
+            }
+        }
+        plugin.getDiscordWebhookHandler().sendAlert(player, "Detected Mods", null, null, list);
+    }
+
+    public void executeCustomPunishments(Player player, List<String> commands) {
+        if (commands == null || commands.isEmpty()) return;
+        for (String cmd : commands) {
+            final String formatted = cmd.replace("%player%", player.getName());
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), formatted));
         }
     }
 

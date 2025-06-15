@@ -669,7 +669,46 @@ public class ConfigManager {
     // Translatable key detection
     private boolean translatableKeysEnabled;
     private boolean translatableAlertOnce;
+    private boolean alertOnTimeoutAll;
+    private boolean alertOnTimeoutAny;
+    private boolean punishOnTimeoutAll;
+    private boolean punishOnTimeoutAny;
+    public enum ComboMethod { CHANNEL, BRAND, KEY, ANY }
+
+    public static class CustomCombination {
+        ComboMethod method = ComboMethod.ANY;
+        String withChannel;
+        String withoutChannel;
+        String withKey;
+        String withoutKey;
+        String withBrand;
+        String withoutBrand;
+        boolean alert;
+        boolean discordAlert;
+        boolean punish;
+        String alertMessage;
+        String consoleAlertMessage;
+        List<String> punishments = new ArrayList<>();
+    }
+
+    private String defaultComboAlert(CustomCombination cc, boolean console) {
+        String base = console ? "%player% triggered custom combo" : "&8[&cAntiSpoof&8] &e%player% flagged";
+        String suffix = "";
+        if (cc.withChannel != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!";
+        } else if (cc.withChannel != null && cc.withoutBrand != null) {
+            suffix = "! &cUsing &f%channel% &cwithout &f%brand% &cbrand!";
+        } else if (cc.withBrand != null && cc.withoutKey != null) {
+            suffix = "! &cUsing &f%brand% &cwithout &f%mod_label% &ckey!";
+        } else {
+            suffix = "!";
+        }
+        return base + suffix;
+    }
+
+    private final List<CustomCombination> customCombinations = new ArrayList<>();
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
+    private final Map<String, TranslatableModConfig> requiredTranslatableMods = new HashMap<>();
     private TranslatableModConfig defaultTranslatableConfig;
 
     public static class TranslatableModConfig {
@@ -677,6 +716,7 @@ public class ConfigManager {
         private boolean alert;
         private boolean discordAlert;
         private boolean punish;
+        private boolean flag;
         private String alertMessage;
         private String consoleAlertMessage;
         private List<String> punishments = new ArrayList<>();
@@ -685,6 +725,7 @@ public class ConfigManager {
         public boolean shouldAlert() { return alert; }
         public boolean shouldDiscordAlert() { return discordAlert; }
         public boolean shouldPunish() { return punish; }
+        public boolean shouldFlag() { return flag; }
         public String getAlertMessage() { return alertMessage; }
         public String getConsoleAlertMessage() { return consoleAlertMessage; }
         public List<String> getPunishments() { return punishments; }
@@ -699,8 +740,13 @@ public class ConfigManager {
         }
 
         translatableKeysEnabled = main.getBoolean("enabled", false);
-        translatableAlertOnce = main.getConfigurationSection("check")
-                .getBoolean("alert-once-per-label", false);
+        ConfigurationSection check = main.getConfigurationSection("check");
+        if (check == null) check = main.createSection("check");
+        translatableAlertOnce = check.getBoolean("alert-once-per-label", false);
+        alertOnTimeoutAll = check.getBoolean("alert-on-timeout-all", false);
+        alertOnTimeoutAny = check.getBoolean("alert-on-timeout-any", false);
+        punishOnTimeoutAll = check.getBoolean("punish-on-timeout-all", false);
+        punishOnTimeoutAny = check.getBoolean("punish-on-timeout-any", false);
 
         ConfigurationSection def = main.getConfigurationSection("default");
         defaultTranslatableConfig = new TranslatableModConfig();
@@ -710,6 +756,7 @@ public class ConfigManager {
             defaultTranslatableConfig.discordAlert = def.getBoolean("discord-alert", false);
             defaultTranslatableConfig.punish = def.getBoolean("punish", false);
             defaultTranslatableConfig.punishments = def.getStringList("punishments");
+            defaultTranslatableConfig.flag = def.getBoolean("flag", false);
             defaultTranslatableConfig.alert = true;
             defaultTranslatableConfig.label = "";
         } else {
@@ -719,6 +766,7 @@ public class ConfigManager {
             defaultTranslatableConfig.punish = false;
             defaultTranslatableConfig.punishments = new ArrayList<>();
             defaultTranslatableConfig.alert = true;
+            defaultTranslatableConfig.flag = false;
             defaultTranslatableConfig.label = "";
         }
 
@@ -734,11 +782,62 @@ public class ConfigManager {
                 cfg.alert = m.getBoolean("alert", true);
                 cfg.discordAlert = m.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
                 cfg.punish = m.getBoolean("punish", defaultTranslatableConfig.punish);
+                cfg.flag = m.getBoolean("flag", defaultTranslatableConfig.flag);
                 cfg.punishments = m.getStringList("punishments");
                 // Load per-mod alert messages with fallback to defaults
                 cfg.alertMessage = m.getString("alert-message", defaultTranslatableConfig.alertMessage);
                 cfg.consoleAlertMessage = m.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
                 translatableMods.put(key, cfg);
+            }
+        }
+
+        requiredTranslatableMods.clear();
+        ConfigurationSection req = main.getConfigurationSection("required");
+        if (req != null) {
+            for (String key : req.getKeys(false)) {
+                ConfigurationSection r = req.getConfigurationSection(key);
+                if (r == null) continue;
+                TranslatableModConfig cfg = new TranslatableModConfig();
+                cfg.label = r.getString("label", key);
+                cfg.alert = r.getBoolean("alert", true);
+                cfg.discordAlert = r.getBoolean("discord-alert", defaultTranslatableConfig.discordAlert);
+                cfg.punish = r.getBoolean("punish", defaultTranslatableConfig.punish);
+                cfg.flag = r.getBoolean("flag", defaultTranslatableConfig.flag);
+                cfg.punishments = r.getStringList("punishments");
+                cfg.alertMessage = r.getString("alert-message", defaultTranslatableConfig.alertMessage);
+                cfg.consoleAlertMessage = r.getString("console-alert-message", defaultTranslatableConfig.consoleAlertMessage);
+                requiredTranslatableMods.put(key, cfg);
+            }
+        }
+
+        customCombinations.clear();
+        ConfigurationSection combos = config.getConfigurationSection("custom-combinations");
+        if (combos != null) {
+            for (String cKey : combos.getKeys(false)) {
+                ConfigurationSection csec = combos.getConfigurationSection(cKey);
+                if (csec == null) continue;
+                CustomCombination cc = new CustomCombination();
+                String methodStr = csec.getString("method", "ANY").toUpperCase();
+                try {
+                    cc.method = ComboMethod.valueOf(methodStr);
+                } catch (IllegalArgumentException e) {
+                    cc.method = ComboMethod.ANY;
+                }
+                cc.withChannel = csec.getString("with-channel");
+                cc.withoutChannel = csec.getString("without-channel");
+                cc.withKey = csec.getString("with-key");
+                cc.withoutKey = csec.getString("without-key");
+                cc.withBrand = csec.getString("with-brand");
+                cc.withoutBrand = csec.getString("without-brand");
+                cc.alert = csec.getBoolean("alert", true);
+                cc.discordAlert = csec.getBoolean("discord-alert", false);
+                cc.punish = csec.getBoolean("punish", false);
+                cc.alertMessage = csec.contains("alert-message") ?
+                        csec.getString("alert-message") : defaultComboAlert(cc, false);
+                cc.consoleAlertMessage = csec.contains("console-alert-message") ?
+                        csec.getString("console-alert-message") : defaultComboAlert(cc, true);
+                cc.punishments = csec.getStringList("punishments");
+                customCombinations.add(cc);
             }
         }
     }
@@ -756,6 +855,9 @@ public class ConfigManager {
 
     public TranslatableModConfig getTranslatableModConfig(String key) {
         TranslatableModConfig cfg = translatableMods.get(key);
+        if (cfg != null) return cfg;
+
+        cfg = requiredTranslatableMods.get(key);
         if (cfg != null) return cfg;
 
         ConfigurationSection m = config.getConfigurationSection("translatable-keys.mods." + key);
@@ -785,7 +887,7 @@ public class ConfigManager {
         Map<String, String> modsWithLabels = new LinkedHashMap<>();
         ConfigurationSection modsSection = config.getConfigurationSection("translatable-keys.mods");
         if (modsSection == null) {
-            return modsWithLabels;
+            modsSection = config.createSection("translatable-keys.mods");
         }
 
         for (String path : modsSection.getKeys(true)) {
@@ -797,6 +899,10 @@ public class ConfigManager {
                 modsWithLabels.put(modKey, label);
             }
         }
+
+        for (Map.Entry<String, TranslatableModConfig> e : requiredTranslatableMods.entrySet()) {
+            modsWithLabels.putIfAbsent(e.getKey(), e.getValue().label != null ? e.getValue().label : e.getKey());
+        }
         return modsWithLabels;
     }
 
@@ -804,8 +910,12 @@ public class ConfigManager {
     // END OF FIX
     // ===================================================================================
 
+    public Map<String, TranslatableModConfig> getTranslatableRequiredMods() {
+        return requiredTranslatableMods;
+    }
+
     public List<String> getTranslatableRequiredKeys() {
-        return config.getStringList("translatable-keys.required");
+        return new ArrayList<>(requiredTranslatableMods.keySet());
     }
 
     public int getTranslatableFirstDelay() {
@@ -848,6 +958,26 @@ public class ConfigManager {
 
     public boolean isTranslatableAlertOnce() {
         return translatableAlertOnce;
+    }
+
+    public boolean shouldAlertOnTimeoutAll() {
+        return alertOnTimeoutAll;
+    }
+
+    public boolean shouldAlertOnTimeoutAny() {
+        return alertOnTimeoutAny;
+    }
+
+    public boolean shouldPunishOnTimeoutAll() {
+        return punishOnTimeoutAll;
+    }
+
+    public boolean shouldPunishOnTimeoutAny() {
+        return punishOnTimeoutAny;
+    }
+
+    public List<CustomCombination> getCustomCombinations() {
+        return customCombinations;
     }
     
     /**

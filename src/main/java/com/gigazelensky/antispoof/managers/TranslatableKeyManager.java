@@ -22,6 +22,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.scheduler.BukkitTask;
+import com.gigazelensky.antispoof.data.PlayerData;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -67,6 +68,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         org.bukkit.command.CommandSender debug;
         long sendTime;
         boolean forceSend = false;
+        boolean anyTimeout = false;
     }
 
     private final Map<UUID, Probe> probes   = new HashMap<>();
@@ -280,6 +282,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         probe.sendTime = System.currentTimeMillis();
         probe.timeoutTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if(cfg.isDebugMode()) plugin.getLogger().warning("[Debug] Batch " + probe.currentBatchNum + " timed out for " + player.getName());
+            probe.anyTimeout = true;
             // Unpack and handle each key as a failure on timeout
             for (String line : probe.currentKeyLines) {
                 String[] originalKeys = line.split(DELIMITER, -1);
@@ -336,10 +339,19 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         String label = cfg.getTranslatableModsWithLabels().get(key);
         if (label == null) return;
 
+        boolean isRequired = cfg.getTranslatableRequiredMods().containsKey(key);
+
         if (translated) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
-            detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+
+            // For required mods, just mark the translation but do not alert
+            if (!isRequired) {
+                detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+            } else {
+                PlayerData pd = plugin.getPlayerDataMap().get(p.getUniqueId());
+                if (pd != null) pd.addTranslatedKey(key);
+            }
         } else {
             probe.failedForNext.put(key, label);
         }
@@ -358,9 +370,76 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     beginProbe(p, probe.failedForNext, probe.retriesLeft - 1, true, probe.debug, probe.forceSend),
                     interval);
         } else {
+            boolean anyTimedOut = !probe.failedForNext.isEmpty();
+            boolean allTimedOut = probe.translated.isEmpty();
+            if (anyTimedOut && (cfg.shouldAlertOnTimeoutAny() || cfg.shouldPunishOnTimeoutAny())) {
+                for (String k : probe.failedForNext.keySet()) {
+                    detect.handleTranslatable(p, TranslatableEventType.TIMEOUT_ANY, k);
+                }
+            }
+            if (allTimedOut && (cfg.shouldAlertOnTimeoutAll() || cfg.shouldPunishOnTimeoutAll())) {
+                detect.handleTranslatable(p, TranslatableEventType.TIMEOUT_ALL, "timeout-all");
+            }
+            PlayerData pdata = plugin.getPlayerDataMap().get(p.getUniqueId());
+            if (pdata != null) {
+                Set<String> batch = new LinkedHashSet<>(pdata.getDiscordAlertMods());
+                if (!batch.isEmpty()) {
+                    plugin.getAlertManager().sendDiscordModBatch(p, batch);
+                }
+                processCustomCombinations(p, pdata, batch);
+                pdata.getDiscordAlertMods().clear();
+            }
             probes.remove(p.getUniqueId());
             if (cfg.isDebugMode()) {
                 plugin.getLogger().info("[Debug] Probe finished for " + p.getName());
+            }
+        }
+    }
+
+    private void processCustomCombinations(Player p, PlayerData pdata, Set<String> batch) {
+        for (ConfigManager.CustomCombination cc : cfg.getCustomCombinations()) {
+            boolean match = true;
+            if (cc.withChannel != null) {
+                match &= pdata.getChannels().stream().anyMatch(ch -> ch.matches(cc.withChannel));
+            }
+            if (cc.withoutChannel != null) {
+                match &= pdata.getChannels().stream().noneMatch(ch -> ch.matches(cc.withoutChannel));
+            }
+            if (cc.withKey != null) {
+                match &= pdata.getTranslatedKeys().stream().anyMatch(k -> k.matches(cc.withKey));
+            }
+            if (cc.withoutKey != null) {
+                match &= pdata.getTranslatedKeys().stream().noneMatch(k -> k.matches(cc.withoutKey));
+            }
+            String brand = plugin.getClientBrand(p);
+            if (cc.withBrand != null && brand != null) {
+                match &= brand.matches(cc.withBrand);
+            }
+            if (cc.withoutBrand != null && brand != null) {
+                match &= !brand.matches(cc.withoutBrand);
+            }
+            if (!match) continue;
+
+            String modsStr = String.join(",", batch);
+            String alertMsg = cc.alertMessage
+                    .replace("%player%", p.getName())
+                    .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
+            String consoleMsg = cc.consoleAlertMessage
+                    .replace("%player%", p.getName())
+                    .replace("%channel%", cc.withChannel == null ? "" : cc.withChannel)
+                    .replace("%mod_label%", modsStr)
+                    .replace("%brand%", brand != null ? brand : "");
+
+            if (cc.alert) {
+                plugin.getAlertManager().sendCustomAlert(p, alertMsg, consoleMsg, "CUSTOM_COMBO");
+            }
+            if (cc.discordAlert) {
+                plugin.getAlertManager().sendDiscordModBatch(p, batch);
+            }
+            if (cc.punish) {
+                plugin.getAlertManager().executeCustomPunishments(p, cc.punishments);
             }
         }
     }
