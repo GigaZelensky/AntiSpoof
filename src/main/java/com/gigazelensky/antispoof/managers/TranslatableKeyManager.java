@@ -346,7 +346,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
         if (translated) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
-            if (!isRequired) {
+            probe.failedForNext.remove(key); // clear any earlier failure
+            probe.timedOut.remove(key);
+            if (isRequired) {
+                PlayerData data = plugin.getPlayerDataMap().get(p.getUniqueId());
+                if (data != null) {
+                    data.removeDetectedMod(label);
+                    data.removeAlertedMod(label);
+                }
+            } else {
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
             }
         } else {
@@ -357,8 +365,10 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
 
     private void finishRound(Player p, Probe probe) {
         for (String req : cfg.getTranslatableRequiredKeys()) {
-            if (!probe.translated.contains(req))
+            // Only flag keys that ultimately failed translation
+            if (probe.failedForNext.containsKey(req)) {
                 detect.handleTranslatable(p, TranslatableEventType.REQUIRED_MISS, req);
+            }
         }
         boolean anyTimeout = !probe.timedOut.isEmpty();
         boolean allTimeout = anyTimeout && probe.timedOut.containsAll(probe.allKeys);
