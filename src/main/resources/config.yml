@@ -341,7 +341,14 @@ translatable-keys:
       alert: true
       punish: false
       punishments: []
-  required: []
+  # A list of keys that a player *must* have translated.
+  # If a key from this list is NOT translated by the end of the probe, the player will be flagged.
+  # Useful for forcing players on a modpack to have required mods.
+  required:
+    item.minecraft.bone:
+      label: Vanilla
+      alert: true
+      flag: false
   check:
     first-delay: 40
     gui-visible-ticks: 1
@@ -355,6 +362,15 @@ translatable-keys:
   # When enabled, each mod label will only alert once per player even if
   # the probes are triggered again during the same session.
   alert-once-per-label: false
+  timeout:
+    alert-on-any: true
+    alert-on-all: true
+    punish-on-any: false
+    punish-on-all: false
+    # Custom messages
+    alert-message-any: '&8[&cAntiSpoof&8] &7%player% experienced some key timeouts'
+    alert-message-all: '&8[&cAntiSpoof&8] &7%player% experienced all key timeouts'
+    punishments: []
 
 # ──────────────────────────────────────────────────────────
 #                Bedrock Handling Settings
