@@ -2,6 +2,7 @@ package com.gigazelensky.antispoof.managers;
 
 import com.gigazelensky.antispoof.AntiSpoofPlugin;
 import com.gigazelensky.antispoof.enums.TranslatableEventType;
+import com.gigazelensky.antispoof.data.PlayerData;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
@@ -339,17 +340,15 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                     org.bukkit.ChatColor.AQUA + ms + "ms");
         }
 
-        boolean isMod = cfg.getTranslatableModsWithLabels().containsKey(key);
-        boolean isRequired = cfg.isRequiredKey(key);
-        if (!isMod && !isRequired) return;
-
         String label = cfg.getAllTranslatableLabels().getOrDefault(key, key);
+        boolean isRequired = cfg.isRequiredKey(key);
 
         if (translated) {
             if(cfg.isDebugMode()) plugin.getLogger().info("[Debug] " + p.getName() + " translated: '" + key + "' -> '" + response + "' (" + label + ")");
             probe.translated.add(key);
-            if (isMod)
+            if (!isRequired) {
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);
+            }
         } else {
             if (timedOut) probe.timedOut.add(key);
             probe.failedForNext.put(key, label);
@@ -395,6 +394,11 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                         plugin.getAlertManager().executeGenericPunishments(p, cfg.getTimeoutPunishments(), "TRANSLATE_TIMEOUT_ANY");
                     }
                 }
+            }
+
+            PlayerData pdata = plugin.getPlayerDataMap().get(p.getUniqueId());
+            if (pdata != null && !pdata.getAlertedMods().isEmpty() && cfg.isDiscordWebhookEnabled()) {
+                plugin.getDiscordWebhookHandler().sendAlert(p, "Translatable key violations", plugin.getClientBrand(p), null, new ArrayList<>(pdata.getAlertedMods()));
             }
         }
     }

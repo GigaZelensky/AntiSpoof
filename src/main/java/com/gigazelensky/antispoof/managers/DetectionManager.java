@@ -892,7 +892,10 @@ public class DetectionManager {
         }
 
         if (type == TranslatableEventType.TRANSLATED) {
-            if (pdata != null && modConfig.shouldFlag() && !isRequired) pdata.addDetectedMod(label);
+            if (isRequired) {
+                return;
+            }
+            if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
             if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);

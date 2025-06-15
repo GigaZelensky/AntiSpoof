@@ -309,12 +309,6 @@ public class AlertManager {
 
         plugin.getLogger().info(consoleMessage);
         sendAlertToRecipients(alertMessage);
-
-        if (config.isDiscordWebhookEnabled() && modConfig.shouldDiscordAlert()) {
-            List<String> single = new ArrayList<>();
-            single.add(label);
-            plugin.getDiscordWebhookHandler().sendAlert(player, label, null, null, single);
-        }
     }
 
     /**
