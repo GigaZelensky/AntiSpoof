@@ -482,3 +482,22 @@ messages:
   multiple-flags: "&8[&cAntiSpoof&8] &e%player% has multiple violations: &c%reasons%"
   # Message for console when multiple violations
   console-multiple-flags: "%player% has multiple violations: %reasons%"
+
+# ──────────────────────────────────────────────────────────
+#                 Custom Combination Checks
+# ──────────────────────────────────────────────────────────
+custom-combinations:
+  xaerospoof:
+    method: CHANNEL
+    with-channel: "(?i).*xaero.*"
+    without-key: "(?i).*xaero.*"
+    alert: true
+    alert-message: "&8[&cAntiSpoof&8] &e%player% failed %combination% combination"
+  brandcheck:
+    method: CHANNEL
+    with-channel: "mods:?example"
+    without-brand: "vanilla"
+    alert: true
+    punish: true
+    punishments:
+      - "kick %player% bad boy"

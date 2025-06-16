@@ -496,6 +496,20 @@ public class DetectionManager {
                 }
             }
         }
+
+        // Custom combinations
+        if (!config.getCustomCombinations().isEmpty()) {
+            Set<String> alertedKeys = plugin.getPlayerDataMap().get(player.getUniqueId()) != null ?
+                    plugin.getPlayerDataMap().get(player.getUniqueId()).getAlertedKeys() : Collections.emptySet();
+            for (Map.Entry<String, ConfigManager.CustomCombinationConfig> entry : config.getCustomCombinations().entrySet()) {
+                String name = entry.getKey();
+                ConfigManager.CustomCombinationConfig cc = entry.getValue();
+                if (evaluateCustomCombination(cc, brand, filteredChannels, alertedKeys)) {
+                    String reason = cc.getAlertMessage().replace("%combination%", name);
+                    detectedViolations.put("COMBINATION_" + name.toUpperCase(), reason);
+                }
+            }
+        }
         
         // If player is a Bedrock player and we're in EXEMPT mode, don't process violations
         if (!detectedViolations.isEmpty() && isBedrockPlayer && config.isBedrockExemptMode()) {
@@ -728,6 +742,41 @@ public class DetectionManager {
         
         return missingChannels;
     }
+
+    private boolean matchesAny(Set<String> values, Pattern pattern) {
+        if (values == null || pattern == null) return false;
+        for (String v : values) {
+            try {
+                if (pattern.matcher(v).matches()) return true;
+            } catch (Exception e) {
+                if (v.equalsIgnoreCase(pattern.pattern())) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean evaluateCustomCombination(ConfigManager.CustomCombinationConfig cfg, String brand,
+                                              Set<String> channels, Set<String> keys) {
+        List<Boolean> checks = new ArrayList<>();
+        if (cfg.getWithChannel() != null) checks.add(matchesAny(channels, cfg.getWithChannel()));
+        if (cfg.getWithoutChannel() != null) checks.add(!matchesAny(channels, cfg.getWithoutChannel()));
+        if (cfg.getWithBrand() != null) checks.add(cfg.getWithBrand().matcher(brand != null ? brand : "").matches());
+        if (cfg.getWithoutBrand() != null) checks.add(!cfg.getWithoutBrand().matcher(brand != null ? brand : "").matches());
+        if (cfg.getWithKey() != null) checks.add(matchesAny(keys, cfg.getWithKey()));
+        if (cfg.getWithoutKey() != null) checks.add(!matchesAny(keys, cfg.getWithoutKey()));
+
+        if (checks.isEmpty()) return false;
+
+        String method = cfg.getMethod();
+        if ("ANY".equalsIgnoreCase(method)) {
+            for (Boolean b : checks) if (b) return true;
+            return false;
+        }
+
+        // For ALL, CHANNEL, BRAND, KEY treat as all required
+        for (Boolean b : checks) if (!b) return false;
+        return true;
+    }
     
     /**
      * Determines if a violation should result in punishment
@@ -765,6 +814,11 @@ public class DetectionManager {
             case "NO_BRAND":
                 return config.shouldPunishNoBrand();
             default:
+                if (violationType.startsWith("COMBINATION_")) {
+                    String key = violationType.substring("COMBINATION_".length()).toLowerCase();
+                    ConfigManager.CustomCombinationConfig cc = config.getCustomCombination(key);
+                    return cc != null && cc.shouldPunish();
+                }
                 return false;
         }
     }
@@ -896,7 +950,10 @@ public class DetectionManager {
                 return;
             }
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
@@ -907,7 +964,10 @@ public class DetectionManager {
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }

@@ -362,6 +362,7 @@ public final class TranslatableKeyManager extends PacketListenerAbstract impleme
                 if (data != null) {
                     data.removeDetectedMod(label);
                     data.removeAlertedMod(label);
+                    data.removeAlertedKey(key);
                 }
             } else {
                 detect.handleTranslatable(p, TranslatableEventType.TRANSLATED, key);

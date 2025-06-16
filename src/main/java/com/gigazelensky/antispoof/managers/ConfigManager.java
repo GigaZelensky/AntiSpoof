@@ -89,6 +89,9 @@ public class ConfigManager {
 
         // Load translatable key configurations
         loadTranslatableKeyConfigs();
+
+        // Load custom combination configurations
+        loadCustomCombinationConfigs();
     }
     
     /**
@@ -966,5 +969,81 @@ public class ConfigManager {
      */
     public boolean isUpdateNotifyOnJoinEnabled() {
         return config.getBoolean("update-checker.notify-on-join", true);
+    }
+
+    private void loadCustomCombinationConfigs() {
+        customCombinations.clear();
+        ConfigurationSection section = config.getConfigurationSection("custom-combinations");
+        if (section == null) return;
+
+        for (String key : section.getKeys(false)) {
+            ConfigurationSection c = section.getConfigurationSection(key);
+            if (c == null) continue;
+
+            CustomCombinationConfig cfg = new CustomCombinationConfig();
+            cfg.method = c.getString("method", "ALL").toUpperCase();
+            cfg.alert = c.getBoolean("alert", true);
+            cfg.punish = c.getBoolean("punish", false);
+            cfg.punishments = c.getStringList("punishments");
+            cfg.alertMessage = c.getString("alert-message", "%player% failed %combination% combination");
+            cfg.consoleAlertMessage = c.getString("console-alert-message", "%player% failed %combination% combination");
+
+            String wch = c.getString("with-channel");
+            if (wch != null) try { cfg.withChannel = Pattern.compile(wch); } catch (PatternSyntaxException ignored) {}
+            String woch = c.getString("without-channel");
+            if (woch != null) try { cfg.withoutChannel = Pattern.compile(woch); } catch (PatternSyntaxException ignored) {}
+            String wk = c.getString("with-key");
+            if (wk != null) try { cfg.withKey = Pattern.compile(wk); } catch (PatternSyntaxException ignored) {}
+            String wok = c.getString("without-key");
+            if (wok != null) try { cfg.withoutKey = Pattern.compile(wok); } catch (PatternSyntaxException ignored) {}
+            String wb = c.getString("with-brand");
+            if (wb != null) try { cfg.withBrand = Pattern.compile(wb); } catch (PatternSyntaxException ignored) {}
+            String wob = c.getString("without-brand");
+            if (wob != null) try { cfg.withoutBrand = Pattern.compile(wob); } catch (PatternSyntaxException ignored) {}
+
+            customCombinations.put(key.toLowerCase(), cfg);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    // Custom combinations
+    /* ------------------------------------------------------------------ */
+
+    public static class CustomCombinationConfig {
+        private String method;
+        private Pattern withChannel;
+        private Pattern withoutChannel;
+        private Pattern withKey;
+        private Pattern withoutKey;
+        private Pattern withBrand;
+        private Pattern withoutBrand;
+        private boolean alert;
+        private boolean punish;
+        private List<String> punishments = new ArrayList<>();
+        private String alertMessage;
+        private String consoleAlertMessage;
+
+        public String getMethod() { return method; }
+        public Pattern getWithChannel() { return withChannel; }
+        public Pattern getWithoutChannel() { return withoutChannel; }
+        public Pattern getWithKey() { return withKey; }
+        public Pattern getWithoutKey() { return withoutKey; }
+        public Pattern getWithBrand() { return withBrand; }
+        public Pattern getWithoutBrand() { return withoutBrand; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldPunish() { return punish; }
+        public List<String> getPunishments() { return punishments; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+    }
+
+    private final Map<String, CustomCombinationConfig> customCombinations = new HashMap<>();
+
+    public Map<String, CustomCombinationConfig> getCustomCombinations() {
+        return customCombinations;
+    }
+
+    public CustomCombinationConfig getCustomCombination(String key) {
+        return customCombinations.get(key);
     }
 }
