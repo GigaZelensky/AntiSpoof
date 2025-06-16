@@ -125,7 +125,11 @@ public class DetectionManager {
                 checkPlayerAsync(player, false, false);
             }
         }
-        
+
+        // Evaluate custom combinations whenever a channel is added
+        String brand = plugin.getClientBrand(player);
+        checkCustomCombinations(player, brand, data);
+
         return channelAdded;
     }
     
@@ -648,6 +652,9 @@ public class DetectionManager {
                 }
             }
         }
+
+        // Evaluate custom combinations after standard violations
+        checkCustomCombinations(player, brand, data);
     }
     
     /**
@@ -896,7 +903,10 @@ public class DetectionManager {
                 return;
             }
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
@@ -907,7 +917,10 @@ public class DetectionManager {
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }
@@ -915,6 +928,99 @@ public class DetectionManager {
                 plugin.getAlertManager().executeTranslatablePunishment(player, label, "REQUIRED_KEY_MISS", modConfig);
                 PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
                 if (data != null) data.setAlreadyPunished(true);
+            }
+        }
+
+        // Evaluate custom combinations when new key info is processed
+        PlayerData d = plugin.getPlayerDataMap().get(player.getUniqueId());
+        if (d != null) {
+            String b = plugin.getClientBrand(player);
+            checkCustomCombinations(player, b, d);
+        }
+    }
+
+    private void checkCustomCombinations(Player player, String brand, PlayerData data) {
+        Map<String, ConfigManager.CustomCombination> combos = config.getCustomCombinations();
+        if (combos.isEmpty()) return;
+
+        Map<String, Boolean> violations = playerViolations.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>());
+
+        Set<String> channels = filterIgnoredChannels(data.getChannels());
+        Set<String> keys = data.getAlertedKeys();
+
+        for (Map.Entry<String, ConfigManager.CustomCombination> e : combos.entrySet()) {
+            String name = e.getKey();
+            ConfigManager.CustomCombination cc = e.getValue();
+            String violationId = "COMBO_" + name.toUpperCase();
+            if (violations.getOrDefault(violationId, false)) continue;
+
+            boolean withChannel = cc.getWithChannel() == null;
+            String matchedChannel = null;
+            if (cc.getWithChannel() != null) {
+                for (String ch : channels) {
+                    if (cc.getWithChannel().matcher(ch).matches()) { matchedChannel = ch; withChannel = true; break; }
+                }
+            }
+            boolean withoutChannel = cc.getWithoutChannel() == null;
+            if (cc.getWithoutChannel() != null) {
+                withoutChannel = true;
+                for (String ch : channels) {
+                    if (cc.getWithoutChannel().matcher(ch).matches()) { withoutChannel = false; break; }
+                }
+            }
+
+            boolean withBrand = cc.getWithBrand() == null || (brand != null && cc.getWithBrand().matcher(brand).matches());
+            boolean withoutBrand = cc.getWithoutBrand() == null || !(brand != null && cc.getWithoutBrand().matcher(brand).matches());
+
+            boolean withKey = cc.getWithKey() == null;
+            String matchedKey = null;
+            if (cc.getWithKey() != null) {
+                for (String k : keys) {
+                    if (cc.getWithKey().matcher(k).matches()) { matchedKey = k; withKey = true; break; }
+                }
+            }
+
+            boolean withoutKey = cc.getWithoutKey() == null;
+            if (cc.getWithoutKey() != null) {
+                withoutKey = true;
+                for (String k : keys) {
+                    if (cc.getWithoutKey().matcher(k).matches()) { withoutKey = false; break; }
+                }
+            }
+
+            boolean result;
+            if ("ANY".equals(cc.getMethod())) {
+                result = withChannel || withoutChannel || withKey || withoutKey || withBrand || withoutBrand;
+            } else { // ALL and others
+                result = withChannel && withoutChannel && withKey && withoutKey && withBrand && withoutBrand;
+            }
+
+            if (result) {
+                violations.put(violationId, true);
+                if (cc.shouldAlert()) {
+                    String msg = cc.getAlertMessage()
+                            .replace("%player%", player.getName())
+                            .replace("%combination%", name);
+                    if (matchedChannel != null) msg = msg.replace("%channel%", matchedChannel);
+                    if (matchedKey != null) {
+                        String label = config.getAllTranslatableLabels().getOrDefault(matchedKey, matchedKey);
+                        msg = msg.replace("%mod_label%", label).replace("%key%", matchedKey);
+                    }
+                    String consoleMsg = cc.getConsoleAlertMessage()
+                            .replace("%player%", player.getName())
+                            .replace("%combination%", name);
+                    if (matchedChannel != null) consoleMsg = consoleMsg.replace("%channel%", matchedChannel);
+                    if (matchedKey != null) {
+                        String label = config.getAllTranslatableLabels().getOrDefault(matchedKey, matchedKey);
+                        consoleMsg = consoleMsg.replace("%mod_label%", label).replace("%key%", matchedKey);
+                    }
+                    plugin.getAlertManager().sendCustomAlert(player, msg, consoleMsg, violationId);
+                }
+
+                if (cc.shouldPunish() && !data.isAlreadyPunished()) {
+                    plugin.getAlertManager().executeGenericPunishments(player, cc.getPunishments(), violationId);
+                    data.setAlreadyPunished(true);
+                }
             }
         }
     }

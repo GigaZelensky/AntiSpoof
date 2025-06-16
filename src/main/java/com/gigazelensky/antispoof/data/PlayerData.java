@@ -8,6 +8,7 @@ public class PlayerData {
     private final Set<String> channels = ConcurrentHashMap.newKeySet();
     private final Set<String> detectedMods = ConcurrentHashMap.newKeySet();
     private final Set<String> alertedMods = ConcurrentHashMap.newKeySet();
+    private final Set<String> alertedKeys = ConcurrentHashMap.newKeySet();
     private boolean alreadyPunished = false;
     private long joinTime = System.currentTimeMillis();
     private boolean initialChannelsRegistered = false;
@@ -51,6 +52,13 @@ public class PlayerData {
     }
 
     /**
+     * Adds a key that triggered an alert for this player
+     */
+    public void addAlertedKey(String key) {
+        alertedKeys.add(key);
+    }
+
+    /**
      * Removes a detected mod label from this player's session
      */
     public void removeDetectedMod(String label) {
@@ -65,10 +73,24 @@ public class PlayerData {
     }
 
     /**
+     * Removes an alerted key from this player's session
+     */
+    public void removeAlertedKey(String key) {
+        alertedKeys.remove(key);
+    }
+
+    /**
      * @return Mods that triggered alerts for this player
      */
     public Set<String> getAlertedMods() {
         return Collections.unmodifiableSet(alertedMods);
+    }
+
+    /**
+     * @return Keys that triggered alerts for this player
+     */
+    public Set<String> getAlertedKeys() {
+        return Collections.unmodifiableSet(alertedKeys);
     }
 
     /**

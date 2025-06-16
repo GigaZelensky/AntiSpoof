@@ -89,6 +89,9 @@ public class ConfigManager {
 
         // Load translatable key configurations
         loadTranslatableKeyConfigs();
+
+        // Load custom combinations
+        loadCustomCombinations();
     }
     
     /**
@@ -672,6 +675,8 @@ public class ConfigManager {
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
     private final Map<String, TranslatableModConfig> requiredMods = new HashMap<>();
     private TranslatableModConfig defaultTranslatableConfig;
+    // Custom combinations
+    private final Map<String, CustomCombination> customCombinations = new HashMap<>();
     // Required translatable keys
     
     // Timeout handling
@@ -682,6 +687,34 @@ public class ConfigManager {
     private String timeoutAlertMessageAny;
     private String timeoutAlertMessageAll;
     private List<String> timeoutPunishments = new ArrayList<>();
+
+    public static class CustomCombination {
+        private String method;
+        private Pattern withChannel;
+        private Pattern withoutChannel;
+        private Pattern withBrand;
+        private Pattern withoutBrand;
+        private Pattern withKey;
+        private Pattern withoutKey;
+        private boolean alert;
+        private boolean punish;
+        private String alertMessage;
+        private String consoleAlertMessage;
+        private List<String> punishments = new ArrayList<>();
+
+        public String getMethod() { return method; }
+        public Pattern getWithChannel() { return withChannel; }
+        public Pattern getWithoutChannel() { return withoutChannel; }
+        public Pattern getWithBrand() { return withBrand; }
+        public Pattern getWithoutBrand() { return withoutBrand; }
+        public Pattern getWithKey() { return withKey; }
+        public Pattern getWithoutKey() { return withoutKey; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldPunish() { return punish; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+        public List<String> getPunishments() { return punishments; }
+    }
 
     public static class TranslatableModConfig {
         private String label;
@@ -938,6 +971,35 @@ public class ConfigManager {
 
     public boolean isTranslatableOnlyOnMove() {
         return config.getBoolean("translatable-keys.check.only-on-move", false);
+    }
+
+    private void loadCustomCombinations() {
+        customCombinations.clear();
+        ConfigurationSection base = config.getConfigurationSection("custom-combinations");
+        if (base == null) return;
+
+        for (String key : base.getKeys(false)) {
+            ConfigurationSection sec = base.getConfigurationSection(key);
+            if (sec == null) continue;
+            CustomCombination cc = new CustomCombination();
+            cc.method = sec.getString("method", "ALL").toUpperCase();
+            if (sec.isString("with-channel")) cc.withChannel = Pattern.compile(sec.getString("with-channel"));
+            if (sec.isString("without-channel")) cc.withoutChannel = Pattern.compile(sec.getString("without-channel"));
+            if (sec.isString("with-brand")) cc.withBrand = Pattern.compile(sec.getString("with-brand"));
+            if (sec.isString("without-brand")) cc.withoutBrand = Pattern.compile(sec.getString("without-brand"));
+            if (sec.isString("with-key")) cc.withKey = Pattern.compile(sec.getString("with-key"));
+            if (sec.isString("without-key")) cc.withoutKey = Pattern.compile(sec.getString("without-key"));
+            cc.alert = sec.getBoolean("alert", true);
+            cc.punish = sec.getBoolean("punish", false);
+            cc.punishments = sec.getStringList("punishments");
+            cc.alertMessage = sec.getString("alert-message", "&8[&cAntiSpoof&8] &e%player% failed %combination% combination");
+            cc.consoleAlertMessage = sec.getString("console-alert-message", "%player% failed %combination% combination");
+            customCombinations.put(key, cc);
+        }
+    }
+
+    public Map<String, CustomCombination> getCustomCombinations() {
+        return customCombinations;
     }
 
     public boolean isTranslatableAlertOnce() {
