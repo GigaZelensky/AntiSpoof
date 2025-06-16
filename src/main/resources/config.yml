@@ -484,17 +484,16 @@ messages:
   console-multiple-flags: "%player% has multiple violations: %reasons%"
 
 # ──────────────────────────────────────────────────────────
-#                 Custom Combination Checks
+#                 Custom Combination Settings
 # ──────────────────────────────────────────────────────────
-# Define custom rules that combine channels, brands and translated keys.
-# Default alert messages will use the combination key.
 custom-combinations:
   xaerospoof:
     method: CHANNEL
     with-channel: "(?i).*xaero.*"
     without-key: "(?i).*xaero.*"
     alert: true
-    alert-message: "&8[&cAntiSpoof&8] &e%player% flagged! &cUsing &f%channel% &cwithout &f%mod_label% &ckey!"
+    alert-message: "&8[&cAntiSpoof&8] &e%player% failed %combination% combination"
+    console-alert-message: "%player% failed %combination% combination"
   brandcheck:
     method: CHANNEL
     with-channel: "mods:?example"

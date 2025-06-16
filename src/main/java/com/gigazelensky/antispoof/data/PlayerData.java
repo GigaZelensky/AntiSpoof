@@ -9,7 +9,6 @@ public class PlayerData {
     private final Set<String> detectedMods = ConcurrentHashMap.newKeySet();
     private final Set<String> alertedMods = ConcurrentHashMap.newKeySet();
     private final Set<String> alertedKeys = ConcurrentHashMap.newKeySet();
-    private final java.util.Map<String, String> alertedKeyLabels = new java.util.concurrent.ConcurrentHashMap<>();
     private boolean alreadyPunished = false;
     private long joinTime = System.currentTimeMillis();
     private boolean initialChannelsRegistered = false;
@@ -54,20 +53,9 @@ public class PlayerData {
 
     /**
      * Adds a key that triggered an alert for this player
-     * @param key The translatable key
-     * @param label The label associated with the key
      */
-    public void addAlertedKey(String key, String label) {
+    public void addAlertedKey(String key) {
         alertedKeys.add(key);
-        if (label != null) alertedKeyLabels.put(key, label);
-    }
-
-    /**
-     * Removes an alerted key from this player's session
-     */
-    public void removeAlertedKey(String key) {
-        alertedKeys.remove(key);
-        alertedKeyLabels.remove(key);
     }
 
     /**
@@ -85,24 +73,10 @@ public class PlayerData {
     }
 
     /**
-     * @return Keys that triggered alerts for this player
+     * Removes an alerted key from this player's session
      */
-    public Set<String> getAlertedKeys() {
-        return Collections.unmodifiableSet(alertedKeys);
-    }
-
-    /**
-     * @return Labels associated with alerted keys
-     */
-    public java.util.Collection<String> getAlertedKeyLabels() {
-        return java.util.Collections.unmodifiableCollection(alertedKeyLabels.values());
-    }
-
-    /**
-     * Gets the label for a specific alerted key
-     */
-    public String getLabelForKey(String key) {
-        return alertedKeyLabels.get(key);
+    public void removeAlertedKey(String key) {
+        alertedKeys.remove(key);
     }
 
     /**
@@ -110,6 +84,13 @@ public class PlayerData {
      */
     public Set<String> getAlertedMods() {
         return Collections.unmodifiableSet(alertedMods);
+    }
+
+    /**
+     * @return Keys that triggered alerts for this player
+     */
+    public Set<String> getAlertedKeys() {
+        return Collections.unmodifiableSet(alertedKeys);
     }
 
     /**

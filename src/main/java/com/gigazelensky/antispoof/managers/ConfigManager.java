@@ -24,9 +24,6 @@ public class ConfigManager {
     private final Map<String, ClientBrandConfig> clientBrands = new HashMap<>();
     private ClientBrandConfig defaultBrandConfig;
 
-    // Custom combination configurations
-    private final Map<String, CustomCombinationConfig> customCombinations = new HashMap<>();
-
     // Class to hold client brand configuration
     public static class ClientBrandConfig {
         private boolean enabled;
@@ -64,22 +61,6 @@ public class ConfigManager {
         public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
     }
 
-    // Configuration holder for custom combinations
-    public static class CustomCombinationConfig {
-        public String method = "ALL";
-        public Pattern withChannel;
-        public Pattern withoutChannel;
-        public Pattern withBrand;
-        public Pattern withoutBrand;
-        public Pattern withKey;
-        public Pattern withoutKey;
-        public boolean alert = true;
-        public boolean punish = false;
-        public List<String> punishments = new ArrayList<>();
-        public String alertMessage = "%player% failed %combination% combination";
-        public String consoleAlertMessage = "%player% failed %combination% combination";
-    }
-
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
         reload();
@@ -109,8 +90,8 @@ public class ConfigManager {
         // Load translatable key configurations
         loadTranslatableKeyConfigs();
 
-        // Load custom combination configurations
-        loadCustomCombinationConfigs();
+        // Load custom combinations
+        loadCustomCombinations();
     }
     
     /**
@@ -694,6 +675,8 @@ public class ConfigManager {
     private final Map<String, TranslatableModConfig> translatableMods = new HashMap<>();
     private final Map<String, TranslatableModConfig> requiredMods = new HashMap<>();
     private TranslatableModConfig defaultTranslatableConfig;
+    // Custom combinations
+    private final Map<String, CustomCombination> customCombinations = new HashMap<>();
     // Required translatable keys
     
     // Timeout handling
@@ -704,6 +687,34 @@ public class ConfigManager {
     private String timeoutAlertMessageAny;
     private String timeoutAlertMessageAll;
     private List<String> timeoutPunishments = new ArrayList<>();
+
+    public static class CustomCombination {
+        private String method;
+        private Pattern withChannel;
+        private Pattern withoutChannel;
+        private Pattern withBrand;
+        private Pattern withoutBrand;
+        private Pattern withKey;
+        private Pattern withoutKey;
+        private boolean alert;
+        private boolean punish;
+        private String alertMessage;
+        private String consoleAlertMessage;
+        private List<String> punishments = new ArrayList<>();
+
+        public String getMethod() { return method; }
+        public Pattern getWithChannel() { return withChannel; }
+        public Pattern getWithoutChannel() { return withoutChannel; }
+        public Pattern getWithBrand() { return withBrand; }
+        public Pattern getWithoutBrand() { return withoutBrand; }
+        public Pattern getWithKey() { return withKey; }
+        public Pattern getWithoutKey() { return withoutKey; }
+        public boolean shouldAlert() { return alert; }
+        public boolean shouldPunish() { return punish; }
+        public String getAlertMessage() { return alertMessage; }
+        public String getConsoleAlertMessage() { return consoleAlertMessage; }
+        public List<String> getPunishments() { return punishments; }
+    }
 
     public static class TranslatableModConfig {
         private String label;
@@ -822,31 +833,6 @@ public class ConfigManager {
             timeoutAlertMessageAny = "&8[&cAntiSpoof&8] &7%player% experienced some key timeouts";
             timeoutAlertMessageAll = "&8[&cAntiSpoof&8] &7%player% experienced all key timeouts";
             timeoutPunishments = new ArrayList<>();
-        }
-    }
-
-    private void loadCustomCombinationConfigs() {
-        customCombinations.clear();
-        ConfigurationSection sec = config.getConfigurationSection("custom-combinations");
-        if (sec == null) return;
-
-        for (String key : sec.getKeys(false)) {
-            ConfigurationSection cs = sec.getConfigurationSection(key);
-            if (cs == null) continue;
-            CustomCombinationConfig cfg = new CustomCombinationConfig();
-            cfg.method = cs.getString("method", "ALL").toUpperCase();
-            try { String s = cs.getString("with-channel"); if (s != null) cfg.withChannel = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            try { String s = cs.getString("without-channel"); if (s != null) cfg.withoutChannel = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            try { String s = cs.getString("with-brand"); if (s != null) cfg.withBrand = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            try { String s = cs.getString("without-brand"); if (s != null) cfg.withoutBrand = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            try { String s = cs.getString("with-key"); if (s != null) cfg.withKey = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            try { String s = cs.getString("without-key"); if (s != null) cfg.withoutKey = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
-            cfg.alert = cs.getBoolean("alert", true);
-            cfg.punish = cs.getBoolean("punish", false);
-            cfg.punishments = cs.getStringList("punishments");
-            cfg.alertMessage = cs.getString("alert-message", "%player% failed %combination% combination");
-            cfg.consoleAlertMessage = cs.getString("console-alert-message", "%player% failed %combination% combination");
-            customCombinations.put(key, cfg);
         }
     }
 
@@ -987,6 +973,35 @@ public class ConfigManager {
         return config.getBoolean("translatable-keys.check.only-on-move", false);
     }
 
+    private void loadCustomCombinations() {
+        customCombinations.clear();
+        ConfigurationSection base = config.getConfigurationSection("custom-combinations");
+        if (base == null) return;
+
+        for (String key : base.getKeys(false)) {
+            ConfigurationSection sec = base.getConfigurationSection(key);
+            if (sec == null) continue;
+            CustomCombination cc = new CustomCombination();
+            cc.method = sec.getString("method", "ALL").toUpperCase();
+            if (sec.isString("with-channel")) cc.withChannel = Pattern.compile(sec.getString("with-channel"));
+            if (sec.isString("without-channel")) cc.withoutChannel = Pattern.compile(sec.getString("without-channel"));
+            if (sec.isString("with-brand")) cc.withBrand = Pattern.compile(sec.getString("with-brand"));
+            if (sec.isString("without-brand")) cc.withoutBrand = Pattern.compile(sec.getString("without-brand"));
+            if (sec.isString("with-key")) cc.withKey = Pattern.compile(sec.getString("with-key"));
+            if (sec.isString("without-key")) cc.withoutKey = Pattern.compile(sec.getString("without-key"));
+            cc.alert = sec.getBoolean("alert", true);
+            cc.punish = sec.getBoolean("punish", false);
+            cc.punishments = sec.getStringList("punishments");
+            cc.alertMessage = sec.getString("alert-message", "&8[&cAntiSpoof&8] &e%player% failed %combination% combination");
+            cc.consoleAlertMessage = sec.getString("console-alert-message", "%player% failed %combination% combination");
+            customCombinations.put(key, cc);
+        }
+    }
+
+    public Map<String, CustomCombination> getCustomCombinations() {
+        return customCombinations;
+    }
+
     public boolean isTranslatableAlertOnce() {
         return translatableAlertOnce;
     }
@@ -998,8 +1013,6 @@ public class ConfigManager {
     public String getTimeoutAlertMessageAny() { return timeoutAlertMessageAny; }
     public String getTimeoutAlertMessageAll() { return timeoutAlertMessageAll; }
     public List<String> getTimeoutPunishments() { return timeoutPunishments; }
-
-    public Map<String, CustomCombinationConfig> getCustomCombinations() { return customCombinations; }
     
     /**
      * Checks if update checking is enabled
