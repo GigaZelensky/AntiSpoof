@@ -126,6 +126,9 @@ public class DetectionManager {
             }
         }
         
+        if (channelAdded) {
+            checkCustomCombinations(player);
+        }
         return channelAdded;
     }
     
@@ -510,11 +513,14 @@ public class DetectionManager {
         if (!detectedViolations.isEmpty()) {
             final Map<String, String> finalViolations = new HashMap<>(detectedViolations);
             final String finalBrand = brand;  // Make brand effectively final
-            
+
             Bukkit.getScheduler().runTask(plugin, () -> {
                 processViolations(player, finalViolations, finalBrand);
             });
         }
+
+        // Evaluate custom combinations after standard checks
+        checkCustomCombinations(player);
     }
     
     /**
@@ -896,7 +902,10 @@ public class DetectionManager {
                 return;
             }
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key, label);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "TRANSLATED_KEY", modConfig);
             }
@@ -907,7 +916,10 @@ public class DetectionManager {
             }
         } else if (type == TranslatableEventType.REQUIRED_MISS) {
             if (pdata != null && modConfig.shouldFlag()) pdata.addDetectedMod(label);
-            if (pdata != null && modConfig.shouldAlert()) pdata.addAlertedMod(label);
+            if (pdata != null && modConfig.shouldAlert()) {
+                pdata.addAlertedMod(label);
+                pdata.addAlertedKey(key, label);
+            }
             if (modConfig.shouldAlert()) {
                 plugin.getAlertManager().sendTranslatableViolationAlert(player, label, "REQUIRED_KEY_MISS", modConfig);
             }
@@ -917,8 +929,132 @@ public class DetectionManager {
                 if (data != null) data.setAlreadyPunished(true);
             }
         }
+
+        // Check custom combinations after handling a key event
+        checkCustomCombinations(player);
     }
-    
+
+    /**
+     * Evaluates configured custom combinations for a player.
+     * Alerts and punishes based on the combination rules.
+     */
+    public void checkCustomCombinations(Player player) {
+        Map<String, ConfigManager.CustomCombinationConfig> combos = config.getCustomCombinations();
+        if (combos.isEmpty()) return;
+
+        UUID uuid = player.getUniqueId();
+        PlayerData pdata = plugin.getPlayerDataMap().get(uuid);
+        if (pdata == null) return;
+
+        String brand = plugin.getClientBrand(player);
+        Set<String> channels = pdata.getChannels();
+        Set<String> keys = pdata.getAlertedKeys();
+
+        Map<String, Boolean> violations = playerViolations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+
+        for (Map.Entry<String, ConfigManager.CustomCombinationConfig> entry : combos.entrySet()) {
+            String name = entry.getKey();
+            ConfigManager.CustomCombinationConfig cc = entry.getValue();
+
+            boolean channelCheck = true;
+            boolean brandCheck = true;
+            boolean keyCheck = true;
+            String matchedChannel = null;
+            String matchedKey = null;
+            String matchedLabel = null;
+
+            if (cc.withChannel != null || cc.withoutChannel != null) {
+                channelCheck = false;
+                for (String ch : channels) {
+                    if (matchedChannel == null && cc.withChannel != null && cc.withChannel.matcher(ch).matches()) {
+                        matchedChannel = ch;
+                        channelCheck = true;
+                    }
+                    if (cc.withoutChannel != null && cc.withoutChannel.matcher(ch).matches()) {
+                        channelCheck = false;
+                    }
+                }
+                if (cc.withChannel != null && matchedChannel == null) channelCheck = false;
+            }
+
+            if (cc.withBrand != null || cc.withoutBrand != null) {
+                brandCheck = true;
+                if (brand == null) brandCheck = false;
+                if (cc.withBrand != null && (brand == null || !cc.withBrand.matcher(brand).matches())) {
+                    brandCheck = false;
+                }
+                if (cc.withoutBrand != null && brand != null && cc.withoutBrand.matcher(brand).matches()) {
+                    brandCheck = false;
+                }
+            }
+
+            if (cc.withKey != null || cc.withoutKey != null) {
+                keyCheck = false;
+                for (String k : keys) {
+                    if (matchedKey == null && cc.withKey != null && cc.withKey.matcher(k).matches()) {
+                        matchedKey = k;
+                        matchedLabel = pdata.getLabelForKey(k);
+                        keyCheck = true;
+                    }
+                    if (cc.withoutKey != null && cc.withoutKey.matcher(k).matches()) {
+                        keyCheck = false;
+                    }
+                }
+                if (cc.withKey != null && matchedKey == null) keyCheck = false;
+                if (cc.withoutKey != null && matchedKey != null && cc.withoutKey.matcher(matchedKey).matches()) keyCheck = false;
+            }
+
+            boolean result;
+            switch (cc.method) {
+                case "CHANNEL":
+                    result = channelCheck;
+                    break;
+                case "BRAND":
+                    result = brandCheck;
+                    break;
+                case "KEY":
+                    result = keyCheck;
+                    break;
+                case "ANY":
+                    result = (cc.withChannel != null || cc.withoutChannel != null ? channelCheck : false) ||
+                             (cc.withBrand != null || cc.withoutBrand != null ? brandCheck : false) ||
+                             (cc.withKey != null || cc.withoutKey != null ? keyCheck : false);
+                    break;
+                default: // ALL
+                    result = (cc.withChannel == null && cc.withoutChannel == null || channelCheck) &&
+                             (cc.withBrand == null && cc.withoutBrand == null || brandCheck) &&
+                             (cc.withKey == null && cc.withoutKey == null || keyCheck);
+                    break;
+            }
+
+            String violationKey = "COMBO_" + name.toUpperCase();
+            if (result && !violations.getOrDefault(violationKey, false)) {
+                violations.put(violationKey, true);
+
+                String alertMsg = cc.alertMessage
+                        .replace("%player%", player.getName())
+                        .replace("%combination%", name);
+                if (matchedChannel != null) alertMsg = alertMsg.replace("%channel%", matchedChannel);
+                if (matchedLabel != null) alertMsg = alertMsg.replace("%mod_label%", matchedLabel);
+
+                String consoleMsg = cc.consoleAlertMessage
+                        .replace("%player%", player.getName())
+                        .replace("%combination%", name);
+                if (matchedChannel != null) consoleMsg = consoleMsg.replace("%channel%", matchedChannel);
+                if (matchedLabel != null) consoleMsg = consoleMsg.replace("%mod_label%", matchedLabel);
+
+                if (cc.alert) {
+                    plugin.getAlertManager().sendCustomAlert(player, alertMsg, consoleMsg, violationKey);
+                }
+
+                if (cc.punish) {
+                    plugin.getAlertManager().executeGenericPunishments(player, cc.punishments, violationKey);
+                    pdata.setAlreadyPunished(true);
+                }
+            }
+        }
+    }
+
     /**
      * Cleans up player data when they disconnect
      * @param playerUUID The UUID of the player who disconnected

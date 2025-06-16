@@ -24,6 +24,9 @@ public class ConfigManager {
     private final Map<String, ClientBrandConfig> clientBrands = new HashMap<>();
     private ClientBrandConfig defaultBrandConfig;
 
+    // Custom combination configurations
+    private final Map<String, CustomCombinationConfig> customCombinations = new HashMap<>();
+
     // Class to hold client brand configuration
     public static class ClientBrandConfig {
         private boolean enabled;
@@ -61,6 +64,22 @@ public class ConfigManager {
         public List<String> getRequiredChannelsPunishments() { return requiredChannelsPunishments; }
     }
 
+    // Configuration holder for custom combinations
+    public static class CustomCombinationConfig {
+        public String method = "ALL";
+        public Pattern withChannel;
+        public Pattern withoutChannel;
+        public Pattern withBrand;
+        public Pattern withoutBrand;
+        public Pattern withKey;
+        public Pattern withoutKey;
+        public boolean alert = true;
+        public boolean punish = false;
+        public List<String> punishments = new ArrayList<>();
+        public String alertMessage = "%player% failed %combination% combination";
+        public String consoleAlertMessage = "%player% failed %combination% combination";
+    }
+
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
         reload();
@@ -89,6 +108,9 @@ public class ConfigManager {
 
         // Load translatable key configurations
         loadTranslatableKeyConfigs();
+
+        // Load custom combination configurations
+        loadCustomCombinationConfigs();
     }
     
     /**
@@ -803,6 +825,31 @@ public class ConfigManager {
         }
     }
 
+    private void loadCustomCombinationConfigs() {
+        customCombinations.clear();
+        ConfigurationSection sec = config.getConfigurationSection("custom-combinations");
+        if (sec == null) return;
+
+        for (String key : sec.getKeys(false)) {
+            ConfigurationSection cs = sec.getConfigurationSection(key);
+            if (cs == null) continue;
+            CustomCombinationConfig cfg = new CustomCombinationConfig();
+            cfg.method = cs.getString("method", "ALL").toUpperCase();
+            try { String s = cs.getString("with-channel"); if (s != null) cfg.withChannel = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            try { String s = cs.getString("without-channel"); if (s != null) cfg.withoutChannel = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            try { String s = cs.getString("with-brand"); if (s != null) cfg.withBrand = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            try { String s = cs.getString("without-brand"); if (s != null) cfg.withoutBrand = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            try { String s = cs.getString("with-key"); if (s != null) cfg.withKey = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            try { String s = cs.getString("without-key"); if (s != null) cfg.withoutKey = Pattern.compile(s); } catch (PatternSyntaxException ignored) {}
+            cfg.alert = cs.getBoolean("alert", true);
+            cfg.punish = cs.getBoolean("punish", false);
+            cfg.punishments = cs.getStringList("punishments");
+            cfg.alertMessage = cs.getString("alert-message", "%player% failed %combination% combination");
+            cfg.consoleAlertMessage = cs.getString("console-alert-message", "%player% failed %combination% combination");
+            customCombinations.put(key, cfg);
+        }
+    }
+
     public boolean isTranslatableKeysEnabled() { return translatableKeysEnabled; }
 
     public LinkedHashMap<String, String> getTranslatableTestKeysPlain() {
@@ -951,6 +998,8 @@ public class ConfigManager {
     public String getTimeoutAlertMessageAny() { return timeoutAlertMessageAny; }
     public String getTimeoutAlertMessageAll() { return timeoutAlertMessageAll; }
     public List<String> getTimeoutPunishments() { return timeoutPunishments; }
+
+    public Map<String, CustomCombinationConfig> getCustomCombinations() { return customCombinations; }
     
     /**
      * Checks if update checking is enabled
