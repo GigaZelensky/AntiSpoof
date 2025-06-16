@@ -269,8 +269,6 @@ AntiSpoof integrates with PlaceholderAPI to provide useful placeholders for othe
 | `%antispoof_channels_count%` | Shows the number of registered channels | "5" |
 | `%antispoof_mods%` | Shows a comma-separated list of detected mod labels | "Sodium, ModMenu" |
 | `%antispoof_mods_count%` | Shows the number of detected mod labels | "2" |
-| `%antispoof_alerted_mods%` | Shows a comma-separated list of mod labels that triggered alerts | "Sodium" |
-| `%antispoof_alerted_keys%` | Shows a comma-separated list of keys that triggered alerts | "sodium.option_impact.low" |
 | `%antispoof_is_spoofing%` | Returns whether the player is detected as spoofing | "true" or "false" |
 | `%antispoof_is_bedrock%` | Returns whether the player is detected as a Bedrock player | "true" or "false" |
 

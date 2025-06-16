@@ -484,7 +484,7 @@ messages:
   console-multiple-flags: "%player% has multiple violations: %reasons%"
 
 # ──────────────────────────────────────────────────────────
-#                 Custom Combination Settings
+#                 Custom Combination Checks
 # ──────────────────────────────────────────────────────────
 custom-combinations:
   xaerospoof:
@@ -493,7 +493,6 @@ custom-combinations:
     without-key: "(?i).*xaero.*"
     alert: true
     alert-message: "&8[&cAntiSpoof&8] &e%player% failed %combination% combination"
-    console-alert-message: "%player% failed %combination% combination"
   brandcheck:
     method: CHANNEL
     with-channel: "mods:?example"

@@ -73,7 +73,7 @@ public class PlayerData {
     }
 
     /**
-     * Removes an alerted key from this player's session
+     * Removes a key from this player's alerted set
      */
     public void removeAlertedKey(String key) {
         alertedKeys.remove(key);

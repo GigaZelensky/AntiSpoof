@@ -104,27 +104,33 @@ public class AntiSpoofPlaceholders extends PlaceholderExpansion {
 
         // %antispoof_alerted_mods%
         if (identifier.equals("alerted_mods")) {
-            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+            UUID uuid = player.getUniqueId();
+            PlayerData data = plugin.getPlayerDataMap().get(uuid);
             if (data == null) {
                 return "none";
             }
+
             Set<String> mods = data.getAlertedMods();
             if (mods.isEmpty()) {
                 return "none";
             }
+
             return String.join(", ", mods);
         }
 
         // %antispoof_alerted_keys%
         if (identifier.equals("alerted_keys")) {
-            PlayerData data = plugin.getPlayerDataMap().get(player.getUniqueId());
+            UUID uuid = player.getUniqueId();
+            PlayerData data = plugin.getPlayerDataMap().get(uuid);
             if (data == null) {
                 return "none";
             }
+
             Set<String> keys = data.getAlertedKeys();
             if (keys.isEmpty()) {
                 return "none";
             }
+
             return String.join(", ", keys);
         }
 

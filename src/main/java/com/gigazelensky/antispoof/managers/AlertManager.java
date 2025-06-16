@@ -413,6 +413,16 @@ public class AlertManager {
                 break;
                 
             default:
+                if (violationType.startsWith("COMBINATION_")) {
+                    String key = violationType.substring("COMBINATION_".length()).toLowerCase();
+                    ConfigManager.CustomCombinationConfig cc = config.getCustomCombination(key);
+                    if (cc != null) {
+                        alertTemplate = cc.getAlertMessage();
+                        consoleAlertTemplate = cc.getConsoleAlertMessage();
+                        sendDiscordAlert = false;
+                        break;
+                    }
+                }
                 // Fallback to global messages
                 alertTemplate = config.getAlertMessage();
                 consoleAlertTemplate = config.getConsoleAlertMessage();
@@ -563,8 +573,16 @@ public class AlertManager {
                     punishments = config.getPunishments();
                 }
                 break;
-                
+
             default:
+                if (violationType.startsWith("COMBINATION_")) {
+                    String key = violationType.substring("COMBINATION_".length()).toLowerCase();
+                    ConfigManager.CustomCombinationConfig cc = config.getCustomCombination(key);
+                    if (cc != null) {
+                        punishments = cc.getPunishments();
+                        break;
+                    }
+                }
                 // Fallback to global punishments
                 punishments = config.getPunishments();
         }
